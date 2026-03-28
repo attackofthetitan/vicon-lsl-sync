@@ -39,11 +39,20 @@ jobs:
 
       - name: Install Boost (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libboost-thread-dev libboost-chrono-dev
+        run: sudo apt-get update && sudo apt-get install -y libboost-all-dev
+
+      - name: Cache vcpkg packages (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ matrix.triplet }}-boost-${{ hashFiles('vicon-lsl-bridge/external/vicon-datastream-sdk/CMakeLists.txt') }}
+          restore-keys: |
+            vcpkg-${{ matrix.triplet }}-boost-
 
       - name: Install Boost via vcpkg (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install boost:${{ matrix.triplet }}
+        run: vcpkg install boost-thread boost-chrono boost-asio boost-filesystem boost-format boost-algorithm boost-date-time boost-math boost-range boost-lexical-cast:${{ matrix.triplet }}
 
       - name: Configure CMake (Linux)
         if: runner.os == 'Linux'
@@ -83,8 +92,33 @@ jobs:
           name: ${{ matrix.artifact }}
           path: vicon-lsl-bridge/${{ matrix.artifact }}.*
 
+  bundle-labrecorder:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - asset_pattern: "*Windows_amd64*"
+            artifact: labrecorder-windows-x64
+          - asset_pattern: "*Windows_i386*"
+            artifact: labrecorder-windows-x86
+          - asset_pattern: "*Linux*amd64*"
+            artifact: labrecorder-linux-x64
+
+    steps:
+      - name: Download latest LabRecorder release
+        run: |
+          gh release download --repo labstreaminglayer/App-LabRecorder --pattern '${{ matrix.asset_pattern }}' --dir labrecorder-download
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: labrecorder-download/*
+
   release:
-    needs: build
+    needs: [build, bundle-labrecorder]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
