@@ -1,7 +1,7 @@
-#!/usr/bin/env python3import argparse
+#!/usr/bin/env python3
+import argparse
 import sys
 import time
-import argparse
 
 import numpy as np
 import pandas as pd
