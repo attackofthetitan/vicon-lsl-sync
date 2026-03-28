@@ -17,7 +17,7 @@ FetchContent_Declare(liblsl
 )
 FetchContent_MakeAvailable(liblsl)
 
-add_subdirectory(external/vicon-datastream-sdk)
+add_subdirectory(external/vicon-datastream-sdk EXCLUDE_FROM_ALL)
 
 add_executable(vicon-lsl-bridge
     src/main.cpp
