@@ -29,3 +29,8 @@ target_link_libraries(vicon-lsl-bridge PRIVATE
 )
 
 target_include_directories(vicon-lsl-bridge PRIVATE src)
+
+if(WIN32)
+    target_compile_definitions(vicon-lsl-bridge PRIVATE _WIN32_WINNT=0x0601)
+    target_link_libraries(vicon-lsl-bridge PRIVATE ws2_32)
+endif()
