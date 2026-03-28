@@ -24,11 +24,11 @@ jobs:
             artifact: vicon-lsl-bridge-linux-x64
           - os: windows-latest
             arch: x64
-            triplet: x64-windows-static
+            triplet: x64-windows-static-md
             artifact: vicon-lsl-bridge-windows-x64
           - os: windows-latest
             arch: x86
-            triplet: x86-windows-static
+            triplet: x86-windows-static-md
             artifact: vicon-lsl-bridge-windows-x86
     runs-on: ${{ matrix.os }}
 
