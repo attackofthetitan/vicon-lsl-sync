@@ -4,6 +4,11 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <unistd.h>
+#endif
 
 ViconLSLBridge::ViconLSLBridge(const Config& config)
     : config_(config), client_(config.vicon_server) {}
