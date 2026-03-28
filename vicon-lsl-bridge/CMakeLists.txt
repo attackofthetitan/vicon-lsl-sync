@@ -33,6 +33,7 @@ target_link_libraries(vicon-lsl-bridge PRIVATE
 )
 
 target_include_directories(vicon-lsl-bridge PRIVATE src)
+target_compile_definitions(vicon-lsl-bridge PRIVATE _BUILD_STATIC_LIB)
 
 if(WIN32)
     target_link_libraries(vicon-lsl-bridge PRIVATE ws2_32)
