@@ -44,6 +44,7 @@ dist/
 *.egg
 .venv/
 venv/
+tests/
 
 # Data output
 *.csv
