@@ -1,0 +1,50 @@
+# build artifacts
+build/
+cmake-build-*/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Unity
+hololens-gaze-lsl/Library/
+hololens-gaze-lsl/Temp/
+hololens-gaze-lsl/Obj/
+hololens-gaze-lsl/Build/
+hololens-gaze-lsl/Builds/
+hololens-gaze-lsl/Logs/
+hololens-gaze-lsl/UserSettings/
+hololens-gaze-lsl/MemoryCaptures/
+hololens-gaze-lsl/[Aa]ssets/[Aa]sset[Ss]tore[Tt]ools/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.unityproj
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+
+# Data output
+*.csv
+*.xdf
