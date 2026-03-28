@@ -1,0 +1,6 @@
+[submodule "labrecorder"]
+	path = labrecorder
+	url = https://github.com/labstreaminglayer/App-LabRecorder.git
+[submodule "vicon-lsl-bridge/external/vicon-datastream-sdk"]
+	path = vicon-lsl-bridge/external/vicon-datastream-sdk
+	url = https://github.com/whoenig/vicon-datastream-sdk.git

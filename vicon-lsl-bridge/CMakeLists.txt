@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# liblsl via FetchContent
 include(FetchContent)
 FetchContent_Declare(liblsl
     GIT_REPOSITORY https://github.com/sccn/liblsl.git
@@ -14,9 +13,7 @@ FetchContent_Declare(liblsl
 )
 FetchContent_MakeAvailable(liblsl)
 
-# Vicon DataStream SDK - user must set VICON_SDK_DIR
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-find_package(ViconDataStreamSDK REQUIRED)
+add_subdirectory(external/vicon-datastream-sdk)
 
 add_executable(vicon-lsl-bridge
     src/main.cpp
@@ -28,7 +25,7 @@ add_executable(vicon-lsl-bridge
 
 target_link_libraries(vicon-lsl-bridge PRIVATE
     lsl
-    ViconDataStreamSDK::ViconDataStreamSDK
+    ViconDataStreamSDK_CPP
 )
 
 target_include_directories(vicon-lsl-bridge PRIVATE src)

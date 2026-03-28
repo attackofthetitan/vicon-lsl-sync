@@ -1,0 +1,41 @@
+name: Build Vicon LSL Bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "vicon-lsl-bridge/**"
+      - ".github/workflows/build-bridge.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "vicon-lsl-bridge/**"
+      - ".github/workflows/build-bridge.yml"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Boost (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libboost-thread-dev libboost-chrono-dev
+
+      - name: Install Boost (Windows)
+        if: runner.os == 'Windows'
+        run: choco install boost-msvc-14.3 -y
+
+      - name: Configure CMake
+        run: cmake -B build
+        working-directory: vicon-lsl-bridge
+
+      - name: Build
+        run: cmake --build build --config Release
+        working-directory: vicon-lsl-bridge

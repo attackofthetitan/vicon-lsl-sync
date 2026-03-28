@@ -13,17 +13,14 @@ public:
     bool isConnected() const;
     bool getFrame();
 
-    // Subject enumeration
     unsigned int getSubjectCount() const;
     std::string getSubjectName(unsigned int index) const;
 
-    // Marker access
     unsigned int getMarkerCount(const std::string& subject) const;
     std::string getMarkerName(const std::string& subject, unsigned int index) const;
     bool getMarkerGlobalTranslation(const std::string& subject, const std::string& marker,
                                      double& x, double& y, double& z, bool& occluded);
 
-    // Segment access
     unsigned int getSegmentCount(const std::string& subject) const;
     std::string getSegmentName(const std::string& subject, unsigned int index) const;
     bool getSegmentGlobalTranslation(const std::string& subject, const std::string& segment,
