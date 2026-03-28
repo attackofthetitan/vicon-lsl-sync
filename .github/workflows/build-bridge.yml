@@ -52,7 +52,7 @@ jobs:
 
       - name: Install Boost via vcpkg (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install boost-thread boost-chrono boost-asio boost-filesystem boost-format boost-algorithm boost-date-time boost-math boost-range boost-lexical-cast:${{ matrix.triplet }}
+        run: vcpkg install boost-thread:${{ matrix.triplet }} boost-chrono:${{ matrix.triplet }} boost-asio:${{ matrix.triplet }} boost-filesystem:${{ matrix.triplet }} boost-format:${{ matrix.triplet }} boost-algorithm:${{ matrix.triplet }} boost-date-time:${{ matrix.triplet }} boost-math:${{ matrix.triplet }} boost-range:${{ matrix.triplet }} boost-lexical-cast:${{ matrix.triplet }}
 
       - name: Configure CMake (Linux)
         if: runner.os == 'Linux'
