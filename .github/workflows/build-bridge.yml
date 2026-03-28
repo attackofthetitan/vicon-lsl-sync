@@ -97,11 +97,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - asset_pattern: "*Windows_amd64*"
+          - asset_pattern: "*Win_amd64.zip"
             artifact: labrecorder-windows-x64
-          - asset_pattern: "*Windows_i386*"
+          - asset_pattern: "*Win_i386.zip"
             artifact: labrecorder-windows-x86
-          - asset_pattern: "*Linux*amd64*"
+          - asset_pattern: "*noble_amd64.deb"
             artifact: labrecorder-linux-x64
 
     steps:
