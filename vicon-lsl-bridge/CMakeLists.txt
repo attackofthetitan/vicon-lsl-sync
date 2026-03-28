@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0601)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(liblsl
     GIT_REPOSITORY https://github.com/sccn/liblsl.git
@@ -31,6 +35,5 @@ target_link_libraries(vicon-lsl-bridge PRIVATE
 target_include_directories(vicon-lsl-bridge PRIVATE src)
 
 if(WIN32)
-    target_compile_definitions(vicon-lsl-bridge PRIVATE _WIN32_WINNT=0x0601)
     target_link_libraries(vicon-lsl-bridge PRIVATE ws2_32)
 endif()
