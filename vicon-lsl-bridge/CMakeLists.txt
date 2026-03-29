@@ -38,3 +38,37 @@ target_compile_definitions(vicon-lsl-bridge PRIVATE _BUILD_STATIC_LIB)
 if(WIN32)
     target_link_libraries(vicon-lsl-bridge PRIVATE ws2_32)
 endif()
+
+# Optional Qt6 GUI
+find_package(Qt6 COMPONENTS Core Widgets QUIET)
+if(Qt6_FOUND)
+    set(CMAKE_AUTOMOC ON)
+
+    add_executable(vicon-lsl-bridge-gui
+        src/gui/main_gui.cpp
+        src/gui/BridgeWindow.cpp
+        src/ViconClient.cpp
+        src/MarkerStream.cpp
+        src/SegmentStream.cpp
+        src/ViconLSLBridge.cpp
+    )
+
+    target_link_libraries(vicon-lsl-bridge-gui PRIVATE
+        lsl
+        ViconDataStreamSDK_CPP
+        Qt6::Core
+        Qt6::Widgets
+    )
+
+    target_include_directories(vicon-lsl-bridge-gui PRIVATE src)
+    target_compile_definitions(vicon-lsl-bridge-gui PRIVATE _BUILD_STATIC_LIB)
+
+    if(WIN32)
+        target_link_libraries(vicon-lsl-bridge-gui PRIVATE ws2_32)
+        set_target_properties(vicon-lsl-bridge-gui PROPERTIES WIN32_EXECUTABLE TRUE)
+    endif()
+
+    message(STATUS "Qt6 found - building vicon-lsl-bridge-gui")
+else()
+    message(STATUS "Qt6 not found - skipping GUI build")
+endif()

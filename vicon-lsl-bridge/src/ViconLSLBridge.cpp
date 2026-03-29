@@ -13,6 +13,22 @@
 ViconLSLBridge::ViconLSLBridge(const Config& config)
     : config_(config), client_(config.vicon_server) {}
 
+void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
+    status_callback_ = std::move(callback);
+}
+
+void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message) {
+    if (status_callback_) {
+        BridgeStatus status;
+        status.state = state;
+        status.marker_count = known_markers_.size();
+        status.segment_count = known_segments_.size();
+        status.frame_count = frame_count_;
+        status.message = message;
+        status_callback_(status);
+    }
+}
+
 void ViconLSLBridge::stop() {
     running_ = false;
 }
@@ -24,6 +40,7 @@ void ViconLSLBridge::run() {
 
         if (!client_.getFrame()) {
             std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
+            reportStatus(BridgeState::Connecting, "Failed to get initial frame, reconnecting");
             client_.disconnect();
             continue;
         }
@@ -31,9 +48,11 @@ void ViconLSLBridge::run() {
         initializeStreams();
 
         std::cout << "Streaming started" << std::endl;
+        reportStatus(BridgeState::Streaming, "Streaming started");
         while (running_ && client_.isConnected()) {
             if (!client_.getFrame()) {
                 std::cerr << "Lost connection, will reconnect" << std::endl;
+                reportStatus(BridgeState::Connecting, "Lost connection, will reconnect");
                 break;
             }
 
@@ -42,11 +61,13 @@ void ViconLSLBridge::run() {
 
             frame_count_++;
             if (frame_count_ % 100 == 0) {
+                reportStatus(BridgeState::Streaming);
                 if (checkLayoutChanged()) {
                     std::cout << "Layout changed, reinitializing streams" << std::endl;
                     marker_stream_.destroy();
                     segment_stream_.destroy();
                     initializeStreams();
+                    reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
                 }
             }
         }
@@ -55,14 +76,17 @@ void ViconLSLBridge::run() {
         segment_stream_.destroy();
         client_.disconnect();
         frame_count_ = 0;
+        reportStatus(BridgeState::Disconnected, "Disconnected");
     }
 
+    reportStatus(BridgeState::Stopped, "Stopped");
     std::cout << "Stopped" << std::endl;
 }
 
 void ViconLSLBridge::connectWithRetry() {
+    reportStatus(BridgeState::Connecting, "Connecting to " + config_.vicon_server);
     while (running_ && !client_.connect()) {
-        std::cerr << "Retrying in " << config_.reconnect_interval_ms << "ms" << std::endl;
+        reportStatus(BridgeState::Connecting, "Retrying in " + std::to_string(config_.reconnect_interval_ms) + "ms");
         std::this_thread::sleep_for(std::chrono::milliseconds(config_.reconnect_interval_ms));
     }
 }

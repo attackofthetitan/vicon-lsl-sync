@@ -2,6 +2,12 @@
 
 Stream Vicon motion capture data into [Lab Streaming Layer (LSL)](https://labstreaminglayer.org) for time-synchronized recording alongside other data sources.
 
+## Quick Start
+
+1. Download the latest release for your platform from the [Releases](../../releases) page
+2. Run **vicon-lsl-bridge-gui** — enter your Vicon server address and click **Start Streaming**
+3. Open **LabRecorder** (also included in releases) to record all LSL streams into a single `.xdf` file
+
 ## Overview
 
 The bridge connects to a Vicon DataStream server and creates two LSL outlets:
@@ -17,11 +23,17 @@ Pre-built binaries are available on the [Releases](../../releases) page for:
 
 - Linux x64
 - Windows x64
-- Windows x86
+- Windows x86 (CLI only)
 
-Each release also includes [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) binaries for convenient recording.
+Each release also includes [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) builds for convenient recording.
 
-## Usage
+## GUI Application
+
+The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure and start streaming without using the command line. Enter the Vicon server address, optionally change stream names, and click Start.
+
+## CLI Usage
+
+A command-line version is also included for headless or scripted use:
 
 ```
 vicon-lsl-bridge [options]
@@ -40,8 +52,6 @@ Options:
 ./vicon-lsl-bridge --server 192.168.1.100:801
 ```
 
-The bridge will connect to the Vicon server, enumerate all subjects/markers/segments, and begin streaming. Press Ctrl+C to stop.
-
 ## Recording
 
 Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file with synchronized timestamps.
@@ -55,11 +65,12 @@ Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (include
 - Boost (thread, chrono, and header-only components)
 - liblsl (fetched automatically via CMake)
 - Vicon DataStream SDK (included as a submodule)
+- Qt6 (Core, Widgets) — optional, for the GUI app
 
 ### Linux
 
 ```bash
-sudo apt-get install libboost-all-dev
+sudo apt-get install libboost-all-dev qt6-base-dev
 cd vicon-lsl-bridge
 cmake -B build
 cmake --build build --config Release
@@ -75,4 +86,4 @@ cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/
 cmake --build build --config Release
 ```
 
-The built executable will be at `build/Release/vicon-lsl-bridge.exe` (Windows) or `build/vicon-lsl-bridge` (Linux).
+If Qt6 is installed, both `vicon-lsl-bridge` (CLI) and `vicon-lsl-bridge-gui` (GUI) will be built. Without Qt6, only the CLI is built.
