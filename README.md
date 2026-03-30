@@ -23,7 +23,6 @@ Pre-built binaries are available on the [Releases](../../releases) page for:
 
 - Linux x64
 - Windows x64
-- Windows x86 (CLI only)
 
 Each release also includes [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) builds for convenient recording.
 

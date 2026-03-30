@@ -23,15 +23,11 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: x64
-            artifact: vicon-lsl-bridge-linux-x64
+            artifact: vicon-lsl-sync-linux-x64
           - os: windows-latest
             arch: x64
             triplet: x64-windows-static-md
-            artifact: vicon-lsl-bridge-windows-x64
-          - os: windows-latest
-            arch: x86
-            triplet: x86-windows-static-md
-            artifact: vicon-lsl-bridge-windows-x86
+            artifact: vicon-lsl-sync-windows-x64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -47,7 +43,7 @@ jobs:
 
       - name: Install Boost (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libboost-all-dev
+        run: sudo apt-get update && sudo apt-get install -y libboost-all-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
 
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
@@ -62,94 +58,74 @@ jobs:
         if: runner.os == 'Windows'
         run: vcpkg install boost-thread:${{ matrix.triplet }} boost-chrono:${{ matrix.triplet }} boost-asio:${{ matrix.triplet }} boost-filesystem:${{ matrix.triplet }} boost-format:${{ matrix.triplet }} boost-algorithm:${{ matrix.triplet }} boost-date-time:${{ matrix.triplet }} boost-math:${{ matrix.triplet }} boost-range:${{ matrix.triplet }} boost-lexical-cast:${{ matrix.triplet }}
 
-      - name: Configure CMake (Linux)
+      # Build vicon-lsl-bridge (CLI + GUI)
+      - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
         run: cmake -B build
         working-directory: vicon-lsl-bridge
 
-      - name: Configure CMake (Windows)
+      - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
         run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
         working-directory: vicon-lsl-bridge
         shell: cmd
 
-      - name: Build
+      - name: Build bridge
         run: cmake --build build --config Release
         working-directory: vicon-lsl-bridge
 
+      # Build LabRecorder (skip x86)
+      - name: Configure LabRecorder
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DLSL_FETCH_IF_MISSING=ON -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
+
+      - name: Build LabRecorder
+        run: cmake --build build-labrecorder --config Release --parallel
+
+      # Package everything together
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p package
-          cp build/vicon-lsl-bridge package/
-          cp build/vicon-lsl-bridge-gui package/ || true
+          cp vicon-lsl-bridge/build/vicon-lsl-bridge package/
+          cp vicon-lsl-bridge/build/vicon-lsl-bridge-gui package/ || true
+          # Copy liblsl shared library
+          find vicon-lsl-bridge/build/_deps/liblsl-build -name "liblsl.so*" -exec cp -P {} package/ \;
+          # Copy LabRecorder binaries
+          cp build-labrecorder/LabRecorder package/ || true
+          cp build-labrecorder/LabRecorderCLI package/ || true
+          find build-labrecorder -name "liblsl.so*" -exec cp -P {} package/ \; 2>/dev/null || true
           tar -czf ${{ matrix.artifact }}.tar.gz -C package .
-        working-directory: vicon-lsl-bridge
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir package
-          copy build\Release\vicon-lsl-bridge.exe package\
-          if (Test-Path build\Release\vicon-lsl-bridge-gui.exe) {
-            copy build\Release\vicon-lsl-bridge-gui.exe package\
+          copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe package\
+          # Copy lsl.dll from bridge build
+          Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build\Release -Filter "lsl*.dll" | Copy-Item -Destination package\
+          # Copy GUI and deploy Qt if available
+          if (Test-Path vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe) {
+            copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe package\
             & windeployqt package\vicon-lsl-bridge-gui.exe
           }
+          # Copy LabRecorder if built
+          if (Test-Path build-labrecorder\Release\LabRecorder.exe) {
+            copy build-labrecorder\Release\LabRecorder.exe package\
+            copy build-labrecorder\Release\LabRecorderCLI.exe package\ 2>$null
+            Get-ChildItem -Path build-labrecorder\_deps\liblsl-build\Release -Filter "lsl*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination package\
+            & windeployqt package\LabRecorder.exe
+          }
           Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip
-        working-directory: vicon-lsl-bridge
         shell: pwsh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: vicon-lsl-bridge/${{ matrix.artifact }}.*
-
-  build-labrecorder:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: labrecorder-linux-x64
-          - os: windows-latest
-            artifact: labrecorder-windows-x64
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Qt6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.8.*'
-          cache: true
-
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
-
-      - name: Configure CMake
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DLSL_FETCH_IF_MISSING=ON -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
-
-      - name: Build
-        run: cmake --build build-labrecorder --config Release --parallel
-
-      - name: Package (CPack)
-        run: cd build-labrecorder && cpack -C Release
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            build-labrecorder/*.deb
-            build-labrecorder/*.zip
-            build-labrecorder/*.tar.gz
+          path: ${{ matrix.artifact }}.*
 
   release:
-    needs: [build, build-labrecorder]
+    needs: [build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
