@@ -3,19 +3,20 @@ using UnityEngine;
 
 #if ENABLE_WINMD_SUPPORT
 using Microsoft.MixedReality.EyeTracking;
-using Microsoft.MixedReality.OpenXR;
 using Windows.Perception;
+using Windows.Perception.Spatial;
+using Windows.Perception.Spatial.Preview;
 #endif
 
 namespace GazeLSL
 {
     /*
-    Reads eye tracking data from HoloLens 2 Extended Eye Tracking SDK
-    with fallback to standard OpenXR / Unity XR eye tracking.
+    Reads HoloLens 2 Extended Eye Tracking data and converts it into Unity world space.
 
-    World-space version:
-    - Uses Microsoft.MixedReality.OpenXR.SpatialGraphNode
-    - Does NOT use SpatialGraphInteropPreview
+    This version uses:
+    - Microsoft.MixedReality.EyeTracking for eye gaze readings
+    - Windows.Perception.Spatial.Preview.SpatialGraphInteropPreview for world-space tracking
+    - Unity XR / Camera fallback when extended tracking is unavailable
     */
     public class GazeDataProvider : MonoBehaviour
     {
@@ -50,7 +51,8 @@ namespace GazeLSL
 #if ENABLE_WINMD_SUPPORT
         private EyeGazeTrackerWatcher _watcher;
         private EyeGazeTracker _tracker;
-        private SpatialGraphNode _trackerNode;
+        private SpatialLocator _trackerLocator;
+        private SpatialCoordinateSystem _worldCoordinateSystem;
 #endif
 
         private GazeFrame _currentFrame;
@@ -98,11 +100,29 @@ namespace GazeLSL
 
                 SetBestSupportedFrameRate(tracker);
 
-                _trackerNode = SpatialGraphNode.FromDynamicNodeId(tracker.TrackerSpaceLocatorNodeId);
+                _trackerLocator = SpatialGraphInteropPreview.CreateLocatorForNode(
+                    tracker.TrackerSpaceLocatorNodeId
+                );
 
-                if (_trackerNode == null)
+                if (_trackerLocator == null)
                 {
-                    Debug.LogError("Failed to create SpatialGraphNode for eye tracker. World-space extended gaze will not be available.");
+                    Debug.LogError("Failed to create SpatialLocator for eye tracker.");
+                    IsExtendedTrackingAvailable = false;
+                    IsTrackingAvailable = false;
+                    return;
+                }
+
+                SpatialLocator spatialLocator = SpatialLocator.GetDefault();
+                if (spatialLocator != null)
+                {
+                    _worldCoordinateSystem = spatialLocator
+                        .CreateStationaryFrameOfReferenceAtCurrentLocation()
+                        .CoordinateSystem;
+                }
+
+                if (_worldCoordinateSystem == null)
+                {
+                    Debug.LogError("Failed to create world coordinate system.");
                     IsExtendedTrackingAvailable = false;
                     IsTrackingAvailable = false;
                     return;
@@ -117,8 +137,11 @@ namespace GazeLSL
             catch (Exception e)
             {
                 Debug.LogError($"Failed to open eye tracker - {e.Message}");
+
                 _tracker = null;
-                _trackerNode = null;
+                _trackerLocator = null;
+                _worldCoordinateSystem = null;
+
                 IsExtendedTrackingAvailable = false;
                 IsTrackingAvailable = false;
             }
@@ -129,7 +152,8 @@ namespace GazeLSL
             if (_tracker == tracker)
             {
                 _tracker = null;
-                _trackerNode = null;
+                _trackerLocator = null;
+                _worldCoordinateSystem = null;
 
                 IsExtendedTrackingAvailable = false;
                 IsTrackingAvailable = false;
@@ -211,21 +235,29 @@ namespace GazeLSL
 #if ENABLE_WINMD_SUPPORT
         private void ReadExtendedEyeTracking()
         {
-            if (_tracker == null || _trackerNode == null)
+            if (_tracker == null || _trackerLocator == null || _worldCoordinateSystem == null)
             {
                 ReadStandardEyeTracking();
                 return;
             }
 
-            var timestamp = PerceptionTimestampHelper.FromHistoricalTargetTime(DateTimeOffset.Now);
-            var reading = _tracker.TryGetReadingAtTimestamp(timestamp);
+            DateTimeOffset targetTime = DateTimeOffset.Now;
 
+            // EyeTracking package wants DateTimeOffset here.
+            var reading = _tracker.TryGetReadingAtTimestamp(targetTime);
             if (reading == null)
             {
                 return;
             }
 
-            if (!_trackerNode.TryLocate(FrameTime.OnUpdate, out Pose trackerPose))
+            // Windows spatial APIs want PerceptionTimestamp here.
+            PerceptionTimestamp perceptionTimestamp =
+                PerceptionTimestampHelper.FromHistoricalTargetTime(targetTime);
+
+            SpatialLocation trackerLocation =
+                _trackerLocator.TryLocateAtTimestamp(perceptionTimestamp, _worldCoordinateSystem);
+
+            if (trackerLocation == null)
             {
                 return;
             }
@@ -235,10 +267,10 @@ namespace GazeLSL
                     out System.Numerics.Vector3 combinedDirection))
             {
                 _currentFrame.CombinedOrigin =
-                    TransformTrackerPointToWorld(combinedOrigin, trackerPose);
+                    TransformTrackerPointToUnityWorld(combinedOrigin, trackerLocation);
 
                 _currentFrame.CombinedDirection =
-                    TransformTrackerDirectionToWorld(combinedDirection, trackerPose);
+                    TransformTrackerDirectionToUnityWorld(combinedDirection, trackerLocation);
 
                 _currentFrame.CombinedValid = true;
             }
@@ -249,10 +281,10 @@ namespace GazeLSL
                     out System.Numerics.Vector3 leftDirection))
             {
                 _currentFrame.LeftEyeOrigin =
-                    TransformTrackerPointToWorld(leftOrigin, trackerPose);
+                    TransformTrackerPointToUnityWorld(leftOrigin, trackerLocation);
 
                 _currentFrame.LeftEyeDirection =
-                    TransformTrackerDirectionToWorld(leftDirection, trackerPose);
+                    TransformTrackerDirectionToUnityWorld(leftDirection, trackerLocation);
 
                 _currentFrame.LeftEyeValid = true;
             }
@@ -263,10 +295,10 @@ namespace GazeLSL
                     out System.Numerics.Vector3 rightDirection))
             {
                 _currentFrame.RightEyeOrigin =
-                    TransformTrackerPointToWorld(rightOrigin, trackerPose);
+                    TransformTrackerPointToUnityWorld(rightOrigin, trackerLocation);
 
                 _currentFrame.RightEyeDirection =
-                    TransformTrackerDirectionToWorld(rightDirection, trackerPose);
+                    TransformTrackerDirectionToUnityWorld(rightDirection, trackerLocation);
 
                 _currentFrame.RightEyeValid = true;
             }
@@ -278,16 +310,37 @@ namespace GazeLSL
             }
         }
 
-        private Vector3 TransformTrackerPointToWorld(System.Numerics.Vector3 point, Pose trackerPose)
+        private Vector3 TransformTrackerPointToUnityWorld(
+            System.Numerics.Vector3 trackerPoint,
+            SpatialLocation trackerLocation)
         {
-            Vector3 unityPoint = new Vector3(point.X, point.Y, -point.Z);
-            return trackerPose.position + trackerPose.rotation * unityPoint;
+            System.Numerics.Vector3 position = trackerLocation.Position;
+            System.Numerics.Quaternion rotation = trackerLocation.Orientation;
+
+            System.Numerics.Vector3 transformed =
+                System.Numerics.Vector3.Transform(trackerPoint, rotation) + position;
+
+            return new Vector3(
+                transformed.X,
+                transformed.Y,
+                -transformed.Z
+            );
         }
 
-        private Vector3 TransformTrackerDirectionToWorld(System.Numerics.Vector3 direction, Pose trackerPose)
+        private Vector3 TransformTrackerDirectionToUnityWorld(
+            System.Numerics.Vector3 trackerDirection,
+            SpatialLocation trackerLocation)
         {
-            Vector3 unityDirection = new Vector3(direction.X, direction.Y, -direction.Z).normalized;
-            return (trackerPose.rotation * unityDirection).normalized;
+            System.Numerics.Quaternion rotation = trackerLocation.Orientation;
+
+            System.Numerics.Vector3 transformed =
+                System.Numerics.Vector3.Transform(trackerDirection, rotation);
+
+            return new Vector3(
+                transformed.X,
+                transformed.Y,
+                -transformed.Z
+            ).normalized;
         }
 #endif
 
@@ -302,7 +355,8 @@ namespace GazeLSL
                 _currentFrame.CombinedValid = true;
             }
 
-            var centerEyeDevice = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.CenterEye);
+            var centerEyeDevice =
+                UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.CenterEye);
 
             if (centerEyeDevice.isValid)
             {
@@ -330,9 +384,9 @@ namespace GazeLSL
 #if ENABLE_WINMD_SUPPORT
             if (_watcher != null)
             {
-                _watcher.Stop();
                 _watcher.EyeGazeTrackerAdded -= OnTrackerAdded;
                 _watcher.EyeGazeTrackerRemoved -= OnTrackerRemoved;
+                _watcher.Stop();
                 _watcher = null;
             }
 
@@ -349,7 +403,8 @@ namespace GazeLSL
             }
 
             _tracker = null;
-            _trackerNode = null;
+            _trackerLocator = null;
+            _worldCoordinateSystem = null;
 #endif
         }
     }
