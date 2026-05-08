@@ -4,3 +4,6 @@
 [submodule "vicon-lsl-bridge/external/vicon-datastream-sdk"]
 	path = vicon-lsl-bridge/external/vicon-datastream-sdk
 	url = https://github.com/whoenig/vicon-datastream-sdk.git
+[submodule "hololens-gaze-lsl/external/liblsl"]
+	path = hololens-gaze-lsl/external/liblsl
+	url = https://github.com/sccn/liblsl.git

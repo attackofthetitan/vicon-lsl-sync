@@ -22,6 +22,7 @@ add_subdirectory(external/vicon-datastream-sdk EXCLUDE_FROM_ALL)
 add_executable(vicon-lsl-bridge
     src/main.cpp
     src/ViconClient.cpp
+    src/HoloLensGazeReceiver.cpp
     src/MarkerStream.cpp
     src/SegmentStream.cpp
     src/ViconLSLBridge.cpp
@@ -48,6 +49,7 @@ if(Qt6_FOUND)
         src/gui/main_gui.cpp
         src/gui/BridgeWindow.cpp
         src/ViconClient.cpp
+        src/HoloLensGazeReceiver.cpp
         src/MarkerStream.cpp
         src/SegmentStream.cpp
         src/ViconLSLBridge.cpp

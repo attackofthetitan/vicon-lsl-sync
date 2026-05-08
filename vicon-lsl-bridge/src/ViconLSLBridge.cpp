@@ -11,7 +11,12 @@
 #endif
 
 ViconLSLBridge::ViconLSLBridge(const Config& config)
-    : config_(config), client_(config.vicon_server) {}
+    : config_(config),
+      client_(config.vicon_server),
+      hololens_gaze_receiver_(config.hololens_gaze_port,
+                              config.hololens_gaze_stream_name,
+                              config.hololens_gaze_stream_type,
+                              config.hololens_gaze_source_id) {}
 
 void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
     status_callback_ = std::move(callback);
@@ -31,9 +36,14 @@ void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message)
 
 void ViconLSLBridge::stop() {
     running_ = false;
+    hololens_gaze_receiver_.stop();
 }
 
 void ViconLSLBridge::run() {
+    if (config_.enable_hololens_gaze) {
+        hololens_gaze_receiver_.start();
+    }
+
     while (running_) {
         connectWithRetry();
         if (!running_) break;
@@ -80,6 +90,7 @@ void ViconLSLBridge::run() {
     }
 
     reportStatus(BridgeState::Stopped, "Stopped");
+    hololens_gaze_receiver_.stop();
     std::cout << "Stopped" << std::endl;
 }
 

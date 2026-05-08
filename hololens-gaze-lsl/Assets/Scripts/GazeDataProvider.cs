@@ -10,14 +10,6 @@ using Windows.Perception.Spatial.Preview;
 
 namespace GazeLSL
 {
-    /*
-    Reads HoloLens 2 Extended Eye Tracking data and converts it into Unity world space.
-
-    This version uses:
-    - Microsoft.MixedReality.EyeTracking for eye gaze readings
-    - Windows.Perception.Spatial.Preview.SpatialGraphInteropPreview for world-space tracking
-    - Unity XR / Camera fallback when extended tracking is unavailable
-    */
     public class GazeDataProvider : MonoBehaviour
     {
         public struct GazeFrame
@@ -243,14 +235,12 @@ namespace GazeLSL
 
             DateTimeOffset targetTime = DateTimeOffset.Now;
 
-            // EyeTracking package wants DateTimeOffset here.
             var reading = _tracker.TryGetReadingAtTimestamp(targetTime);
             if (reading == null)
             {
                 return;
             }
 
-            // Windows spatial APIs want PerceptionTimestamp here.
             PerceptionTimestamp perceptionTimestamp =
                 PerceptionTimestampHelper.FromHistoricalTargetTime(targetTime);
 

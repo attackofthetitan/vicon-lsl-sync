@@ -1,0 +1,32 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 70370f92..3a284098 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -336,9 +336,11 @@ install(FILES
+ 
+ include(cmake/LSLCMake.cmake)
+ 
+-add_executable(lslver testing/lslver.c)
+-target_link_libraries(lslver PRIVATE lsl)
+-installLSLApp(lslver)
++if(NOT WINDOWS_STORE)
++	add_executable(lslver testing/lslver.c)
++	target_link_libraries(lslver PRIVATE lsl)
++	installLSLApp(lslver)
++endif()
+ 
+ if(NOT WIN32 AND LSL_TOOLS)
+ 	add_executable(blackhole testing/blackhole.cpp)
+diff --git a/src/common.cpp b/src/common.cpp
+index 90bb4bb7..747f889c 100644
+--- a/src/common.cpp
++++ b/src/common.cpp
+@@ -64,7 +64,7 @@ void lsl::ensure_lsl_initialized() {
+ #endif
+ 		LOG_F(INFO, "%s", lsl_library_info());
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && (!defined(WINAPI_FAMILY) || WINAPI_FAMILY != WINAPI_FAMILY_APP)
+ 		// if a timer resolution other than 0 is requested (0 means don't override)...
+ 		if (int desired_timer_resolution = lsl::api_config::get_instance()->timer_resolution()) {
+ 			// then override it for the lifetime of this program

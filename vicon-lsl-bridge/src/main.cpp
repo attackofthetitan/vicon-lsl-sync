@@ -21,6 +21,9 @@ void printUsage(const char* program) {
               << "  --server <ip:port>          Vicon server address (default: localhost:801)\n"
               << "  --marker-stream <name>      LSL marker stream name (default: ViconMarkers)\n"
               << "  --segment-stream <name>     LSL segment stream name (default: ViconSegments)\n"
+              << "  --no-hololens-gaze          Disable embedded HoloLens gaze UDP-to-LSL receiver\n"
+              << "  --gaze-port <port>          HoloLens gaze UDP port (default: 16571)\n"
+              << "  --gaze-stream <name>        HoloLens gaze LSL stream name (default: HoloLensGaze)\n"
               << "  --reconnect-interval <ms>   Reconnection interval in ms (default: 3000)\n"
               << "  --help                      Show this help message\n";
 }
@@ -35,6 +38,12 @@ int main(int argc, char* argv[]) {
             config.marker_stream_name = argv[++i];
         } else if (std::strcmp(argv[i], "--segment-stream") == 0 && i + 1 < argc) {
             config.segment_stream_name = argv[++i];
+        } else if (std::strcmp(argv[i], "--no-hololens-gaze") == 0) {
+            config.enable_hololens_gaze = false;
+        } else if (std::strcmp(argv[i], "--gaze-port") == 0 && i + 1 < argc) {
+            config.hololens_gaze_port = static_cast<unsigned short>(std::stoi(argv[++i]));
+        } else if (std::strcmp(argv[i], "--gaze-stream") == 0 && i + 1 < argc) {
+            config.hololens_gaze_stream_name = argv[++i];
         } else if (std::strcmp(argv[i], "--reconnect-interval") == 0 && i + 1 < argc) {
             config.reconnect_interval_ms = std::stoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--help") == 0) {
@@ -51,6 +60,12 @@ int main(int argc, char* argv[]) {
     std::cout << "  Server: " << config.vicon_server << std::endl;
     std::cout << "  Marker stream: " << config.marker_stream_name << std::endl;
     std::cout << "  Segment stream: " << config.segment_stream_name << std::endl;
+    if (config.enable_hololens_gaze) {
+        std::cout << "  HoloLens gaze stream: " << config.hololens_gaze_stream_name
+                  << " on UDP port " << config.hololens_gaze_port << std::endl;
+    } else {
+        std::cout << "  HoloLens gaze stream: disabled" << std::endl;
+    }
     std::cout << "Press Ctrl+C to stop." << std::endl;
 
     ViconLSLBridge bridge(config);
