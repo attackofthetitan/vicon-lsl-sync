@@ -14,6 +14,7 @@ The bridge connects to a Vicon DataStream server and creates two LSL outlets:
 
 - **ViconMarkers** — 4 channels per marker (X, Y, Z in mm, Valid flag). Occluded markers are sent as NaN with Valid=0.
 - **ViconSegments** — 7 channels per segment (X, Y, Z in mm, QX, QY, QZ, QW quaternion rotation).
+- **HoloLensGaze** — optional embedded UDP receiver for the HoloLens gaze Unity app.
 
 If the marker/segment layout changes mid-session (e.g., subjects added or removed), streams are automatically destroyed and recreated.
 
@@ -41,6 +42,9 @@ Options:
   --server <ip:port>          Vicon server address (default: localhost:801)
   --marker-stream <name>      LSL marker stream name (default: ViconMarkers)
   --segment-stream <name>     LSL segment stream name (default: ViconSegments)
+  --no-hololens-gaze          Disable embedded HoloLens gaze UDP-to-LSL receiver
+  --gaze-port <port>          HoloLens gaze UDP port (default: 16571)
+  --gaze-stream <name>        HoloLens gaze LSL stream name (default: HoloLensGaze)
   --reconnect-interval <ms>   Reconnection interval in ms (default: 3000)
   --help                      Show this help message
 ```
@@ -54,6 +58,8 @@ Options:
 ## Recording
 
 Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file with synchronized timestamps.
+
+For HoloLens gaze recording with the UDP bridge path, run only `vicon-lsl-bridge` and LabRecorder. Set `GazeLSLConfig.RelayHost` to the desktop running `vicon-lsl-bridge`, and keep `RelayPort` at `16571` unless you pass `--gaze-port`.
 
 ## Building from source
 

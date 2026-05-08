@@ -4,6 +4,7 @@
 #include "ViconClient.h"
 #include "MarkerStream.h"
 #include "SegmentStream.h"
+#include "HoloLensGazeReceiver.h"
 
 #include <atomic>
 #include <functional>
@@ -45,6 +46,7 @@ private:
     ViconClient client_;
     MarkerStream marker_stream_;
     SegmentStream segment_stream_;
+    HoloLensGazeReceiver hololens_gaze_receiver_;
     std::atomic<bool> running_{true};
     StatusCallback status_callback_;
 
