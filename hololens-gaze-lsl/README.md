@@ -24,3 +24,9 @@ build/liblsl-uwp-arm64-install/lib/lsl.lib
 ```
 
 The DLL is a UWP ARM64 build of `liblsl` `v1.16.2`.
+
+## Unity Setup
+
+Attach `GazeDataProvider` and `GazeLSLOutlet` to a scene object, then assign a `GazeLSLConfig` asset.
+
+`GazeLSLOutlet` creates a native LSL outlet first. If `liblsl.dll` cannot be loaded or the outlet fails to initialize, it falls back to sending UDP packets to `vicon-lsl-bridge`.

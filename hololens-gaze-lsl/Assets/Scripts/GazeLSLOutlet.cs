@@ -1,4 +1,6 @@
 using UnityEngine;
+using LSL;
+using System;
 using System.Globalization;
 #if ENABLE_WINMD_SUPPORT
 using Windows.Networking;
@@ -17,6 +19,16 @@ namespace GazeLSL
         [SerializeField] private GazeLSLConfig config;
         [SerializeField] private GazeDataProvider gazeProvider;
 
+        private enum TransportMode
+        {
+            None,
+            Lsl,
+            Udp
+        }
+
+        private TransportMode transportMode = TransportMode.None;
+        private liblsl.StreamOutlet outlet;
+        private liblsl.StreamInfo info;
 #if ENABLE_WINMD_SUPPORT
         private DatagramSocket udpSocket;
         private HostName relayHost;
@@ -29,6 +41,29 @@ namespace GazeLSL
         private readonly StringBuilder packetBuilder = new StringBuilder(512);
 
         private const int ChannelCount = 26;
+        private static readonly string[] ChannelLabels =
+        {
+            "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
+            "CombinedDirectionX", "CombinedDirectionY", "CombinedDirectionZ", "CombinedValid",
+            "LeftEyeOriginX", "LeftEyeOriginY", "LeftEyeOriginZ",
+            "LeftEyeDirectionX", "LeftEyeDirectionY", "LeftEyeDirectionZ", "LeftEyeValid",
+            "RightEyeOriginX", "RightEyeOriginY", "RightEyeOriginZ",
+            "RightEyeDirectionX", "RightEyeDirectionY", "RightEyeDirectionZ", "RightEyeValid",
+            "HitPointX", "HitPointY", "HitPointZ", "HitValid",
+            "VergenceDistance"
+        };
+
+        private static readonly string[] ChannelUnits =
+        {
+            "meters", "meters", "meters",
+            "normalized", "normalized", "normalized", "bool",
+            "meters", "meters", "meters",
+            "normalized", "normalized", "normalized", "bool",
+            "meters", "meters", "meters",
+            "normalized", "normalized", "normalized", "bool",
+            "meters", "meters", "meters", "bool",
+            "meters"
+        };
 
         private void Start()
         {
@@ -45,6 +80,58 @@ namespace GazeLSL
             }
 
             sample = new double[ChannelCount];
+            if (TryInitializeLsl())
+            {
+                transportMode = TransportMode.Lsl;
+                Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
+                return;
+            }
+
+            InitializeUdp();
+            transportMode = TransportMode.Udp;
+            Debug.Log($"Gaze UDP fallback ready - {config.RelayHost}:{config.RelayPort}, {ChannelCount} channels");
+        }
+
+        private bool TryInitializeLsl()
+        {
+            try
+            {
+                info = new liblsl.StreamInfo(
+                    config.StreamName,
+                    config.StreamType,
+                    ChannelCount,
+                    liblsl.IRREGULAR_RATE,
+                    liblsl.channel_format_t.cf_double64,
+                    config.SourceId
+                );
+
+                liblsl.XMLElement channels = info.desc().append_child("channels");
+                for (int i = 0; i < ChannelLabels.Length; i++)
+                {
+                    liblsl.XMLElement ch = channels.append_child("channel");
+                    ch.append_child_value("label", ChannelLabels[i]);
+                    ch.append_child_value("unit", ChannelUnits[i]);
+                }
+
+                liblsl.XMLElement meta = info.desc().append_child("acquisition");
+                meta.append_child_value("device", "HoloLens2");
+                meta.append_child_value("sdk", "ExtendedEyeTracking");
+
+                outlet = new liblsl.StreamOutlet(info);
+                liblsl.local_clock();
+                return true;
+            }
+            catch (Exception e) when (IsLslLoadFailure(e))
+            {
+                Debug.LogWarning($"LSL unavailable, falling back to UDP - {e.GetType().Name}: {e.Message}");
+                outlet = null;
+                info = null;
+                return false;
+            }
+        }
+
+        private void InitializeUdp()
+        {
 #if ENABLE_WINMD_SUPPORT
             udpSocket = new DatagramSocket();
             relayHost = new HostName(config.RelayHost);
@@ -56,17 +143,11 @@ namespace GazeLSL
                 config.RelayPort
             );
 #endif
-
-            Debug.Log($"Gaze UDP sender ready - {config.RelayHost}:{config.RelayPort}, {ChannelCount} channels");
         }
 
         private void LateUpdate()
         {
-#if ENABLE_WINMD_SUPPORT
-            if (udpSocket == null || gazeProvider == null) return;
-#else
-            if (udpClient == null || gazeProvider == null) return;
-#endif
+            if (transportMode == TransportMode.None || gazeProvider == null) return;
 
             var frame = gazeProvider.GetCurrentFrame();
 
@@ -101,10 +182,39 @@ namespace GazeLSL
 
             sample[25] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
 
-            SendSample(Time.realtimeSinceStartupAsDouble, sample);
+            if (transportMode == TransportMode.Lsl)
+            {
+                try
+                {
+                    outlet.push_sample(sample, liblsl.local_clock());
+                }
+                catch (Exception e) when (IsLslLoadFailure(e))
+                {
+                    Debug.LogWarning($"LSL push failed, switching to UDP - {e.GetType().Name}: {e.Message}");
+                    outlet = null;
+                    info = null;
+                    InitializeUdp();
+                    transportMode = TransportMode.Udp;
+                    SendUdpSample(Time.realtimeSinceStartupAsDouble, sample);
+                }
+            }
+            else
+            {
+                SendUdpSample(Time.realtimeSinceStartupAsDouble, sample);
+            }
         }
 
-        private void SendSample(double timestamp, double[] values)
+        private static bool IsLslLoadFailure(Exception e)
+        {
+            return e is DllNotFoundException ||
+                   e is EntryPointNotFoundException ||
+                   e is BadImageFormatException ||
+                   e is TypeInitializationException ||
+                   e is TypeLoadException ||
+                   e is InvalidOperationException;
+        }
+
+        private void SendUdpSample(double timestamp, double[] values)
         {
             packetBuilder.Clear();
             packetBuilder.Append("HLGAZE1,");
@@ -147,6 +257,9 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
+            outlet = null;
+            info = null;
+
 #if ENABLE_WINMD_SUPPORT
             if (udpSocket != null)
             {
@@ -161,7 +274,7 @@ namespace GazeLSL
             }
 #endif
 
-            Debug.Log("Gaze UDP sender closed");
+            transportMode = TransportMode.None;
         }
     }
 }
