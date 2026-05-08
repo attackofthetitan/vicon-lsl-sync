@@ -5,7 +5,12 @@ namespace GazeLSL
     [CreateAssetMenu(fileName = "GazeLSLConfig", menuName = "LSL/Gaze Config")]
     public class GazeLSLConfig : ScriptableObject
     {
-        [Header("Desktop Bridge Settings")]
+        [Header("LSL Stream Settings")]
+        public string StreamName = "HoloLensGaze";
+        public string StreamType = "Gaze";
+        public string SourceId = "hololens2_gaze";
+
+        [Header("UDP Fallback Settings")]
         [Tooltip("IP address or hostname of the desktop running vicon-lsl-bridge")]
         public string RelayHost = "192.168.1.100";
         public int RelayPort = 16571;

@@ -59,7 +59,7 @@ Options:
 
 Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file with synchronized timestamps.
 
-For HoloLens gaze recording with the UDP bridge path, run only `vicon-lsl-bridge` and LabRecorder. Set `GazeLSLConfig.RelayHost` to the desktop running `vicon-lsl-bridge`, and keep `RelayPort` at `16571` unless you pass `--gaze-port`.
+The HoloLens Unity outlet uses native LSL when `liblsl.dll` loads successfully. If it cannot load LSL, it falls back to UDP; in that mode, run `vicon-lsl-bridge` and LabRecorder, and set `GazeLSLConfig.RelayHost` to the desktop running the bridge.
 
 ## Building from source
 
