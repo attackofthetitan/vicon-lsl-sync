@@ -2,6 +2,8 @@ using UnityEngine;
 using LSL;
 using System;
 using System.Globalization;
+using System.Text;
+using System.Threading.Tasks;
 #if ENABLE_WINMD_SUPPORT
 using Windows.Networking;
 using Windows.Networking.Sockets;
@@ -10,7 +12,6 @@ using Windows.Storage.Streams;
 using System.Net;
 using System.Net.Sockets;
 #endif
-using System.Text;
 
 namespace GazeLSL
 {
@@ -29,6 +30,7 @@ namespace GazeLSL
         private TransportMode transportMode = TransportMode.None;
         private liblsl.StreamOutlet outlet;
         private liblsl.StreamInfo info;
+
 #if ENABLE_WINMD_SUPPORT
         private DatagramSocket udpSocket;
         private HostName relayHost;
@@ -37,10 +39,15 @@ namespace GazeLSL
         private UdpClient udpClient;
         private IPEndPoint relayEndpoint;
 #endif
+
         private double[] sample;
         private readonly StringBuilder packetBuilder = new StringBuilder(512);
 
+        private bool samplingLoopRunning;
+        private double nextSampleTime;
+
         private const int ChannelCount = 26;
+
         private static readonly string[] ChannelLabels =
         {
             "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
@@ -80,16 +87,20 @@ namespace GazeLSL
             }
 
             sample = new double[ChannelCount];
+
             if (TryInitializeLsl())
             {
                 transportMode = TransportMode.Lsl;
                 Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
-                return;
+            }
+            else
+            {
+                InitializeUdp();
+                transportMode = TransportMode.Udp;
+                Debug.Log($"Gaze UDP fallback ready - {config.RelayHost}:{config.RelayPort}, {ChannelCount} channels");
             }
 
-            InitializeUdp();
-            transportMode = TransportMode.Udp;
-            Debug.Log($"Gaze UDP fallback ready - {config.RelayHost}:{config.RelayPort}, {ChannelCount} channels");
+            StartSamplingLoop();
         }
 
         private bool TryInitializeLsl()
@@ -100,12 +111,13 @@ namespace GazeLSL
                     config.StreamName,
                     config.StreamType,
                     ChannelCount,
-                    liblsl.IRREGULAR_RATE,
+                    config.TargetFrameRate,
                     liblsl.channel_format_t.cf_double64,
                     config.SourceId
                 );
 
                 liblsl.XMLElement channels = info.desc().append_child("channels");
+
                 for (int i = 0; i < ChannelLabels.Length; i++)
                 {
                     liblsl.XMLElement ch = channels.append_child("channel");
@@ -116,6 +128,7 @@ namespace GazeLSL
                 liblsl.XMLElement meta = info.desc().append_child("acquisition");
                 meta.append_child_value("device", "HoloLens2");
                 meta.append_child_value("sdk", "ExtendedEyeTracking");
+                meta.append_child_value("nominal_srate", config.TargetFrameRate.ToString());
 
                 outlet = new liblsl.StreamOutlet(info);
                 liblsl.local_clock();
@@ -145,9 +158,38 @@ namespace GazeLSL
 #endif
         }
 
-        private void LateUpdate()
+        private async void StartSamplingLoop()
         {
-            if (transportMode == TransportMode.None || gazeProvider == null) return;
+            samplingLoopRunning = true;
+
+            double interval = 1.0 / Math.Max(1, config.TargetFrameRate);
+            nextSampleTime = Time.realtimeSinceStartupAsDouble;
+
+            while (samplingLoopRunning)
+            {
+                double now = Time.realtimeSinceStartupAsDouble;
+
+                if (now >= nextSampleTime)
+                {
+                    PushOneSample();
+                    nextSampleTime += interval;
+
+                    if (now - nextSampleTime > interval)
+                    {
+                        nextSampleTime = now + interval;
+                    }
+                }
+
+                await Task.Yield();
+            }
+        }
+
+        private void PushOneSample()
+        {
+            if (transportMode == TransportMode.None || gazeProvider == null)
+            {
+                return;
+            }
 
             var frame = gazeProvider.GetCurrentFrame();
 
@@ -227,6 +269,7 @@ namespace GazeLSL
             }
 
             string packet = packetBuilder.ToString();
+
 #if ENABLE_WINMD_SUPPORT
             SendUwpPacket(packet);
 #else
@@ -257,6 +300,8 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
+            samplingLoopRunning = false;
+
             outlet = null;
             info = null;
 
