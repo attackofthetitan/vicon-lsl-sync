@@ -1,12 +1,16 @@
 using UnityEngine;
 using LSL;
+using System;
+using System.Threading.Tasks;
 
 namespace GazeLSL
 {
     /*
     Pushes HoloLens 2 eye gaze data to an LSL outlet.
     26 channels: combined gaze, per-eye gaze, hit point, vergence.
-    Attach to a GameObject alongside GazeDataProvider.
+
+    Sampling is intentionally decoupled from Unity's render loop so the
+    eye tracker can operate closer to its native acquisition rate.
     */
     public class GazeLSLOutlet : MonoBehaviour
     {
@@ -16,7 +20,10 @@ namespace GazeLSL
         private StreamOutlet outlet;
         private StreamInfo info;
         private double[] sample;
+
         private int pushedSampleCount = 0;
+        private bool samplingLoopRunning = false;
+        private double nextSampleTime;
 
         /*
         0-2 combined origin, 3-5 combined direction, 6 combined valid,
@@ -29,6 +36,7 @@ namespace GazeLSL
         private void Start()
         {
             Debug.Log("GazeLSLOutlet Start() reached");
+
             if (gazeProvider == null)
             {
                 gazeProvider = GetComponent<GazeDataProvider>();
@@ -40,16 +48,14 @@ namespace GazeLSL
                 enabled = false;
                 return;
             }
-            else
-            {
-                Debug.Log($"GazeLSLOutlet config loaded. StreamName={config.StreamName}");
-            }
+
+            Debug.Log($"GazeLSLOutlet config loaded. StreamName={config.StreamName}");
 
             info = new StreamInfo(
                 config.StreamName,
                 config.StreamType,
                 ChannelCount,
-                LSL.LSL.IRREGULAR_RATE,
+                config.TargetFrameRate,
                 channel_format_t.cf_double64,
                 config.SourceId
             );
@@ -85,16 +91,49 @@ namespace GazeLSL
             XMLElement meta = info.desc().append_child("acquisition");
             meta.append_child_value("device", "HoloLens2");
             meta.append_child_value("sdk", "ExtendedEyeTracking");
+            meta.append_child_value("nominal_srate", config.TargetFrameRate.ToString());
 
             sample = new double[ChannelCount];
             outlet = new StreamOutlet(info);
 
             Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
+
+            StartSamplingLoop();
         }
 
-        private void LateUpdate()
+        private async void StartSamplingLoop()
         {
-            if (outlet == null || gazeProvider == null) return;
+            samplingLoopRunning = true;
+
+            double interval = 1.0 / Math.Max(1, config.TargetFrameRate);
+            nextSampleTime = Time.realtimeSinceStartupAsDouble;
+
+            while (samplingLoopRunning)
+            {
+                double now = Time.realtimeSinceStartupAsDouble;
+
+                if (now >= nextSampleTime)
+                {
+                    PushOneSample();
+
+                    nextSampleTime += interval;
+
+                    if (now - nextSampleTime > interval)
+                    {
+                        nextSampleTime = now + interval;
+                    }
+                }
+
+                await Task.Yield();
+            }
+        }
+
+        private void PushOneSample()
+        {
+            if (outlet == null || gazeProvider == null)
+            {
+                return;
+            }
 
             var frame = gazeProvider.GetCurrentFrame();
             double timestamp = LSL.LSL.local_clock();
@@ -155,6 +194,7 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
+            samplingLoopRunning = false;
             outlet = null;
             info = null;
             Debug.Log("LSL outlet closed");
