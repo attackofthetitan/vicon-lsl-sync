@@ -1,79 +1,34 @@
 using UnityEngine;
 using LSL;
-using System;
-using System.Globalization;
-using System.Text;
-using System.Threading.Tasks;
-#if ENABLE_WINMD_SUPPORT
-using Windows.Networking;
-using Windows.Networking.Sockets;
-using Windows.Storage.Streams;
-#else
-using System.Net;
-using System.Net.Sockets;
-#endif
 
 namespace GazeLSL
 {
+    /*
+    Pushes HoloLens 2 eye gaze data to an LSL outlet.
+    26 channels: combined gaze, per-eye gaze, hit point, vergence.
+    Attach to a GameObject alongside GazeDataProvider.
+    */
     public class GazeLSLOutlet : MonoBehaviour
     {
         [SerializeField] private GazeLSLConfig config;
         [SerializeField] private GazeDataProvider gazeProvider;
 
-        private enum TransportMode
-        {
-            None,
-            Lsl,
-            Udp
-        }
-
-        private TransportMode transportMode = TransportMode.None;
-        private liblsl.StreamOutlet outlet;
-        private liblsl.StreamInfo info;
-
-#if ENABLE_WINMD_SUPPORT
-        private DatagramSocket udpSocket;
-        private HostName relayHost;
-        private string relayPort;
-#else
-        private UdpClient udpClient;
-        private IPEndPoint relayEndpoint;
-#endif
-
+        private StreamOutlet outlet;
+        private StreamInfo info;
         private double[] sample;
-        private readonly StringBuilder packetBuilder = new StringBuilder(512);
+        private int pushedSampleCount = 0;
 
-        private bool samplingLoopRunning;
-        private double nextSampleTime;
-
+        /*
+        0-2 combined origin, 3-5 combined direction, 6 combined valid,
+        7-9 left origin, 10-12 left direction, 13 left valid,
+        14-16 right origin, 17-19 right direction, 20 right valid,
+        21-23 hit point, 24 hit valid, 25 vergence distance
+        */
         private const int ChannelCount = 26;
-
-        private static readonly string[] ChannelLabels =
-        {
-            "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
-            "CombinedDirectionX", "CombinedDirectionY", "CombinedDirectionZ", "CombinedValid",
-            "LeftEyeOriginX", "LeftEyeOriginY", "LeftEyeOriginZ",
-            "LeftEyeDirectionX", "LeftEyeDirectionY", "LeftEyeDirectionZ", "LeftEyeValid",
-            "RightEyeOriginX", "RightEyeOriginY", "RightEyeOriginZ",
-            "RightEyeDirectionX", "RightEyeDirectionY", "RightEyeDirectionZ", "RightEyeValid",
-            "HitPointX", "HitPointY", "HitPointZ", "HitValid",
-            "VergenceDistance"
-        };
-
-        private static readonly string[] ChannelUnits =
-        {
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized", "bool",
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized", "bool",
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized", "bool",
-            "meters", "meters", "meters", "bool",
-            "meters"
-        };
 
         private void Start()
         {
+            Debug.Log("GazeLSLOutlet Start() reached");
             if (gazeProvider == null)
             {
                 gazeProvider = GetComponent<GazeDataProvider>();
@@ -85,113 +40,64 @@ namespace GazeLSL
                 enabled = false;
                 return;
             }
-
-            sample = new double[ChannelCount];
-
-            if (TryInitializeLsl())
-            {
-                transportMode = TransportMode.Lsl;
-                Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
-            }
             else
             {
-                InitializeUdp();
-                transportMode = TransportMode.Udp;
-                Debug.Log($"Gaze UDP fallback ready - {config.RelayHost}:{config.RelayPort}, {ChannelCount} channels");
+                Debug.Log($"GazeLSLOutlet config loaded. StreamName={config.StreamName}");
             }
 
-            StartSamplingLoop();
-        }
-
-        private bool TryInitializeLsl()
-        {
-            try
-            {
-                info = new liblsl.StreamInfo(
-                    config.StreamName,
-                    config.StreamType,
-                    ChannelCount,
-                    config.TargetFrameRate,
-                    liblsl.channel_format_t.cf_double64,
-                    config.SourceId
-                );
-
-                liblsl.XMLElement channels = info.desc().append_child("channels");
-
-                for (int i = 0; i < ChannelLabels.Length; i++)
-                {
-                    liblsl.XMLElement ch = channels.append_child("channel");
-                    ch.append_child_value("label", ChannelLabels[i]);
-                    ch.append_child_value("unit", ChannelUnits[i]);
-                }
-
-                liblsl.XMLElement meta = info.desc().append_child("acquisition");
-                meta.append_child_value("device", "HoloLens2");
-                meta.append_child_value("sdk", "ExtendedEyeTracking");
-                meta.append_child_value("nominal_srate", config.TargetFrameRate.ToString());
-
-                outlet = new liblsl.StreamOutlet(info);
-                liblsl.local_clock();
-                return true;
-            }
-            catch (Exception e) when (IsLslLoadFailure(e))
-            {
-                Debug.LogWarning($"LSL unavailable, falling back to UDP - {e.GetType().Name}: {e.Message}");
-                outlet = null;
-                info = null;
-                return false;
-            }
-        }
-
-        private void InitializeUdp()
-        {
-#if ENABLE_WINMD_SUPPORT
-            udpSocket = new DatagramSocket();
-            relayHost = new HostName(config.RelayHost);
-            relayPort = config.RelayPort.ToString(CultureInfo.InvariantCulture);
-#else
-            udpClient = new UdpClient();
-            relayEndpoint = new IPEndPoint(
-                Dns.GetHostAddresses(config.RelayHost)[0],
-                config.RelayPort
+            info = new StreamInfo(
+                config.StreamName,
+                config.StreamType,
+                ChannelCount,
+                LSL.LSL.IRREGULAR_RATE,
+                channel_format_t.cf_double64,
+                config.SourceId
             );
-#endif
+
+            XMLElement channels = info.desc().append_child("channels");
+            AppendChannel(channels, "CombinedOriginX", "meters");
+            AppendChannel(channels, "CombinedOriginY", "meters");
+            AppendChannel(channels, "CombinedOriginZ", "meters");
+            AppendChannel(channels, "CombinedDirectionX", "normalized");
+            AppendChannel(channels, "CombinedDirectionY", "normalized");
+            AppendChannel(channels, "CombinedDirectionZ", "normalized");
+            AppendChannel(channels, "CombinedValid", "bool");
+            AppendChannel(channels, "LeftEyeOriginX", "meters");
+            AppendChannel(channels, "LeftEyeOriginY", "meters");
+            AppendChannel(channels, "LeftEyeOriginZ", "meters");
+            AppendChannel(channels, "LeftEyeDirectionX", "normalized");
+            AppendChannel(channels, "LeftEyeDirectionY", "normalized");
+            AppendChannel(channels, "LeftEyeDirectionZ", "normalized");
+            AppendChannel(channels, "LeftEyeValid", "bool");
+            AppendChannel(channels, "RightEyeOriginX", "meters");
+            AppendChannel(channels, "RightEyeOriginY", "meters");
+            AppendChannel(channels, "RightEyeOriginZ", "meters");
+            AppendChannel(channels, "RightEyeDirectionX", "normalized");
+            AppendChannel(channels, "RightEyeDirectionY", "normalized");
+            AppendChannel(channels, "RightEyeDirectionZ", "normalized");
+            AppendChannel(channels, "RightEyeValid", "bool");
+            AppendChannel(channels, "HitPointX", "meters");
+            AppendChannel(channels, "HitPointY", "meters");
+            AppendChannel(channels, "HitPointZ", "meters");
+            AppendChannel(channels, "HitValid", "bool");
+            AppendChannel(channels, "VergenceDistance", "meters");
+
+            XMLElement meta = info.desc().append_child("acquisition");
+            meta.append_child_value("device", "HoloLens2");
+            meta.append_child_value("sdk", "ExtendedEyeTracking");
+
+            sample = new double[ChannelCount];
+            outlet = new StreamOutlet(info);
+
+            Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
         }
 
-        private async void StartSamplingLoop()
+        private void LateUpdate()
         {
-            samplingLoopRunning = true;
-
-            double interval = 1.0 / Math.Max(1, config.TargetFrameRate);
-            nextSampleTime = Time.realtimeSinceStartupAsDouble;
-
-            while (samplingLoopRunning)
-            {
-                double now = Time.realtimeSinceStartupAsDouble;
-
-                if (now >= nextSampleTime)
-                {
-                    PushOneSample();
-                    nextSampleTime += interval;
-
-                    if (now - nextSampleTime > interval)
-                    {
-                        nextSampleTime = now + interval;
-                    }
-                }
-
-                await Task.Yield();
-            }
-        }
-
-        private void PushOneSample()
-        {
-            if (transportMode == TransportMode.None || gazeProvider == null)
-            {
-                return;
-            }
+            if (outlet == null || gazeProvider == null) return;
 
             var frame = gazeProvider.GetCurrentFrame();
+            double timestamp = LSL.LSL.local_clock();
 
             sample[0] = frame.CombinedOrigin.x;
             sample[1] = frame.CombinedOrigin.y;
@@ -224,102 +130,34 @@ namespace GazeLSL
 
             sample[25] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
 
-            if (transportMode == TransportMode.Lsl)
+            outlet.push_sample(sample, timestamp);
+
+            pushedSampleCount++;
+
+            if (pushedSampleCount % 300 == 0)
             {
-                try
-                {
-                    outlet.push_sample(sample, liblsl.local_clock());
-                }
-                catch (Exception e) when (IsLslLoadFailure(e))
-                {
-                    Debug.LogWarning($"LSL push failed, switching to UDP - {e.GetType().Name}: {e.Message}");
-                    outlet = null;
-                    info = null;
-                    InitializeUdp();
-                    transportMode = TransportMode.Udp;
-                    SendUdpSample(Time.realtimeSinceStartupAsDouble, sample);
-                }
-            }
-            else
-            {
-                SendUdpSample(Time.realtimeSinceStartupAsDouble, sample);
+                Debug.Log(
+                    $"LSL samples pushed: {pushedSampleCount}, " +
+                    $"CombinedValid={frame.CombinedValid}, " +
+                    $"LeftValid={frame.LeftEyeValid}, " +
+                    $"RightValid={frame.RightEyeValid}, " +
+                    $"HitValid={frame.HitValid}"
+                );
             }
         }
 
-        private static bool IsLslLoadFailure(Exception e)
+        private void AppendChannel(XMLElement parent, string label, string unit)
         {
-            return e is DllNotFoundException ||
-                   e is EntryPointNotFoundException ||
-                   e is BadImageFormatException ||
-                   e is TypeInitializationException ||
-                   e is TypeLoadException ||
-                   e is InvalidOperationException;
+            XMLElement ch = parent.append_child("channel");
+            ch.append_child_value("label", label);
+            ch.append_child_value("unit", unit);
         }
-
-        private void SendUdpSample(double timestamp, double[] values)
-        {
-            packetBuilder.Clear();
-            packetBuilder.Append("HLGAZE1,");
-            packetBuilder.Append(timestamp.ToString("R", CultureInfo.InvariantCulture));
-
-            for (int i = 0; i < values.Length; i++)
-            {
-                packetBuilder.Append(',');
-                packetBuilder.Append(values[i].ToString("R", CultureInfo.InvariantCulture));
-            }
-
-            string packet = packetBuilder.ToString();
-
-#if ENABLE_WINMD_SUPPORT
-            SendUwpPacket(packet);
-#else
-            byte[] bytes = Encoding.ASCII.GetBytes(packet);
-            udpClient.Send(bytes, bytes.Length, relayEndpoint);
-#endif
-        }
-
-#if ENABLE_WINMD_SUPPORT
-        private async void SendUwpPacket(string packet)
-        {
-            try
-            {
-                using (IOutputStream stream = await udpSocket.GetOutputStreamAsync(relayHost, relayPort))
-                using (DataWriter writer = new DataWriter(stream))
-                {
-                    writer.WriteString(packet);
-                    await writer.StoreAsync();
-                    await writer.FlushAsync();
-                }
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogWarning($"Failed to send gaze UDP packet - {e.Message}");
-            }
-        }
-#endif
 
         private void OnDestroy()
         {
-            samplingLoopRunning = false;
-
             outlet = null;
             info = null;
-
-#if ENABLE_WINMD_SUPPORT
-            if (udpSocket != null)
-            {
-                udpSocket.Dispose();
-                udpSocket = null;
-            }
-#else
-            if (udpClient != null)
-            {
-                udpClient.Close();
-                udpClient = null;
-            }
-#endif
-
-            transportMode = TransportMode.None;
+            Debug.Log("LSL outlet closed");
         }
     }
 }
