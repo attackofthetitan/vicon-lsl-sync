@@ -33,9 +33,6 @@ namespace GazeLSL
             public Vector3 RightEyeDirection;
             public bool RightEyeValid;
 
-            public Vector3 HitPoint;
-            public bool HitValid;
-
             public float VergenceDistance;
             public bool VergenceValid;
         }
