@@ -14,8 +14,8 @@ namespace GazeLSL
     Reads HoloLens 2 Extended Eye Tracking data and converts it into Unity world space.
 
     This version uses Microsoft.MixedReality.EyeTracking only. The OpenXR / Unity XR
-    fallback has intentionally been removed so sampling is not silently downgraded
-    to Unity frame-rate-bound gaze data.
+    fallback and Unity Physics raycast hit-point enrichment have intentionally been
+    removed so gaze sampling is not tied to Unity frame-rate or scene physics work.
     */
     public class GazeDataProvider : MonoBehaviour
     {
@@ -210,21 +210,6 @@ namespace GazeLSL
 #else
             return _currentFrame;
 #endif
-
-            if (config != null && config.IncludeHitPoint && _currentFrame.CombinedValid)
-            {
-                Ray gazeRay = new Ray(_currentFrame.CombinedOrigin, _currentFrame.CombinedDirection);
-
-                if (Physics.Raycast(
-                        gazeRay,
-                        out RaycastHit hit,
-                        config.MaxRaycastDistance,
-                        config.RaycastLayerMask))
-                {
-                    _currentFrame.HitPoint = hit.point;
-                    _currentFrame.HitValid = true;
-                }
-            }
 
             return _currentFrame;
         }
