@@ -1,7 +1,8 @@
 using UnityEngine;
 using LSL;
 using System;
-using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Threading;
 
 namespace GazeLSL
 {
@@ -13,8 +14,8 @@ namespace GazeLSL
     - per-eye gaze
     - vergence
 
-    Sampling is intentionally decoupled from Unity's render loop so the
-    eye tracker can operate closer to its native acquisition rate.
+    Sampling runs on a dedicated worker thread instead of Unity's player loop
+    so the eye tracker can operate closer to its native acquisition rate.
     */
     public class GazeLSLOutlet : MonoBehaviour
     {
@@ -26,8 +27,9 @@ namespace GazeLSL
         private double[] sample;
 
         private int pushedSampleCount = 0;
-        private bool samplingLoopRunning = false;
-        private double nextSampleTime;
+
+        private Thread samplingThread;
+        private volatile bool samplingThreadRunning;
 
         /*
         0-2 combined origin
@@ -111,85 +113,89 @@ namespace GazeLSL
 
             Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
 
-            StartSamplingLoop();
+            StartSamplingThread();
         }
 
-        private async void StartSamplingLoop()
+        private void StartSamplingThread()
         {
-            samplingLoopRunning = true;
+            samplingThreadRunning = true;
 
-            double interval = 1.0 / Math.Max(1, config.TargetFrameRate);
-            nextSampleTime = Time.realtimeSinceStartupAsDouble;
+            samplingThread = new Thread(SamplingThreadLoop);
+            samplingThread.IsBackground = true;
+            samplingThread.Priority = System.Threading.ThreadPriority.AboveNormal;
+            samplingThread.Start();
+        }
 
-            while (samplingLoopRunning)
+        private void SamplingThreadLoop()
+        {
+            double intervalMilliseconds = 1000.0 / Math.Max(1, config.TargetFrameRate);
+
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            double nextTimeMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+
+            while (samplingThreadRunning)
             {
-                double now = Time.realtimeSinceStartupAsDouble;
+                double nowMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
 
-                if (now >= nextSampleTime)
+                if (nowMilliseconds >= nextTimeMilliseconds)
                 {
-                    PushOneSample();
+                    PushOneSampleThreaded();
 
-                    nextSampleTime += interval;
+                    nextTimeMilliseconds += intervalMilliseconds;
 
-                    if (now - nextSampleTime > interval)
+                    if (nowMilliseconds - nextTimeMilliseconds > intervalMilliseconds)
                     {
-                        nextSampleTime = now + interval;
+                        nextTimeMilliseconds = nowMilliseconds + intervalMilliseconds;
                     }
                 }
-
-                await Task.Yield();
+                else
+                {
+                    Thread.Sleep(0);
+                }
             }
         }
 
-        private void PushOneSample()
+        private void PushOneSampleThreaded()
         {
             if (outlet == null || gazeProvider == null)
             {
                 return;
             }
 
-            var frame = gazeProvider.GetCurrentFrame();
-            double timestamp = LSL.LSL.local_clock();
+            if (!gazeProvider.TryGetCurrentSample(out GazeDataProvider.GazeSample frame))
+            {
+                return;
+            }
 
-            sample[0] = frame.CombinedOrigin.x;
-            sample[1] = frame.CombinedOrigin.y;
-            sample[2] = frame.CombinedOrigin.z;
-            sample[3] = frame.CombinedDirection.x;
-            sample[4] = frame.CombinedDirection.y;
-            sample[5] = frame.CombinedDirection.z;
+            sample[0] = frame.CombinedOriginX;
+            sample[1] = frame.CombinedOriginY;
+            sample[2] = frame.CombinedOriginZ;
+            sample[3] = frame.CombinedDirectionX;
+            sample[4] = frame.CombinedDirectionY;
+            sample[5] = frame.CombinedDirectionZ;
             sample[6] = frame.CombinedValid ? 1.0 : 0.0;
 
-            sample[7] = frame.LeftEyeOrigin.x;
-            sample[8] = frame.LeftEyeOrigin.y;
-            sample[9] = frame.LeftEyeOrigin.z;
-            sample[10] = frame.LeftEyeDirection.x;
-            sample[11] = frame.LeftEyeDirection.y;
-            sample[12] = frame.LeftEyeDirection.z;
+            sample[7] = frame.LeftEyeOriginX;
+            sample[8] = frame.LeftEyeOriginY;
+            sample[9] = frame.LeftEyeOriginZ;
+            sample[10] = frame.LeftEyeDirectionX;
+            sample[11] = frame.LeftEyeDirectionY;
+            sample[12] = frame.LeftEyeDirectionZ;
             sample[13] = frame.LeftEyeValid ? 1.0 : 0.0;
 
-            sample[14] = frame.RightEyeOrigin.x;
-            sample[15] = frame.RightEyeOrigin.y;
-            sample[16] = frame.RightEyeOrigin.z;
-            sample[17] = frame.RightEyeDirection.x;
-            sample[18] = frame.RightEyeDirection.y;
-            sample[19] = frame.RightEyeDirection.z;
+            sample[14] = frame.RightEyeOriginX;
+            sample[15] = frame.RightEyeOriginY;
+            sample[16] = frame.RightEyeOriginZ;
+            sample[17] = frame.RightEyeDirectionX;
+            sample[18] = frame.RightEyeDirectionY;
+            sample[19] = frame.RightEyeDirectionZ;
             sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
 
             sample[21] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
 
-            outlet.push_sample(sample, timestamp);
+            outlet.push_sample(sample, LSL.LSL.local_clock());
 
             pushedSampleCount++;
-
-            if (pushedSampleCount % 300 == 0)
-            {
-                Debug.Log(
-                    $"LSL samples pushed: {pushedSampleCount}, " +
-                    $"CombinedValid={frame.CombinedValid}, " +
-                    $"LeftValid={frame.LeftEyeValid}, " +
-                    $"RightValid={frame.RightEyeValid}"
-                );
-            }
         }
 
         private void AppendChannel(XMLElement parent, string label, string unit)
@@ -201,9 +207,24 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
-            samplingLoopRunning = false;
+            samplingThreadRunning = false;
+
+            if (samplingThread != null)
+            {
+                try
+                {
+                    samplingThread.Join(100);
+                }
+                catch
+                {
+                }
+
+                samplingThread = null;
+            }
+
             outlet = null;
             info = null;
+
             Debug.Log("LSL outlet closed");
         }
     }
