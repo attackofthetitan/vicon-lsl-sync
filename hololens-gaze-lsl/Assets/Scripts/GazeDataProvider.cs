@@ -219,7 +219,7 @@ namespace GazeLSL
                 return;
             }
 
-            DateTimeOffset targetTime = DateTimeOffset.Now;
+            DateTime targetTime = DateTime.Now;
 
             var reading = _tracker.TryGetReadingAtTimestamp(targetTime);
             if (reading == null)
@@ -228,7 +228,7 @@ namespace GazeLSL
             }
 
             PerceptionTimestamp perceptionTimestamp =
-                PerceptionTimestampHelper.FromHistoricalTargetTime(targetTime);
+                PerceptionTimestampHelper.FromHistoricalTargetTime(new DateTimeOffset(targetTime));
 
             SpatialLocation trackerLocation =
                 _trackerLocator.TryLocateAtTimestamp(perceptionTimestamp, _worldCoordinateSystem);
