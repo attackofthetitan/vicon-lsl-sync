@@ -7,7 +7,11 @@ namespace GazeLSL
 {
     /*
     Pushes HoloLens 2 eye gaze data to an LSL outlet.
-    26 channels: combined gaze, per-eye gaze, hit point, vergence.
+
+    Channels:
+    - combined gaze
+    - per-eye gaze
+    - vergence
 
     Sampling is intentionally decoupled from Unity's render loop so the
     eye tracker can operate closer to its native acquisition rate.
@@ -26,12 +30,21 @@ namespace GazeLSL
         private double nextSampleTime;
 
         /*
-        0-2 combined origin, 3-5 combined direction, 6 combined valid,
-        7-9 left origin, 10-12 left direction, 13 left valid,
-        14-16 right origin, 17-19 right direction, 20 right valid,
-        21-23 hit point, 24 hit valid, 25 vergence distance
+        0-2 combined origin
+        3-5 combined direction
+        6 combined valid
+
+        7-9 left origin
+        10-12 left direction
+        13 left valid
+
+        14-16 right origin
+        17-19 right direction
+        20 right valid
+
+        21 vergence distance
         */
-        private const int ChannelCount = 26;
+        private const int ChannelCount = 22;
 
         private void Start()
         {
@@ -61,6 +74,7 @@ namespace GazeLSL
             );
 
             XMLElement channels = info.desc().append_child("channels");
+
             AppendChannel(channels, "CombinedOriginX", "meters");
             AppendChannel(channels, "CombinedOriginY", "meters");
             AppendChannel(channels, "CombinedOriginZ", "meters");
@@ -68,6 +82,7 @@ namespace GazeLSL
             AppendChannel(channels, "CombinedDirectionY", "normalized");
             AppendChannel(channels, "CombinedDirectionZ", "normalized");
             AppendChannel(channels, "CombinedValid", "bool");
+
             AppendChannel(channels, "LeftEyeOriginX", "meters");
             AppendChannel(channels, "LeftEyeOriginY", "meters");
             AppendChannel(channels, "LeftEyeOriginZ", "meters");
@@ -75,6 +90,7 @@ namespace GazeLSL
             AppendChannel(channels, "LeftEyeDirectionY", "normalized");
             AppendChannel(channels, "LeftEyeDirectionZ", "normalized");
             AppendChannel(channels, "LeftEyeValid", "bool");
+
             AppendChannel(channels, "RightEyeOriginX", "meters");
             AppendChannel(channels, "RightEyeOriginY", "meters");
             AppendChannel(channels, "RightEyeOriginZ", "meters");
@@ -82,10 +98,7 @@ namespace GazeLSL
             AppendChannel(channels, "RightEyeDirectionY", "normalized");
             AppendChannel(channels, "RightEyeDirectionZ", "normalized");
             AppendChannel(channels, "RightEyeValid", "bool");
-            AppendChannel(channels, "HitPointX", "meters");
-            AppendChannel(channels, "HitPointY", "meters");
-            AppendChannel(channels, "HitPointZ", "meters");
-            AppendChannel(channels, "HitValid", "bool");
+
             AppendChannel(channels, "VergenceDistance", "meters");
 
             XMLElement meta = info.desc().append_child("acquisition");
@@ -162,12 +175,7 @@ namespace GazeLSL
             sample[19] = frame.RightEyeDirection.z;
             sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
 
-            sample[21] = frame.HitPoint.x;
-            sample[22] = frame.HitPoint.y;
-            sample[23] = frame.HitPoint.z;
-            sample[24] = frame.HitValid ? 1.0 : 0.0;
-
-            sample[25] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
+            sample[21] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
 
             outlet.push_sample(sample, timestamp);
 
@@ -179,8 +187,7 @@ namespace GazeLSL
                     $"LSL samples pushed: {pushedSampleCount}, " +
                     $"CombinedValid={frame.CombinedValid}, " +
                     $"LeftValid={frame.LeftEyeValid}, " +
-                    $"RightValid={frame.RightEyeValid}, " +
-                    $"HitValid={frame.HitValid}"
+                    $"RightValid={frame.RightEyeValid}"
                 );
             }
         }
