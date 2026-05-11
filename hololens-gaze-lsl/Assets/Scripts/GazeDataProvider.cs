@@ -13,10 +13,9 @@ namespace GazeLSL
     /*
     Reads HoloLens 2 Extended Eye Tracking data and converts it into Unity world space.
 
-    This version uses:
-    - Microsoft.MixedReality.EyeTracking for eye gaze readings
-    - Windows.Perception.Spatial.Preview.SpatialGraphInteropPreview for world-space tracking
-    - Unity XR / Camera fallback when extended tracking is unavailable
+    This version uses Microsoft.MixedReality.EyeTracking only. The OpenXR / Unity XR
+    fallback has intentionally been removed so sampling is not silently downgraded
+    to Unity frame-rate-bound gaze data.
     */
     public class GazeDataProvider : MonoBehaviour
     {
@@ -72,12 +71,14 @@ namespace GazeLSL
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"Extended eye tracking unavailable - {e.Message}");
-                Debug.Log("Falling back to standard OpenXR / Unity XR eye tracking");
+                Debug.LogError($"Extended eye tracking unavailable - {e.Message}");
+                IsExtendedTrackingAvailable = false;
+                IsTrackingAvailable = false;
             }
 #else
-            Debug.Log("Extended eye tracking only available on HoloLens/UWP device builds");
-            Debug.Log("Using standard OpenXR / Unity XR eye tracking fallback");
+            Debug.LogError("Extended eye tracking requires a HoloLens/UWP device build. OpenXR / Unity XR fallback is disabled.");
+            IsExtendedTrackingAvailable = false;
+            IsTrackingAvailable = false;
             await System.Threading.Tasks.Task.CompletedTask;
 #endif
         }
@@ -206,12 +207,8 @@ namespace GazeLSL
             {
                 ReadExtendedEyeTracking();
             }
-            else
-            {
-                ReadStandardEyeTracking();
-            }
 #else
-            ReadStandardEyeTracking();
+            return _currentFrame;
 #endif
 
             if (config != null && config.IncludeHitPoint && _currentFrame.CombinedValid)
@@ -237,22 +234,19 @@ namespace GazeLSL
         {
             if (_tracker == null || _trackerLocator == null || _worldCoordinateSystem == null)
             {
-                ReadStandardEyeTracking();
                 return;
             }
 
-            DateTime targetTime = DateTime.Now;
+            DateTimeOffset targetTime = DateTimeOffset.Now;
 
-            // EyeTracking package wants DateTimeOffset here.
             var reading = _tracker.TryGetReadingAtTimestamp(targetTime);
             if (reading == null)
             {
                 return;
             }
 
-            // Windows spatial APIs want PerceptionTimestamp here.
             PerceptionTimestamp perceptionTimestamp =
-                PerceptionTimestampHelper.FromHistoricalTargetTime(new DateTimeOffset(targetTime));
+                PerceptionTimestampHelper.FromHistoricalTargetTime(targetTime);
 
             SpatialLocation trackerLocation =
                 _trackerLocator.TryLocateAtTimestamp(perceptionTimestamp, _worldCoordinateSystem);
@@ -343,41 +337,6 @@ namespace GazeLSL
             ).normalized;
         }
 #endif
-
-        private void ReadStandardEyeTracking()
-        {
-            Camera camera = Camera.main;
-
-            if (camera != null)
-            {
-                _currentFrame.CombinedOrigin = camera.transform.position;
-                _currentFrame.CombinedDirection = camera.transform.forward;
-                _currentFrame.CombinedValid = true;
-            }
-
-            var centerEyeDevice =
-                UnityEngine.XR.InputDevices.GetDeviceAtXRNode(UnityEngine.XR.XRNode.CenterEye);
-
-            if (centerEyeDevice.isValid)
-            {
-                bool hasPosition = centerEyeDevice.TryGetFeatureValue(
-                    UnityEngine.XR.CommonUsages.centerEyePosition,
-                    out Vector3 position
-                );
-
-                bool hasRotation = centerEyeDevice.TryGetFeatureValue(
-                    UnityEngine.XR.CommonUsages.centerEyeRotation,
-                    out Quaternion rotation
-                );
-
-                if (hasPosition && hasRotation)
-                {
-                    _currentFrame.CombinedOrigin = position;
-                    _currentFrame.CombinedDirection = rotation * Vector3.forward;
-                    _currentFrame.CombinedValid = true;
-                }
-            }
-        }
 
         private void OnDestroy()
         {
