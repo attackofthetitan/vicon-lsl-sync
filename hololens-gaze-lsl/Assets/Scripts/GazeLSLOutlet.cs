@@ -1,7 +1,7 @@
 using UnityEngine;
 using LSL;
 using System;
-using System.Diagnostics;
+using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Threading;
 
 namespace GazeLSL
