@@ -10,11 +10,6 @@ namespace GazeLSL
         public string StreamType = "Gaze";
         public string SourceId = "hololens2_gaze";
 
-        [Header("UDP Fallback Settings")]
-        [Tooltip("IP address or hostname of the desktop running vicon-lsl-bridge")]
-        public string RelayHost = "192.168.1.100";
-        public int RelayPort = 16571;
-
         [Header("Eye Tracking Settings")]
         [Tooltip("Target frame rate for Extended Eye Tracking (30, 60, or 90)")]
         public uint TargetFrameRate = 90;
