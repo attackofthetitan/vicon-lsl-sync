@@ -91,7 +91,7 @@ namespace GazeLSL
 
         private void CreateOutlet()
         {
-            uint nominalRate = Math.Max(1, config.TargetFrameRate);
+            uint nominalRate = Math.Max(1u, config.TargetFrameRate);
 
             info = new StreamInfo(
                 config.StreamName,
