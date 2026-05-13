@@ -136,9 +136,10 @@ namespace GazeLSL
 
                 ConfigureFrameRate(newTracker);
 
+                EyeGazeTracker oldTracker;
                 lock (trackerLock)
                 {
-                    CloseTracker(tracker);
+                    oldTracker = tracker;
 
                     tracker = newTracker;
                     trackerLocator = newTrackerLocator;
@@ -148,6 +149,11 @@ namespace GazeLSL
                     AreIndividualEyeGazesSupported = newTracker.AreLeftAndRightGazesSupported;
                     IsVergenceSupported = newTracker.IsVergenceDistanceSupported;
                     IsTrackingAvailable = true;
+                }
+
+                if (oldTracker != newTracker)
+                {
+                    CloseTracker(oldTracker);
                 }
 
                 Debug.Log(
@@ -396,10 +402,14 @@ namespace GazeLSL
         private void SetTrackingUnavailable()
         {
 #if ENABLE_WINMD_SUPPORT
+            EyeGazeTracker trackerToClose;
             lock (trackerLock)
             {
+                trackerToClose = tracker;
                 ClearTrackerStateLocked();
             }
+
+            CloseTracker(trackerToClose);
 #endif
 
             AreIndividualEyeGazesSupported = false;
