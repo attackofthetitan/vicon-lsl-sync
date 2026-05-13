@@ -109,7 +109,7 @@ namespace GazeLSL
 
                 if (isDestroying)
                 {
-                    newTracker.Close();
+                    CloseTracker(newTracker);
                     return;
                 }
 
@@ -119,6 +119,7 @@ namespace GazeLSL
 
                 if (newTrackerLocator == null)
                 {
+                    CloseTracker(newTracker);
                     SetTrackingUnavailable();
                     Debug.LogError("Failed to create SpatialLocator for eye tracker.");
                     return;
@@ -127,6 +128,7 @@ namespace GazeLSL
                 SpatialCoordinateSystem newWorldCoordinateSystem = CreateWorldCoordinateSystem();
                 if (newWorldCoordinateSystem == null)
                 {
+                    CloseTracker(newTracker);
                     SetTrackingUnavailable();
                     Debug.LogError("Failed to create world coordinate system.");
                     return;
@@ -136,6 +138,8 @@ namespace GazeLSL
 
                 lock (trackerLock)
                 {
+                    CloseTracker(tracker);
+
                     tracker = newTracker;
                     trackerLocator = newTrackerLocator;
                     worldCoordinateSystem = newWorldCoordinateSystem;
@@ -154,6 +158,7 @@ namespace GazeLSL
             }
             catch (Exception e)
             {
+                CloseTracker(newTracker);
                 SetTrackingUnavailable();
                 Debug.LogError($"Failed to open eye tracker - {e.Message}");
             }
@@ -267,9 +272,25 @@ namespace GazeLSL
                     return;
                 }
 
-                int selectedIndex = SelectFrameRateIndex(supportedRates, requestedFrameRate);
-                var selectedRate = supportedRates[selectedIndex];
+                int selectedIndex = 0;
+                for (int i = 1; i < supportedRates.Count; i++)
+                {
+                    uint current = supportedRates[i].FramesPerSecond;
+                    uint selected = supportedRates[selectedIndex].FramesPerSecond;
 
+                    bool currentIsBetterAtOrBelowRequest = current <= requestedFrameRate &&
+                        (selected > requestedFrameRate || current > selected);
+
+                    bool neitherIsAtOrBelowRequestButCurrentIsLower = current < selected &&
+                        selected > requestedFrameRate;
+
+                    if (currentIsBetterAtOrBelowRequest || neitherIsAtOrBelowRequestButCurrentIsLower)
+                    {
+                        selectedIndex = i;
+                    }
+                }
+
+                var selectedRate = supportedRates[selectedIndex];
                 currentTracker.SetTargetFrameRate(selectedRate);
 
                 Debug.Log($"Eye tracker frame rate set to {selectedRate.FramesPerSecond} Hz");
@@ -278,32 +299,6 @@ namespace GazeLSL
             {
                 Debug.LogWarning($"Could not set eye tracker frame rate - {e.Message}");
             }
-        }
-
-        private static int SelectFrameRateIndex(
-            System.Collections.Generic.IReadOnlyList<EyeGazeTrackerFrameRate> supportedRates,
-            uint requestedFrameRate)
-        {
-            int bestAtOrBelow = -1;
-            int lowest = 0;
-
-            for (int i = 0; i < supportedRates.Count; i++)
-            {
-                uint framesPerSecond = supportedRates[i].FramesPerSecond;
-
-                if (framesPerSecond < supportedRates[lowest].FramesPerSecond)
-                {
-                    lowest = i;
-                }
-
-                if (framesPerSecond <= requestedFrameRate &&
-                    (bestAtOrBelow < 0 || framesPerSecond > supportedRates[bestAtOrBelow].FramesPerSecond))
-                {
-                    bestAtOrBelow = i;
-                }
-            }
-
-            return bestAtOrBelow >= 0 ? bestAtOrBelow : lowest;
         }
 
         private void MarkReadingConsumed(EyeGazeTracker sourceTracker, DateTime readingTimestamp)
