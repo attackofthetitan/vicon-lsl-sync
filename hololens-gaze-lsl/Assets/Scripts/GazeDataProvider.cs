@@ -65,7 +65,7 @@ namespace GazeLSL
         private EyeGazeTracker tracker;
         private SpatialLocator trackerLocator;
         private SpatialCoordinateSystem worldCoordinateSystem;
-        private DateTime? lastConsumedReadingTimestamp;
+        private DateTime lastConsumedReadingTimestamp;
 #endif
 
         private bool isDestroying;
@@ -144,7 +144,10 @@ namespace GazeLSL
                     tracker = newTracker;
                     trackerLocator = newTrackerLocator;
                     worldCoordinateSystem = newWorldCoordinateSystem;
-                    lastConsumedReadingTimestamp = null;
+
+                    // Start from "now" so the outlet does not drain old buffered readings
+                    // in a burst when tracking first becomes available.
+                    lastConsumedReadingTimestamp = DateTime.Now;
 
                     AreIndividualEyeGazesSupported = newTracker.AreLeftAndRightGazesSupported;
                     IsVergenceSupported = newTracker.IsVergenceDistanceSupported;
@@ -198,7 +201,7 @@ namespace GazeLSL
             EyeGazeTracker currentTracker;
             SpatialLocator currentTrackerLocator;
             SpatialCoordinateSystem currentWorldCoordinateSystem;
-            DateTime? previousTimestamp;
+            DateTime previousTimestamp;
             bool includeIndividualEyes;
             bool includeVergence;
 
@@ -217,10 +220,7 @@ namespace GazeLSL
                 return false;
             }
 
-            EyeGazeTrackerReading reading = previousTimestamp.HasValue
-                ? currentTracker.TryGetReadingAfterTimestamp(previousTimestamp.Value)
-                : currentTracker.TryGetReadingAtTimestamp(DateTime.Now);
-
+            EyeGazeTrackerReading reading = currentTracker.TryGetReadingAfterTimestamp(previousTimestamp);
             if (reading == null)
             {
                 return false;
@@ -245,7 +245,9 @@ namespace GazeLSL
 
             PopulateGazeSample(reading, trackerLocation, includeIndividualEyes, includeVergence, ref sample);
 
-            return sample.CombinedValid || sample.LeftEyeValid || sample.RightEyeValid || sample.VergenceValid;
+            // Do not publish metadata-only readings. Vergence can be valid while all gaze rays
+            // are unavailable, which leaves origin/direction channels at zero.
+            return sample.CombinedValid || sample.LeftEyeValid || sample.RightEyeValid;
 #else
             return false;
 #endif
@@ -316,7 +318,7 @@ namespace GazeLSL
                     return;
                 }
 
-                if (!lastConsumedReadingTimestamp.HasValue || readingTimestamp > lastConsumedReadingTimestamp.Value)
+                if (readingTimestamp > lastConsumedReadingTimestamp)
                 {
                     lastConsumedReadingTimestamp = readingTimestamp;
                 }
@@ -332,7 +334,8 @@ namespace GazeLSL
         {
             if (reading.TryGetCombinedEyeGazeInTrackerSpace(
                     out System.Numerics.Vector3 combinedOrigin,
-                    out System.Numerics.Vector3 combinedDirection))
+                    out System.Numerics.Vector3 combinedDirection) &&
+                IsUsableRay(combinedOrigin, combinedDirection))
             {
                 WriteRay(combinedOrigin, combinedDirection, trackerLocation,
                     out sample.CombinedOriginX, out sample.CombinedOriginY, out sample.CombinedOriginZ,
@@ -344,7 +347,8 @@ namespace GazeLSL
             if (includeIndividualEyes &&
                 reading.TryGetLeftEyeGazeInTrackerSpace(
                     out System.Numerics.Vector3 leftOrigin,
-                    out System.Numerics.Vector3 leftDirection))
+                    out System.Numerics.Vector3 leftDirection) &&
+                IsUsableRay(leftOrigin, leftDirection))
             {
                 WriteRay(leftOrigin, leftDirection, trackerLocation,
                     out sample.LeftEyeOriginX, out sample.LeftEyeOriginY, out sample.LeftEyeOriginZ,
@@ -356,7 +360,8 @@ namespace GazeLSL
             if (includeIndividualEyes &&
                 reading.TryGetRightEyeGazeInTrackerSpace(
                     out System.Numerics.Vector3 rightOrigin,
-                    out System.Numerics.Vector3 rightDirection))
+                    out System.Numerics.Vector3 rightDirection) &&
+                IsUsableRay(rightOrigin, rightDirection))
             {
                 WriteRay(rightOrigin, rightDirection, trackerLocation,
                     out sample.RightEyeOriginX, out sample.RightEyeOriginY, out sample.RightEyeOriginZ,
@@ -370,6 +375,25 @@ namespace GazeLSL
                 sample.VergenceDistance = vergenceDistance;
                 sample.VergenceValid = true;
             }
+        }
+
+        private static bool IsUsableRay(
+            System.Numerics.Vector3 origin,
+            System.Numerics.Vector3 direction)
+        {
+            return IsFinite(origin.X) && IsFinite(origin.Y) && IsFinite(origin.Z) &&
+                   IsFinite(direction.X) && IsFinite(direction.Y) && IsFinite(direction.Z) &&
+                   SquaredMagnitude(direction) > 0.000001f;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static float SquaredMagnitude(System.Numerics.Vector3 value)
+        {
+            return value.X * value.X + value.Y * value.Y + value.Z * value.Z;
         }
 
         private static void WriteRay(
@@ -423,7 +447,7 @@ namespace GazeLSL
             tracker = null;
             trackerLocator = null;
             worldCoordinateSystem = null;
-            lastConsumedReadingTimestamp = null;
+            lastConsumedReadingTimestamp = DateTime.Now;
             AreIndividualEyeGazesSupported = false;
             IsVergenceSupported = false;
             IsTrackingAvailable = false;
