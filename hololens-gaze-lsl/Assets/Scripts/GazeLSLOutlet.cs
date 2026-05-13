@@ -11,7 +11,8 @@ namespace GazeLSL
 
     The eye tracker owns acquisition, but this outlet caps publication to the
     configured nominal rate so buffered or higher-rate tracker states do not
-    over-publish into LSL.
+    over-publish into LSL. LSL sample timestamps are backdated from the push time
+    to the eye tracker reading time.
     */
     public sealed class GazeLSLOutlet : MonoBehaviour
     {
@@ -128,6 +129,7 @@ namespace GazeLSL
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
             acquisition.append_child_value("acquisition_mode", "latest_tracker_reading_rate_limited");
+            acquisition.append_child_value("timestamp", "lsl_clock_backdated_to_tracker_reading_time");
         }
 
         private void StartWorker()
@@ -202,8 +204,15 @@ namespace GazeLSL
                 return;
             }
 
-            currentOutlet.push_sample(sampleBuffer, LSL.LSL.local_clock());
+            currentOutlet.push_sample(sampleBuffer, EstimateLslTimestamp(gazeSample));
             Interlocked.Increment(ref pushedSampleCount);
+        }
+
+        private static double EstimateLslTimestamp(GazeDataProvider.GazeSample gazeSample)
+        {
+            double nowLsl = LSL.LSL.local_clock();
+            double ageSeconds = Math.Max(0.0, (DateTime.Now - gazeSample.TrackerTimestamp).TotalSeconds);
+            return nowLsl - ageSeconds;
         }
 
         private static void WriteSampleBuffer(GazeDataProvider.GazeSample frame, double[] sample)
