@@ -1,57 +1,74 @@
-using UnityEngine;
-using LSL;
 using System;
-using Stopwatch = System.Diagnostics.Stopwatch;
 using System.Threading;
+using LSL;
+using UnityEngine;
 
 namespace GazeLSL
 {
     /*
-    Pushes HoloLens 2 eye gaze data to an LSL outlet.
+    Publishes HoloLens 2 Extended Eye Tracking readings to LSL.
 
-    Channels:
-    - combined gaze
-    - per-eye gaze
-    - vergence
-
-    Sampling runs on a dedicated worker thread instead of Unity's player loop
-    so the eye tracker can operate closer to its native acquisition rate.
+    The eye tracker owns the acquisition cadence. This component drains unread
+    tracker readings and pushes exactly one LSL sample per available reading.
     */
-    public class GazeLSLOutlet : MonoBehaviour
+    public sealed class GazeLSLOutlet : MonoBehaviour
     {
+        private const int ChannelCount = 22;
+        private const int IdleWaitMilliseconds = 1;
+        private const int StopTimeoutMilliseconds = 500;
+
+        private static readonly string[] ChannelLabels =
+        {
+            "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
+            "CombinedDirectionX", "CombinedDirectionY", "CombinedDirectionZ",
+            "CombinedValid",
+            "LeftEyeOriginX", "LeftEyeOriginY", "LeftEyeOriginZ",
+            "LeftEyeDirectionX", "LeftEyeDirectionY", "LeftEyeDirectionZ",
+            "LeftEyeValid",
+            "RightEyeOriginX", "RightEyeOriginY", "RightEyeOriginZ",
+            "RightEyeDirectionX", "RightEyeDirectionY", "RightEyeDirectionZ",
+            "RightEyeValid",
+            "VergenceDistance"
+        };
+
+        private static readonly string[] ChannelUnits =
+        {
+            "meters", "meters", "meters",
+            "normalized", "normalized", "normalized",
+            "bool",
+            "meters", "meters", "meters",
+            "normalized", "normalized", "normalized",
+            "bool",
+            "meters", "meters", "meters",
+            "normalized", "normalized", "normalized",
+            "bool",
+            "meters"
+        };
+
         [SerializeField] private GazeLSLConfig config;
         [SerializeField] private GazeDataProvider gazeProvider;
 
-        private StreamOutlet outlet;
         private StreamInfo info;
-        private double[] sample;
-
-        private int pushedSampleCount = 0;
-
-        private Thread samplingThread;
-        private volatile bool samplingThreadRunning;
-
-        /*
-        0-2 combined origin
-        3-5 combined direction
-        6 combined valid
-
-        7-9 left origin
-        10-12 left direction
-        13 left valid
-
-        14-16 right origin
-        17-19 right direction
-        20 right valid
-
-        21 vergence distance
-        */
-        private const int ChannelCount = 22;
+        private StreamOutlet outlet;
+        private Thread workerThread;
+        private ManualResetEventSlim stopSignal;
+        private volatile bool workerRunning;
+        private int pushedSampleCount;
 
         private void Start()
         {
-            Debug.Log("GazeLSLOutlet Start() reached");
+            if (!ValidateReferences())
+            {
+                enabled = false;
+                return;
+            }
 
+            CreateOutlet();
+            StartWorker();
+        }
+
+        private bool ValidateReferences()
+        {
             if (gazeProvider == null)
             {
                 gazeProvider = GetComponent<GazeDataProvider>();
@@ -59,114 +76,105 @@ namespace GazeLSL
 
             if (config == null)
             {
-                Debug.LogError("GazeLSLOutlet - config not assigned");
-                enabled = false;
-                return;
+                Debug.LogError("GazeLSLOutlet requires a GazeLSLConfig asset.");
+                return false;
             }
 
-            Debug.Log($"GazeLSLOutlet config loaded. StreamName={config.StreamName}");
+            if (gazeProvider == null)
+            {
+                Debug.LogError("GazeLSLOutlet requires a GazeDataProvider on the same GameObject or assigned in the inspector.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void CreateOutlet()
+        {
+            uint nominalRate = Math.Max(1, config.TargetFrameRate);
 
             info = new StreamInfo(
                 config.StreamName,
                 config.StreamType,
                 ChannelCount,
-                config.TargetFrameRate,
+                nominalRate,
                 channel_format_t.cf_double64,
                 config.SourceId
             );
 
-            XMLElement channels = info.desc().append_child("channels");
+            AppendChannelMetadata(info.desc().append_child("channels"));
+            AppendAcquisitionMetadata(info.desc().append_child("acquisition"), nominalRate);
 
-            AppendChannel(channels, "CombinedOriginX", "meters");
-            AppendChannel(channels, "CombinedOriginY", "meters");
-            AppendChannel(channels, "CombinedOriginZ", "meters");
-            AppendChannel(channels, "CombinedDirectionX", "normalized");
-            AppendChannel(channels, "CombinedDirectionY", "normalized");
-            AppendChannel(channels, "CombinedDirectionZ", "normalized");
-            AppendChannel(channels, "CombinedValid", "bool");
-
-            AppendChannel(channels, "LeftEyeOriginX", "meters");
-            AppendChannel(channels, "LeftEyeOriginY", "meters");
-            AppendChannel(channels, "LeftEyeOriginZ", "meters");
-            AppendChannel(channels, "LeftEyeDirectionX", "normalized");
-            AppendChannel(channels, "LeftEyeDirectionY", "normalized");
-            AppendChannel(channels, "LeftEyeDirectionZ", "normalized");
-            AppendChannel(channels, "LeftEyeValid", "bool");
-
-            AppendChannel(channels, "RightEyeOriginX", "meters");
-            AppendChannel(channels, "RightEyeOriginY", "meters");
-            AppendChannel(channels, "RightEyeOriginZ", "meters");
-            AppendChannel(channels, "RightEyeDirectionX", "normalized");
-            AppendChannel(channels, "RightEyeDirectionY", "normalized");
-            AppendChannel(channels, "RightEyeDirectionZ", "normalized");
-            AppendChannel(channels, "RightEyeValid", "bool");
-
-            AppendChannel(channels, "VergenceDistance", "meters");
-
-            XMLElement meta = info.desc().append_child("acquisition");
-            meta.append_child_value("device", "HoloLens2");
-            meta.append_child_value("sdk", "ExtendedEyeTracking");
-            meta.append_child_value("nominal_srate", config.TargetFrameRate.ToString());
-
-            sample = new double[ChannelCount];
             outlet = new StreamOutlet(info);
 
-            Debug.Log($"LSL outlet created - {config.StreamName}, {ChannelCount} channels");
-
-            StartSamplingThread();
+            Debug.Log($"LSL outlet created: {config.StreamName}, {ChannelCount} channels, nominal {nominalRate} Hz");
         }
 
-        private void StartSamplingThread()
+        private static void AppendChannelMetadata(XMLElement channels)
         {
-            samplingThreadRunning = true;
-
-            samplingThread = new Thread(SamplingThreadLoop);
-            samplingThread.IsBackground = true;
-            samplingThread.Priority = System.Threading.ThreadPriority.AboveNormal;
-            samplingThread.Start();
-        }
-
-        private void SamplingThreadLoop()
-        {
-            double intervalMilliseconds = 1000.0 / Math.Max(1, config.TargetFrameRate);
-
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            double nextTimeMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-
-            while (samplingThreadRunning)
+            for (int i = 0; i < ChannelCount; i++)
             {
-                double nowMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                XMLElement channel = channels.append_child("channel");
+                channel.append_child_value("label", ChannelLabels[i]);
+                channel.append_child_value("unit", ChannelUnits[i]);
+            }
+        }
 
-                if (nowMilliseconds >= nextTimeMilliseconds)
+        private static void AppendAcquisitionMetadata(XMLElement acquisition, uint nominalRate)
+        {
+            acquisition.append_child_value("device", "HoloLens2");
+            acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
+            acquisition.append_child_value("nominal_srate", nominalRate.ToString());
+            acquisition.append_child_value("acquisition_mode", "tracker_buffer_drain");
+        }
+
+        private void StartWorker()
+        {
+            stopSignal = new ManualResetEventSlim(false);
+            workerRunning = true;
+
+            workerThread = new Thread(WorkerLoop)
+            {
+                IsBackground = true,
+                Priority = System.Threading.ThreadPriority.AboveNormal,
+                Name = "HoloLens Gaze LSL"
+            };
+
+            workerThread.Start();
+        }
+
+        private void WorkerLoop()
+        {
+            double[] sampleBuffer = new double[ChannelCount];
+
+            while (workerRunning && !stopSignal.IsSet)
+            {
+                bool pushedAny = false;
+
+                while (workerRunning && gazeProvider.TryGetNextSample(out GazeDataProvider.GazeSample gazeSample))
                 {
-                    PushOneSampleThreaded();
+                    WriteSampleBuffer(gazeSample, sampleBuffer);
 
-                    nextTimeMilliseconds += intervalMilliseconds;
-
-                    if (nowMilliseconds - nextTimeMilliseconds > intervalMilliseconds)
+                    StreamOutlet currentOutlet = outlet;
+                    if (currentOutlet == null)
                     {
-                        nextTimeMilliseconds = nowMilliseconds + intervalMilliseconds;
+                        return;
                     }
+
+                    currentOutlet.push_sample(sampleBuffer, LSL.LSL.local_clock());
+                    Interlocked.Increment(ref pushedSampleCount);
+                    pushedAny = true;
                 }
-                else
+
+                if (!pushedAny)
                 {
-                    Thread.Sleep(0);
+                    stopSignal.Wait(IdleWaitMilliseconds);
                 }
             }
         }
 
-        private void PushOneSampleThreaded()
+        private static void WriteSampleBuffer(GazeDataProvider.GazeSample frame, double[] sample)
         {
-            if (outlet == null || gazeProvider == null)
-            {
-                return;
-            }
-
-            if (!gazeProvider.TryGetCurrentSample(out GazeDataProvider.GazeSample frame))
-            {
-                return;
-            }
-
             sample[0] = frame.CombinedOriginX;
             sample[1] = frame.CombinedOriginY;
             sample[2] = frame.CombinedOriginZ;
@@ -192,40 +200,30 @@ namespace GazeLSL
             sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
 
             sample[21] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
-
-            outlet.push_sample(sample, LSL.LSL.local_clock());
-
-            pushedSampleCount++;
-        }
-
-        private void AppendChannel(XMLElement parent, string label, string unit)
-        {
-            XMLElement ch = parent.append_child("channel");
-            ch.append_child_value("label", label);
-            ch.append_child_value("unit", unit);
         }
 
         private void OnDestroy()
         {
-            samplingThreadRunning = false;
+            workerRunning = false;
+            stopSignal?.Set();
 
-            if (samplingThread != null)
+            if (workerThread != null)
             {
-                try
+                if (!workerThread.Join(StopTimeoutMilliseconds))
                 {
-                    samplingThread.Join(100);
-                }
-                catch
-                {
+                    Debug.LogWarning("Gaze LSL worker did not stop cleanly before timeout.");
                 }
 
-                samplingThread = null;
+                workerThread = null;
             }
+
+            stopSignal?.Dispose();
+            stopSignal = null;
 
             outlet = null;
             info = null;
 
-            Debug.Log("LSL outlet closed");
+            Debug.Log($"LSL outlet closed after pushing {pushedSampleCount} gaze samples");
         }
     }
 }
