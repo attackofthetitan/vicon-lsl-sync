@@ -11,11 +11,11 @@ using Windows.Perception.Spatial.Preview;
 namespace GazeLSL
 {
     /*
-    Reads HoloLens 2 Extended Eye Tracking data and converts each tracker reading
+    Reads HoloLens 2 Extended Eye Tracking data and converts fresh tracker readings
     into Unity-compatible world-space gaze samples.
 
-    The Microsoft.MixedReality.EyeTracking API is buffer-based: the tracker publishes
-    readings internally, and the app drains unread readings with TryGetReadingAfterTimestamp.
+    The Microsoft.MixedReality.EyeTracking API is buffer-based. This provider samples
+    the latest tracker state and publishes it only when its tracker timestamp advances.
     */
     public sealed class GazeDataProvider : MonoBehaviour
     {
@@ -145,8 +145,8 @@ namespace GazeLSL
                     trackerLocator = newTrackerLocator;
                     worldCoordinateSystem = newWorldCoordinateSystem;
 
-                    // Start from "now" so the outlet does not drain old buffered readings
-                    // in a burst when tracking first becomes available.
+                    // Start from "now" so the outlet does not publish old buffered readings
+                    // when tracking first becomes available.
                     lastConsumedReadingTimestamp = DateTime.Now;
 
                     AreIndividualEyeGazesSupported = newTracker.AreLeftAndRightGazesSupported;
@@ -220,8 +220,9 @@ namespace GazeLSL
                 return false;
             }
 
-            EyeGazeTrackerReading reading = currentTracker.TryGetReadingAfterTimestamp(previousTimestamp);
-            if (reading == null)
+            DateTime queryTimestamp = DateTime.Now;
+            EyeGazeTrackerReading reading = currentTracker.TryGetReadingAtTimestamp(queryTimestamp);
+            if (reading == null || reading.Timestamp <= previousTimestamp)
             {
                 return false;
             }
