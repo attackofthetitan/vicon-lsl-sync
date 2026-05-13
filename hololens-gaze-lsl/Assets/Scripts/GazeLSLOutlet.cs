@@ -1,23 +1,17 @@
 using System;
-using System.Threading;
 using LSL;
 using UnityEngine;
-using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace GazeLSL
 {
     /*
-    Publishes HoloLens 2 Extended Eye Tracking readings to LSL.
-
-    The eye tracker owns acquisition, but this outlet caps publication to the
-    configured nominal rate so buffered or higher-rate tracker states do not
-    over-publish into LSL. LSL sample timestamps are backdated from the push time
-    to the eye tracker reading time.
+    Publishes HoloLens 2 Extended Eye Tracking readings to LSL from Unity's
+    frame loop. Application.targetFrameRate is set from the config, and Update()
+    attempts to push one fresh tracker reading per frame.
     */
     public sealed class GazeLSLOutlet : MonoBehaviour
     {
         private const int ChannelCount = 22;
-        private const int StopTimeoutMilliseconds = 500;
 
         private static readonly string[] ChannelLabels =
         {
@@ -52,9 +46,7 @@ namespace GazeLSL
 
         private StreamInfo info;
         private StreamOutlet outlet;
-        private Thread workerThread;
-        private ManualResetEventSlim stopSignal;
-        private volatile bool workerRunning;
+        private double[] sampleBuffer;
         private int pushedSampleCount;
         private uint nominalRate;
 
@@ -67,9 +59,27 @@ namespace GazeLSL
             }
 
             nominalRate = Math.Max(1u, config.TargetFrameRate);
+            ConfigureFrameLoop(nominalRate);
 
+            sampleBuffer = new double[ChannelCount];
             CreateOutlet();
-            StartWorker();
+        }
+
+        private void Update()
+        {
+            if (outlet == null || sampleBuffer == null)
+            {
+                return;
+            }
+
+            if (!gazeProvider.TryGetNextSample(out GazeDataProvider.GazeSample gazeSample))
+            {
+                return;
+            }
+
+            WriteSampleBuffer(gazeSample, sampleBuffer);
+            outlet.push_sample(sampleBuffer, EstimateLslTimestamp(gazeSample));
+            pushedSampleCount++;
         }
 
         private bool ValidateReferences()
@@ -92,6 +102,13 @@ namespace GazeLSL
             }
 
             return true;
+        }
+
+        private static void ConfigureFrameLoop(uint rate)
+        {
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = (int)rate;
+            Debug.Log($"Unity frame loop target set to {rate} FPS");
         }
 
         private void CreateOutlet()
@@ -128,84 +145,8 @@ namespace GazeLSL
             acquisition.append_child_value("device", "HoloLens2");
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
-            acquisition.append_child_value("acquisition_mode", "latest_tracker_reading_rate_limited");
+            acquisition.append_child_value("acquisition_mode", "unity_update_loop");
             acquisition.append_child_value("timestamp", "lsl_clock_backdated_to_tracker_reading_time");
-        }
-
-        private void StartWorker()
-        {
-            stopSignal = new ManualResetEventSlim(false);
-            workerRunning = true;
-
-            workerThread = new Thread(WorkerLoop)
-            {
-                IsBackground = true,
-                Priority = System.Threading.ThreadPriority.AboveNormal,
-                Name = "HoloLens Gaze LSL"
-            };
-
-            workerThread.Start();
-        }
-
-        private void WorkerLoop()
-        {
-            double[] sampleBuffer = new double[ChannelCount];
-            double sampleIntervalMilliseconds = 1000.0 / nominalRate;
-
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            double nextSampleMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-
-            while (workerRunning && !stopSignal.IsSet)
-            {
-                double nowMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-
-                if (nowMilliseconds < nextSampleMilliseconds)
-                {
-                    WaitUntilNextSample(nextSampleMilliseconds - nowMilliseconds);
-                    continue;
-                }
-
-                TryPushOneSample(sampleBuffer);
-
-                nextSampleMilliseconds += sampleIntervalMilliseconds;
-
-                // If the app was paused or delayed, skip missed slots instead of
-                // publishing a compressed catch-up burst.
-                if (nowMilliseconds - nextSampleMilliseconds > sampleIntervalMilliseconds)
-                {
-                    nextSampleMilliseconds = nowMilliseconds + sampleIntervalMilliseconds;
-                }
-            }
-        }
-
-        private void WaitUntilNextSample(double remainingMilliseconds)
-        {
-            if (remainingMilliseconds > 1.0)
-            {
-                stopSignal.Wait(TimeSpan.FromMilliseconds(remainingMilliseconds - 0.25));
-                return;
-            }
-
-            Thread.Yield();
-        }
-
-        private void TryPushOneSample(double[] sampleBuffer)
-        {
-            if (!gazeProvider.TryGetNextSample(out GazeDataProvider.GazeSample gazeSample))
-            {
-                return;
-            }
-
-            WriteSampleBuffer(gazeSample, sampleBuffer);
-
-            StreamOutlet currentOutlet = outlet;
-            if (currentOutlet == null)
-            {
-                return;
-            }
-
-            currentOutlet.push_sample(sampleBuffer, EstimateLslTimestamp(gazeSample));
-            Interlocked.Increment(ref pushedSampleCount);
         }
 
         private static double EstimateLslTimestamp(GazeDataProvider.GazeSample gazeSample)
@@ -246,24 +187,9 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
-            workerRunning = false;
-            stopSignal?.Set();
-
-            if (workerThread != null)
-            {
-                if (!workerThread.Join(StopTimeoutMilliseconds))
-                {
-                    Debug.LogWarning("Gaze LSL worker did not stop cleanly before timeout.");
-                }
-
-                workerThread = null;
-            }
-
-            stopSignal?.Dispose();
-            stopSignal = null;
-
             outlet = null;
             info = null;
+            sampleBuffer = null;
 
             Debug.Log($"LSL outlet closed after pushing {pushedSampleCount} gaze samples");
         }
