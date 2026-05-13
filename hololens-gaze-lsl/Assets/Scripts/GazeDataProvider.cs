@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using UnityEngine;
 
 #if ENABLE_WINMD_SUPPORT
@@ -281,28 +282,42 @@ namespace GazeLSL
                     return;
                 }
 
-                int selectedIndex = 0;
-                for (int i = 1; i < supportedRates.Count; i++)
+                int highestIndex = 0;
+                int bestAtOrBelowRequestIndex = -1;
+
+                StringBuilder supportedRatesLog = new StringBuilder();
+                supportedRatesLog.Append("Supported eye tracker frame rates:");
+
+                for (int i = 0; i < supportedRates.Count; i++)
                 {
-                    uint current = supportedRates[i].FramesPerSecond;
-                    uint selected = supportedRates[selectedIndex].FramesPerSecond;
+                    uint framesPerSecond = supportedRates[i].FramesPerSecond;
+                    supportedRatesLog.Append(' ').Append(framesPerSecond).Append("Hz");
 
-                    bool currentIsBetterAtOrBelowRequest = current <= requestedFrameRate &&
-                        (selected > requestedFrameRate || current > selected);
-
-                    bool neitherIsAtOrBelowRequestButCurrentIsLower = current < selected &&
-                        selected > requestedFrameRate;
-
-                    if (currentIsBetterAtOrBelowRequest || neitherIsAtOrBelowRequestButCurrentIsLower)
+                    if (framesPerSecond > supportedRates[highestIndex].FramesPerSecond)
                     {
-                        selectedIndex = i;
+                        highestIndex = i;
+                    }
+
+                    if (framesPerSecond <= requestedFrameRate &&
+                        (bestAtOrBelowRequestIndex < 0 ||
+                         framesPerSecond > supportedRates[bestAtOrBelowRequestIndex].FramesPerSecond))
+                    {
+                        bestAtOrBelowRequestIndex = i;
                     }
                 }
+
+                int selectedIndex = bestAtOrBelowRequestIndex >= 0
+                    ? bestAtOrBelowRequestIndex
+                    : highestIndex;
 
                 var selectedRate = supportedRates[selectedIndex];
                 currentTracker.SetTargetFrameRate(selectedRate);
 
-                Debug.Log($"Eye tracker frame rate set to {selectedRate.FramesPerSecond} Hz");
+                Debug.Log(supportedRatesLog.ToString());
+                Debug.Log(
+                    $"Requested eye tracker frame rate: {requestedFrameRate} Hz; " +
+                    $"selected: {selectedRate.FramesPerSecond} Hz"
+                );
             }
             catch (Exception e)
             {
