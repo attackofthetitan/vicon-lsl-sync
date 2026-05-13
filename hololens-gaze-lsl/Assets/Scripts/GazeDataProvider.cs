@@ -12,11 +12,12 @@ using Windows.Perception.Spatial.Preview;
 namespace GazeLSL
 {
     /*
-    Reads HoloLens 2 Extended Eye Tracking data and converts fresh tracker readings
+    Reads HoloLens 2 Extended Eye Tracking data and converts tracker readings
     into Unity-compatible world-space gaze samples.
 
-    The Microsoft.MixedReality.EyeTracking API is buffer-based. This provider samples
-    the latest tracker state and publishes it only when its tracker timestamp advances.
+    The Microsoft.MixedReality.EyeTracking API is buffer-based. This provider
+    returns each acquired tracker reading. Missing or invalid gaze rays are encoded
+    as NaN values with their valid flag set to 0 by the outlet.
     */
     public sealed class GazeDataProvider : MonoBehaviour
     {
@@ -146,8 +147,7 @@ namespace GazeLSL
                     trackerLocator = newTrackerLocator;
                     worldCoordinateSystem = newWorldCoordinateSystem;
 
-                    // Start from "now" so the outlet does not publish old buffered readings
-                    // when tracking first becomes available.
+                    // Start from now so old buffered readings are not published when tracking starts.
                     lastConsumedReadingTimestamp = DateTime.Now;
 
                     AreIndividualEyeGazesSupported = newTracker.AreLeftAndRightGazesSupported;
@@ -221,14 +221,15 @@ namespace GazeLSL
                 return false;
             }
 
-            DateTime queryTimestamp = DateTime.Now;
-            EyeGazeTrackerReading reading = currentTracker.TryGetReadingAtTimestamp(queryTimestamp);
-            if (reading == null || reading.Timestamp <= previousTimestamp)
+            EyeGazeTrackerReading reading = currentTracker.TryGetReadingAfterTimestamp(previousTimestamp);
+            if (reading == null)
             {
                 return false;
             }
 
             MarkReadingConsumed(currentTracker, reading.Timestamp);
+
+            sample = CreateEmptySample(reading);
 
             PerceptionTimestamp perceptionTimestamp =
                 PerceptionTimestampHelper.FromHistoricalTargetTime(new DateTimeOffset(reading.Timestamp));
@@ -236,26 +237,55 @@ namespace GazeLSL
             SpatialLocation trackerLocation =
                 currentTrackerLocator.TryLocateAtTimestamp(perceptionTimestamp, currentWorldCoordinateSystem);
 
-            if (trackerLocation == null)
+            if (trackerLocation != null)
             {
-                return false;
+                PopulateGazeSample(reading, trackerLocation, includeIndividualEyes, includeVergence, ref sample);
             }
 
-            sample.TrackerTimestamp = reading.Timestamp;
-            sample.TrackerSystemRelativeTime = reading.SystemRelativeTime;
-            sample.CalibrationValid = reading.IsCalibrationValid;
-
-            PopulateGazeSample(reading, trackerLocation, includeIndividualEyes, includeVergence, ref sample);
-
-            // Do not publish metadata-only readings. Vergence can be valid while all gaze rays
-            // are unavailable, which leaves origin/direction channels at zero.
-            return sample.CombinedValid || sample.LeftEyeValid || sample.RightEyeValid;
+            // Return true for every acquired tracker reading. Invalid gaze is represented
+            // by NaNs and valid flags, not by dropping the whole sample.
+            return true;
 #else
             return false;
 #endif
         }
 
 #if ENABLE_WINMD_SUPPORT
+        private static GazeSample CreateEmptySample(EyeGazeTrackerReading reading)
+        {
+            GazeSample sample = new GazeSample
+            {
+                TrackerTimestamp = reading.Timestamp,
+                TrackerSystemRelativeTime = reading.SystemRelativeTime,
+                CalibrationValid = reading.IsCalibrationValid,
+
+                CombinedOriginX = double.NaN,
+                CombinedOriginY = double.NaN,
+                CombinedOriginZ = double.NaN,
+                CombinedDirectionX = double.NaN,
+                CombinedDirectionY = double.NaN,
+                CombinedDirectionZ = double.NaN,
+
+                LeftEyeOriginX = double.NaN,
+                LeftEyeOriginY = double.NaN,
+                LeftEyeOriginZ = double.NaN,
+                LeftEyeDirectionX = double.NaN,
+                LeftEyeDirectionY = double.NaN,
+                LeftEyeDirectionZ = double.NaN,
+
+                RightEyeOriginX = double.NaN,
+                RightEyeOriginY = double.NaN,
+                RightEyeOriginZ = double.NaN,
+                RightEyeDirectionX = double.NaN,
+                RightEyeDirectionY = double.NaN,
+                RightEyeDirectionZ = double.NaN,
+
+                VergenceDistance = double.NaN
+            };
+
+            return sample;
+        }
+
         private static SpatialCoordinateSystem CreateWorldCoordinateSystem()
         {
             SpatialLocator spatialLocator = SpatialLocator.GetDefault();
