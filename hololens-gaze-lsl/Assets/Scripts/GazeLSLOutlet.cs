@@ -15,6 +15,10 @@ namespace GazeLSL
         private const int ChannelCount = 22;
         private const int StopTimeoutMilliseconds = 500;
 
+        private static readonly DateTime UnixEpoch = new DateTime(
+            1970, 1, 1, 0, 0, 0, DateTimeKind.Utc
+        );
+
         private static readonly string[] ChannelLabels =
         {
             "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
@@ -125,7 +129,7 @@ namespace GazeLSL
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
             acquisition.append_child_value("acquisition_mode", "worker_thread_rate_limited");
-            acquisition.append_child_value("timestamp", "lsl_clock_backdated_to_tracker_reading_time");
+            acquisition.append_child_value("timestamp", "eye_tracker_acquisition_time_unix_seconds");
         }
 
         private void StartWorker()
@@ -198,15 +202,20 @@ namespace GazeLSL
                 return;
             }
 
-            currentOutlet.push_sample(sampleBuffer, EstimateLslTimestamp(gazeSample));
+            currentOutlet.push_sample(sampleBuffer, GetAcquisitionTimestampSeconds(gazeSample));
             Interlocked.Increment(ref pushedSampleCount);
         }
 
-        private static double EstimateLslTimestamp(GazeDataProvider.GazeSample gazeSample)
+        private static double GetAcquisitionTimestampSeconds(GazeDataProvider.GazeSample gazeSample)
         {
-            double nowLsl = LSL.LSL.local_clock();
-            double ageSeconds = Math.Max(0.0, (DateTime.Now - gazeSample.TrackerTimestamp).TotalSeconds);
-            return nowLsl - ageSeconds;
+            DateTime acquisitionTime = gazeSample.TrackerTimestamp;
+
+            if (acquisitionTime.Kind != DateTimeKind.Utc)
+            {
+                acquisitionTime = acquisitionTime.ToUniversalTime();
+            }
+
+            return (acquisitionTime - UnixEpoch).TotalSeconds;
         }
 
         private static void WriteSampleBuffer(GazeDataProvider.GazeSample frame, double[] sample)
