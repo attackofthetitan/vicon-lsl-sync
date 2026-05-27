@@ -240,6 +240,9 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     labrecorder_status_label_ = new QLabel("Disconnected");
     labrecorder_status_label_->setWordWrap(true);
     recording_layout->addWidget(labrecorder_status_label_);
+    readiness_label_ = new QLabel();
+    readiness_label_->setWordWrap(true);
+    recording_layout->addWidget(readiness_label_);
 
     right_layout->addWidget(recording_group);
     right_layout->addStretch();
@@ -272,7 +275,12 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     loadSettings();
     updateFilenamePreview();
     status_timer_.start();
+    status_stale_timer_ = new QTimer(this);
+    status_stale_timer_->setInterval(500);
+    connect(status_stale_timer_, &QTimer::timeout, this, &BridgeWindow::onStatusStaleCheck);
+    status_stale_timer_->start();
     updateRecordingButtons();
+    updateReadiness();
 }
 
 BridgeWindow::~BridgeWindow() {
@@ -360,12 +368,14 @@ void BridgeWindow::onConnectLabRecorder() {
         recording_requested_ = false;
         setLabRecorderStatus("Connected to LabRecorder RCS.");
         updateRecordingButtons();
+        updateReadiness();
         return;
     }
     labrecorder_connected_ = false;
     recording_requested_ = false;
     setLabRecorderStatus("LabRecorder connection failed: " + labrecorder_client_.lastError());
     updateRecordingButtons();
+    updateReadiness();
 }
 
 void BridgeWindow::onRefreshLabRecorder() {
@@ -385,6 +395,7 @@ void BridgeWindow::onStartRecording() {
             "Recording start requested.")) {
         recording_requested_ = true;
         updateRecordingButtons();
+        updateReadiness();
     }
 }
 
@@ -392,6 +403,7 @@ void BridgeWindow::onStopRecording() {
     if (sendLabRecorderCommand(labrecorder_client_.stopRecording(), "Recording stop requested.")) {
         recording_requested_ = false;
         updateRecordingButtons();
+        updateReadiness();
     }
 }
 
@@ -403,6 +415,24 @@ void BridgeWindow::updateFilenamePreview() {
         filename_preview_label_->setCursorPosition(0);
     }
     updateRecordingButtons();
+    updateReadiness();
+}
+
+void BridgeWindow::onStatusStaleCheck() {
+    if (!bridge_streaming_ || !have_previous_status_) {
+        return;
+    }
+
+    const qint64 now_ms = status_timer_.elapsed();
+    if (now_ms - previous_status_ms_ <= 3000 || bridge_status_stale_) {
+        return;
+    }
+
+    bridge_status_stale_ = true;
+    frame_rate_label_->setText("0.0 Hz");
+    gaze_rate_label_->setText("0.0 Hz");
+    status_label_->setText(status_label_->text() + " - stale status");
+    updateReadiness();
 }
 
 void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
@@ -425,6 +455,8 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
     }
 
     status_label_->setText(state_text);
+    bridge_streaming_ = bridge_state == BridgeState::Streaming;
+    bridge_status_stale_ = false;
     if (!gaze_enabled) {
         gaze_status_label_->setText("Disabled");
     } else if (gaze_listening) {
@@ -458,12 +490,19 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
     previous_frames_ = frames;
     previous_gaze_samples_ = gaze_samples;
     have_previous_status_ = true;
+    updateReadiness();
 }
 
 void BridgeWindow::onWorkerFinished() {
     start_button_->setEnabled(true);
     stop_button_->setEnabled(false);
     setInputsEnabled(true);
+    bridge_streaming_ = false;
+    bridge_status_stale_ = false;
+    have_previous_status_ = false;
+    frame_rate_label_->setText("0.0 Hz");
+    gaze_rate_label_->setText("0.0 Hz");
+    updateReadiness();
 
     worker_->deleteLater();
     worker_ = nullptr;
@@ -603,6 +642,7 @@ bool BridgeWindow::sendLabRecorderCommand(bool ok, const QString& success_messag
             labrecorder_connected_ = false;
             recording_requested_ = false;
             updateRecordingButtons();
+            updateReadiness();
         }
         setLabRecorderStatus("LabRecorder command failed: " + labrecorder_client_.lastError());
         return false;
@@ -624,4 +664,18 @@ void BridgeWindow::updateRecordingButtons() {
 
 bool BridgeWindow::isFilenameValid() const {
     return filenameValidationError().isEmpty();
+}
+
+void BridgeWindow::updateReadiness() {
+    if (!readiness_label_) {
+        return;
+    }
+
+    const QString bridge_text = bridge_streaming_
+        ? QString("Bridge streaming at %1").arg(bridge_status_stale_ ? "0.0 Hz (stale)" : frame_rate_label_->text())
+        : "Bridge not streaming";
+    const QString labrecorder_text = labrecorder_connected_ ? "LabRecorder connected" : "LabRecorder disconnected";
+    const QString filename_text = isFilenameValid() ? "filename valid" : "filename incomplete";
+    readiness_label_->setText(QString("Readiness: %1; %2; %3.")
+                                  .arg(bridge_text, labrecorder_text, filename_text));
 }
