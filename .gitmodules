@@ -6,4 +6,4 @@
 	url = https://github.com/whoenig/vicon-datastream-sdk.git
 [submodule "hololens-gaze-lsl/external/liblsl"]
 	path = hololens-gaze-lsl/external/liblsl
-	url = https://github.com/sccn/liblsl.git
+	url = https://github.com/attackofthetitan/liblsl-uwp-arm64.git

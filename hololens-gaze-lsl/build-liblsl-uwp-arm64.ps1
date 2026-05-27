@@ -11,7 +11,6 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LiblslSource = Join-Path $Root "external\liblsl"
 $BuildDir = Join-Path $Root "build\liblsl-uwp-arm64"
 $InstallDir = Join-Path $Root "build\liblsl-uwp-arm64-install"
-$PatchFile = Join-Path $Root "patches\liblsl-uwp-arm64.patch"
 
 function Invoke-Native {
     $command = $args[0]
@@ -28,22 +27,6 @@ function Invoke-Native {
 
 if (-not (Test-Path (Join-Path $LiblslSource "CMakeLists.txt"))) {
     throw "liblsl submodule is missing. Run: git submodule update --init --recursive hololens-gaze-lsl/external/liblsl"
-}
-
-if (Test-Path $PatchFile) {
-    $commonCpp = Join-Path $LiblslSource "src\common.cpp"
-    $cmakeLists = Join-Path $LiblslSource "CMakeLists.txt"
-    $hasTimerPatch = Select-String -Path $commonCpp -SimpleMatch "WINAPI_FAMILY != WINAPI_FAMILY_APP" -Quiet
-    $hasLslverPatch = Select-String -Path $cmakeLists -SimpleMatch "if(NOT WINDOWS_STORE)" -Quiet
-
-    if (-not ($hasTimerPatch -and $hasLslverPatch)) {
-        Push-Location $LiblslSource
-        try {
-            Invoke-Native git apply $PatchFile
-        } finally {
-            Pop-Location
-        }
-    }
 }
 
 $staticValue = if ($Static) { "ON" } else { "OFF" }

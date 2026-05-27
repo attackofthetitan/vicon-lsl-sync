@@ -1,6 +1,8 @@
 # liblsl UWP ARM64
 
-`external/liblsl` is pinned to `v1.16.2` and patched for UWP ARM64.
+`external/liblsl` points to the public patched source repository
+[`attackofthetitan/liblsl-uwp-arm64`](https://github.com/attackofthetitan/liblsl-uwp-arm64),
+based on `sccn/liblsl` `v1.16.2`.
 
 Build from the repository root:
 
