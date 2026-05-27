@@ -2,11 +2,27 @@
 
 namespace {
 
+struct FilenameToken {
+    const char* placeholder;
+    QString LabRecorderFilenameFields::*field;
+};
+
+const FilenameToken kFilenameTokens[] = {
+    {"%p", &LabRecorderFilenameFields::participant},
+    {"%s", &LabRecorderFilenameFields::session},
+    {"%b", &LabRecorderFilenameFields::task},
+    {"%r", &LabRecorderFilenameFields::run},
+    {"%n", &LabRecorderFilenameFields::run},
+    {"%a", &LabRecorderFilenameFields::acquisition},
+    {"%m", &LabRecorderFilenameFields::modality},
+};
+
 void appendField(QString& command, const QString& key, const QString& value) {
-    if (value.isEmpty()) {
+    const QString sanitized = LabRecorderClient::sanitizedValue(value);
+    if (sanitized.isEmpty()) {
         return;
     }
-    command += " {" + key + ":" + LabRecorderClient::sanitizedValue(value) + "}";
+    command += " {" + key + ":" + sanitized + "}";
 }
 
 } // namespace
@@ -104,6 +120,25 @@ QString LabRecorderClient::filenameCommand(const LabRecorderFilenameFields& fiel
     appendField(command, "acquisition", fields.acquisition);
     appendField(command, "modality", fields.modality);
     return command;
+}
+
+QString LabRecorderClient::renderedFilename(const LabRecorderFilenameFields& fields) {
+    QString rendered = sanitizedValue(fields.templ);
+    for (const FilenameToken& token : kFilenameTokens) {
+        rendered.replace(QLatin1String(token.placeholder), sanitizedValue(fields.*(token.field)));
+    }
+    return rendered;
+}
+
+bool LabRecorderClient::hasUnresolvedFilenamePlaceholders(const LabRecorderFilenameFields& fields) {
+    const QString templ = sanitizedValue(fields.templ);
+    for (const FilenameToken& token : kFilenameTokens) {
+        if (templ.contains(QLatin1String(token.placeholder)) &&
+            sanitizedValue(fields.*(token.field)).isEmpty()) {
+            return true;
+        }
+    }
+    return renderedFilename(fields).contains('%');
 }
 
 QStringList LabRecorderClient::startRecordingCommands(const LabRecorderFilenameFields& fields,
