@@ -79,6 +79,16 @@ bool LabRecorderClient::startRecording() {
     return sendCommand("start");
 }
 
+bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields, bool select_all_first) {
+    const QStringList commands = startRecordingCommands(fields, select_all_first);
+    for (const QString& command : commands) {
+        if (!sendCommand(command)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool LabRecorderClient::stopRecording() {
     return sendCommand("stop");
 }
@@ -96,6 +106,17 @@ QString LabRecorderClient::filenameCommand(const LabRecorderFilenameFields& fiel
     return command;
 }
 
+QStringList LabRecorderClient::startRecordingCommands(const LabRecorderFilenameFields& fields,
+                                                      bool select_all_first) {
+    QStringList commands;
+    if (select_all_first) {
+        commands.append("select all");
+    }
+    commands.append(filenameCommand(fields));
+    commands.append("start");
+    return commands;
+}
+
 QString LabRecorderClient::sanitizedValue(QString value) {
     value.replace('{', '_');
     value.replace('}', '_');
@@ -103,4 +124,3 @@ QString LabRecorderClient::sanitizedValue(QString value) {
     value.replace('\r', ' ');
     return value.trimmed();
 }
-

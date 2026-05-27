@@ -68,6 +68,7 @@ private:
     QString renderedFilenamePreview() const;
     void setLabRecorderStatus(const QString& status);
     bool sendLabRecorderCommand(bool ok, const QString& success_message);
+    void updateRecordingButtons();
 
     QLineEdit* server_edit_;
     QLineEdit* marker_stream_edit_;
@@ -97,6 +98,7 @@ private:
     QLineEdit* acquisition_edit_;
     QLineEdit* modality_edit_;
     QLabel* filename_preview_label_;
+    QCheckBox* select_all_before_start_check_;
     QLineEdit* labrecorder_executable_edit_;
     QLineEdit* labrecorder_host_edit_;
     QSpinBox* labrecorder_port_spin_;
@@ -114,6 +116,8 @@ private:
     unsigned int previous_frames_ = 0;
     unsigned long long previous_gaze_samples_ = 0;
     qint64 previous_status_ms_ = 0;
+    bool labrecorder_connected_ = false;
+    bool recording_requested_ = false;
 
     BridgeWorker* worker_ = nullptr;
 };

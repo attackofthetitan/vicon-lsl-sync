@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTcpSocket>
 
 struct LabRecorderFilenameFields {
@@ -31,13 +32,14 @@ public:
     bool selectNone();
     bool updateFilename(const LabRecorderFilenameFields& fields);
     bool startRecording();
+    bool startRecording(const LabRecorderFilenameFields& fields, bool select_all_first);
     bool stopRecording();
 
     static QString filenameCommand(const LabRecorderFilenameFields& fields);
+    static QStringList startRecordingCommands(const LabRecorderFilenameFields& fields, bool select_all_first);
     static QString sanitizedValue(QString value);
 
 private:
     QTcpSocket socket_;
     QString last_error_;
 };
-
