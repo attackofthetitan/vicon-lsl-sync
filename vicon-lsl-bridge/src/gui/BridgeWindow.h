@@ -7,7 +7,10 @@
 #include <QLabel>
 #include <QSpinBox>
 #include <QThread>
+#include <QElapsedTimer>
+#include <QProcess>
 #include <memory>
+#include "gui/LabRecorderClient.h"
 #include "ViconLSLBridge.h"
 
 class BridgeWorker : public QThread {
@@ -41,6 +44,14 @@ public:
 private slots:
     void onStart();
     void onStop();
+    void onBrowseStudyRoot();
+    void onBrowseLabRecorder();
+    void onLaunchLabRecorder();
+    void onConnectLabRecorder();
+    void onRefreshLabRecorder();
+    void onStartRecording();
+    void onStopRecording();
+    void updateFilenamePreview();
     void onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
                         unsigned int frames, bool gaze_enabled, bool gaze_listening,
                         unsigned long long gaze_samples,
@@ -53,6 +64,10 @@ private:
     void loadSettings();
     void saveSettings() const;
     void setInputsEnabled(bool enabled);
+    LabRecorderFilenameFields filenameFields() const;
+    QString renderedFilenamePreview() const;
+    void setLabRecorderStatus(const QString& status);
+    bool sendLabRecorderCommand(bool ok, const QString& success_message);
 
     QLineEdit* server_edit_;
     QLineEdit* marker_stream_edit_;
@@ -67,9 +82,38 @@ private:
     QLabel* markers_label_;
     QLabel* segments_label_;
     QLabel* frames_label_;
+    QLabel* frame_rate_label_;
     QLabel* gaze_samples_label_;
+    QLabel* gaze_rate_label_;
     QLabel* malformed_packets_label_;
     QLabel* last_error_label_;
+
+    QLineEdit* study_root_edit_;
+    QLineEdit* filename_template_edit_;
+    QLineEdit* participant_edit_;
+    QLineEdit* session_edit_;
+    QLineEdit* task_edit_;
+    QSpinBox* run_spin_;
+    QLineEdit* acquisition_edit_;
+    QLineEdit* modality_edit_;
+    QLabel* filename_preview_label_;
+    QLineEdit* labrecorder_executable_edit_;
+    QLineEdit* labrecorder_host_edit_;
+    QSpinBox* labrecorder_port_spin_;
+    QPushButton* launch_labrecorder_button_;
+    QPushButton* connect_labrecorder_button_;
+    QPushButton* refresh_streams_button_;
+    QPushButton* start_recording_button_;
+    QPushButton* stop_recording_button_;
+    QLabel* labrecorder_status_label_;
+
+    LabRecorderClient labrecorder_client_;
+    std::unique_ptr<QProcess> labrecorder_process_;
+    QElapsedTimer status_timer_;
+    bool have_previous_status_ = false;
+    unsigned int previous_frames_ = 0;
+    unsigned long long previous_gaze_samples_ = 0;
+    qint64 previous_status_ms_ = 0;
 
     BridgeWorker* worker_ = nullptr;
 };
