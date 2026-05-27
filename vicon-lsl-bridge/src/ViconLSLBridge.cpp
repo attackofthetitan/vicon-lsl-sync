@@ -112,7 +112,7 @@ void ViconLSLBridge::connectWithRetry() {
         reportStatus(BridgeState::Connecting, "Retrying in " + std::to_string(config_.reconnect_interval_ms) + "ms");
         int remaining_ms = config_.reconnect_interval_ms;
         while (running_ && remaining_ms > 0) {
-            int sleep_ms = std::min(remaining_ms, 100);
+            int sleep_ms = (std::min)(remaining_ms, 100);
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
             remaining_ms -= sleep_ms;
         }
