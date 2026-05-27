@@ -4,9 +4,11 @@
 
 #include <cerrno>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <limits>
 #include <string_view>
+#include <utility>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -47,11 +49,6 @@ constexpr std::array<ChannelMeta, HoloLensGazeReceiver::ChannelCount> kChannels{
     {"RightEyeDirectionY", "normalized"},
     {"RightEyeDirectionZ", "normalized"},
     {"RightEyeValid", "bool"},
-    {"HitPointX", "meters"},
-    {"HitPointY", "meters"},
-    {"HitPointZ", "meters"},
-    {"HitValid", "bool"},
-    {"VergenceDistance", "meters"},
 }};
 
 #ifdef _WIN32
@@ -111,9 +108,16 @@ void HoloLensGazeReceiver::start() {
         return;
     }
 
-    initializeOutlet();
+    sample_count_ = 0;
+    malformed_packet_count_ = 0;
+    listening_ = false;
+    {
+        std::lock_guard<std::mutex> lock(status_mutex_);
+        last_error_.clear();
+    }
     running_ = true;
     thread_ = std::thread(&HoloLensGazeReceiver::run, this);
+    reportStatus();
 }
 
 void HoloLensGazeReceiver::stop() {
@@ -121,8 +125,35 @@ void HoloLensGazeReceiver::stop() {
     if (thread_.joinable()) {
         thread_.join();
     }
+    listening_ = false;
     outlet_.reset();
     info_.reset();
+    reportStatus();
+}
+
+HoloLensGazeReceiver::Status HoloLensGazeReceiver::status() const {
+    Status current;
+    current.enabled = running_;
+    current.listening = listening_;
+    current.sample_count = sample_count_;
+    current.malformed_packet_count = malformed_packet_count_;
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    current.last_error = last_error_;
+    return current;
+}
+
+void HoloLensGazeReceiver::setStatusCallback(StatusCallback callback) {
+    status_callback_ = std::move(callback);
+}
+
+void HoloLensGazeReceiver::reportStatus(const std::string& last_error) {
+    if (!last_error.empty()) {
+        std::lock_guard<std::mutex> lock(status_mutex_);
+        last_error_ = last_error;
+    }
+    if (status_callback_) {
+        status_callback_(status());
+    }
 }
 
 void HoloLensGazeReceiver::initializeOutlet() {
@@ -154,14 +185,21 @@ void HoloLensGazeReceiver::run() {
     WSADATA wsa_data;
     const bool wsa_started = WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
     if (!wsa_started) {
-        std::cerr << "Failed to initialize Winsock for HoloLens gaze receiver" << std::endl;
+        const std::string error = "Failed to initialize Winsock for HoloLens gaze receiver";
+        std::cerr << error << std::endl;
+        running_ = false;
+        reportStatus(error);
         return;
     }
 #endif
 
     SocketHandle socket_handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (socket_handle == kInvalidSocket) {
-        std::cerr << "Failed to create HoloLens gaze UDP socket: " << lastSocketError() << std::endl;
+        const std::string error = "Failed to create HoloLens gaze UDP socket: " +
+            std::to_string(lastSocketError());
+        std::cerr << error << std::endl;
+        running_ = false;
+        reportStatus(error);
 #ifdef _WIN32
         WSACleanup();
 #endif
@@ -174,8 +212,11 @@ void HoloLensGazeReceiver::run() {
     address.sin_port = htons(port_);
 
     if (bind(socket_handle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
-        std::cerr << "Failed to bind HoloLens gaze UDP port " << port_
-                  << ": " << lastSocketError() << std::endl;
+        const std::string error = "Failed to bind HoloLens gaze UDP port " +
+            std::to_string(port_) + ": " + std::to_string(lastSocketError());
+        std::cerr << error << std::endl;
+        running_ = false;
+        reportStatus(error);
         closeSocket(socket_handle);
 #ifdef _WIN32
         WSACleanup();
@@ -194,11 +235,25 @@ void HoloLensGazeReceiver::run() {
     setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 #endif
 
+    try {
+        initializeOutlet();
+    } catch (const std::exception& e) {
+        const std::string error = "Failed to create HoloLens gaze LSL outlet: " + std::string(e.what());
+        std::cerr << error << std::endl;
+        running_ = false;
+        reportStatus(error);
+        closeSocket(socket_handle);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+    listening_ = true;
     std::cout << "HoloLens gaze UDP receiver listening on port " << port_ << std::endl;
+    reportStatus();
 
     std::array<char, 4096> buffer{};
     std::array<double, ChannelCount> sample{};
-    unsigned long long count = 0;
 
     while (running_) {
         sockaddr_in sender{};
@@ -217,24 +272,32 @@ void HoloLensGazeReceiver::run() {
 
         std::string packet(buffer.data(), static_cast<size_t>(received));
         if (!parsePacket(packet, sample)) {
+            unsigned long long malformed = ++malformed_packet_count_;
+            if (malformed % 100 == 0) {
+                std::cerr << "Ignored " << malformed << " malformed HoloLens gaze UDP packets" << std::endl;
+                reportStatus();
+            }
             continue;
         }
 
         outlet_->push_sample(sample.data(), lsl::local_clock());
-        ++count;
+        unsigned long long count = ++sample_count_;
         if (count % 900 == 0) {
             std::cout << "Relayed " << count << " HoloLens gaze samples" << std::endl;
+            reportStatus();
         }
     }
 
+    listening_ = false;
     closeSocket(socket_handle);
 #ifdef _WIN32
     WSACleanup();
 #endif
+    reportStatus();
 }
 
 bool HoloLensGazeReceiver::parsePacket(const std::string& packet,
-                                       std::array<double, ChannelCount>& sample) const {
+                                       std::array<double, ChannelCount>& sample) {
     std::string_view view(packet);
     constexpr std::string_view prefix = "HLGAZE1,";
     if (view.substr(0, prefix.size()) != prefix) {
