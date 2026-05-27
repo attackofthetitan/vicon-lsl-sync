@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QMessageBox>
 #include <QApplication>
@@ -42,13 +43,23 @@ void BridgeWorker::stopBridge() {
 
 BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     setWindowTitle("Vicon LSL Bridge");
-    setMinimumWidth(620);
+    setMinimumWidth(860);
 
     auto* main_layout = new QVBoxLayout(this);
+    main_layout->setContentsMargins(8, 8, 8, 8);
+    main_layout->setSpacing(8);
+    auto* content_layout = new QHBoxLayout();
+    content_layout->setSpacing(8);
+    auto* left_layout = new QVBoxLayout();
+    left_layout->setSpacing(8);
+    auto* right_layout = new QVBoxLayout();
+    right_layout->setSpacing(8);
 
     // Connection settings
     auto* settings_group = new QGroupBox("Connection Settings");
     auto* form = new QFormLayout(settings_group);
+    form->setContentsMargins(8, 8, 8, 8);
+    form->setVerticalSpacing(4);
 
     server_edit_ = new QLineEdit("localhost:801");
     marker_stream_edit_ = new QLineEdit("ViconMarkers");
@@ -57,10 +68,12 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     form->addRow("Vicon server:", server_edit_);
     form->addRow("Marker stream:", marker_stream_edit_);
     form->addRow("Segment stream:", segment_stream_edit_);
-    main_layout->addWidget(settings_group);
+    left_layout->addWidget(settings_group);
 
     auto* gaze_group = new QGroupBox("HoloLens Gaze Relay");
     auto* gaze_form = new QFormLayout(gaze_group);
+    gaze_form->setContentsMargins(8, 8, 8, 8);
+    gaze_form->setVerticalSpacing(4);
 
     gaze_enabled_check_ = new QCheckBox("Enable UDP relay");
     gaze_enabled_check_->setChecked(true);
@@ -72,7 +85,7 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     gaze_form->addRow("HoloLens gaze relay:", gaze_enabled_check_);
     gaze_form->addRow("UDP port:", gaze_port_spin_);
     gaze_form->addRow("Gaze stream:", gaze_stream_edit_);
-    main_layout->addWidget(gaze_group);
+    left_layout->addWidget(gaze_group);
 
     // Buttons
     auto* button_layout = new QHBoxLayout();
@@ -81,11 +94,64 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     stop_button_->setEnabled(false);
     button_layout->addWidget(start_button_);
     button_layout->addWidget(stop_button_);
-    main_layout->addLayout(button_layout);
+    left_layout->addLayout(button_layout);
+
+    // Status
+    auto* status_group = new QGroupBox("Status");
+    auto* status_layout = new QGridLayout(status_group);
+    status_layout->setContentsMargins(8, 8, 8, 8);
+    status_layout->setHorizontalSpacing(10);
+    status_layout->setVerticalSpacing(4);
+
+    status_label_ = new QLabel("Disconnected");
+    gaze_status_label_ = new QLabel("Disabled");
+    markers_label_ = new QLabel("0");
+    segments_label_ = new QLabel("0");
+    frames_label_ = new QLabel("0");
+    frame_rate_label_ = new QLabel("0.0 Hz");
+    gaze_samples_label_ = new QLabel("0");
+    gaze_rate_label_ = new QLabel("0.0 Hz");
+    malformed_packets_label_ = new QLabel("0");
+    last_error_label_ = new QLabel("-");
+    last_error_label_->setWordWrap(true);
+
+    int status_row = 0;
+    status_layout->addWidget(new QLabel("Bridge state:"), status_row, 0);
+    status_layout->addWidget(status_label_, status_row, 1, 1, 3);
+    ++status_row;
+    status_layout->addWidget(new QLabel("Gaze relay:"), status_row, 0);
+    status_layout->addWidget(gaze_status_label_, status_row, 1);
+    status_layout->addWidget(new QLabel("Vicon rate:"), status_row, 2);
+    status_layout->addWidget(frame_rate_label_, status_row, 3);
+    ++status_row;
+    status_layout->addWidget(new QLabel("Vicon frames:"), status_row, 0);
+    status_layout->addWidget(frames_label_, status_row, 1);
+    status_layout->addWidget(new QLabel("Gaze rate:"), status_row, 2);
+    status_layout->addWidget(gaze_rate_label_, status_row, 3);
+    ++status_row;
+    status_layout->addWidget(new QLabel("Markers:"), status_row, 0);
+    status_layout->addWidget(markers_label_, status_row, 1);
+    status_layout->addWidget(new QLabel("Segments:"), status_row, 2);
+    status_layout->addWidget(segments_label_, status_row, 3);
+    ++status_row;
+    status_layout->addWidget(new QLabel("Gaze samples:"), status_row, 0);
+    status_layout->addWidget(gaze_samples_label_, status_row, 1);
+    status_layout->addWidget(new QLabel("Malformed:"), status_row, 2);
+    status_layout->addWidget(malformed_packets_label_, status_row, 3);
+    ++status_row;
+    status_layout->addWidget(new QLabel("Last error:"), status_row, 0);
+    status_layout->addWidget(last_error_label_, status_row, 1, 1, 3);
+    status_layout->setColumnStretch(1, 1);
+    status_layout->setColumnStretch(3, 1);
+    left_layout->addWidget(status_group);
+    left_layout->addStretch();
 
     auto* recording_group = new QGroupBox("Recording");
     auto* recording_layout = new QVBoxLayout(recording_group);
+    recording_layout->setContentsMargins(8, 8, 8, 8);
+    recording_layout->setSpacing(6);
     auto* recording_form = new QFormLayout();
+    recording_form->setVerticalSpacing(4);
 
     auto* root_layout = new QHBoxLayout();
     study_root_edit_ = new QLineEdit();
@@ -105,19 +171,34 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     filename_preview_label_ = new QLabel();
     filename_preview_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     filename_preview_label_->setWordWrap(true);
+    filename_preview_label_->setMaximumHeight(42);
 
     recording_form->addRow("Study root:", root_layout);
     recording_form->addRow("File template:", filename_template_edit_);
-    recording_form->addRow("Participant:", participant_edit_);
-    recording_form->addRow("Session:", session_edit_);
-    recording_form->addRow("Task/block:", task_edit_);
-    recording_form->addRow("Run:", run_spin_);
-    recording_form->addRow("Acquisition:", acquisition_edit_);
-    recording_form->addRow("Modality:", modality_edit_);
+
+    auto* metadata_grid = new QGridLayout();
+    metadata_grid->setHorizontalSpacing(8);
+    metadata_grid->setVerticalSpacing(4);
+    metadata_grid->addWidget(new QLabel("Participant:"), 0, 0);
+    metadata_grid->addWidget(participant_edit_, 0, 1);
+    metadata_grid->addWidget(new QLabel("Session:"), 0, 2);
+    metadata_grid->addWidget(session_edit_, 0, 3);
+    metadata_grid->addWidget(new QLabel("Task/block:"), 1, 0);
+    metadata_grid->addWidget(task_edit_, 1, 1);
+    metadata_grid->addWidget(new QLabel("Run:"), 1, 2);
+    metadata_grid->addWidget(run_spin_, 1, 3);
+    metadata_grid->addWidget(new QLabel("Acquisition:"), 2, 0);
+    metadata_grid->addWidget(acquisition_edit_, 2, 1);
+    metadata_grid->addWidget(new QLabel("Modality:"), 2, 2);
+    metadata_grid->addWidget(modality_edit_, 2, 3);
+    metadata_grid->setColumnStretch(1, 1);
+    metadata_grid->setColumnStretch(3, 1);
+    recording_form->addRow("Metadata:", metadata_grid);
     recording_form->addRow("Filename preview:", filename_preview_label_);
     recording_layout->addLayout(recording_form);
 
     auto* labrecorder_form = new QFormLayout();
+    labrecorder_form->setVerticalSpacing(4);
     auto* executable_layout = new QHBoxLayout();
     labrecorder_executable_edit_ = new QLineEdit();
     auto* browse_labrecorder_button = new QPushButton("Browse");
@@ -130,57 +211,38 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     labrecorder_port_spin_->setValue(22345);
 
     labrecorder_form->addRow("LabRecorder executable:", executable_layout);
-    labrecorder_form->addRow("RCS host:", labrecorder_host_edit_);
-    labrecorder_form->addRow("RCS port:", labrecorder_port_spin_);
+    auto* rcs_layout = new QHBoxLayout();
+    rcs_layout->addWidget(new QLabel("Host:"));
+    rcs_layout->addWidget(labrecorder_host_edit_, 1);
+    rcs_layout->addWidget(new QLabel("Port:"));
+    rcs_layout->addWidget(labrecorder_port_spin_);
+    labrecorder_form->addRow("RCS:", rcs_layout);
     recording_layout->addLayout(labrecorder_form);
 
-    auto* recording_buttons = new QHBoxLayout();
+    auto* recording_buttons = new QGridLayout();
+    recording_buttons->setHorizontalSpacing(6);
+    recording_buttons->setVerticalSpacing(4);
     launch_labrecorder_button_ = new QPushButton("Launch LabRecorder");
     connect_labrecorder_button_ = new QPushButton("Connect");
     refresh_streams_button_ = new QPushButton("Refresh Streams");
     start_recording_button_ = new QPushButton("Start Recording");
     stop_recording_button_ = new QPushButton("Stop Recording");
-    recording_buttons->addWidget(launch_labrecorder_button_);
-    recording_buttons->addWidget(connect_labrecorder_button_);
-    recording_buttons->addWidget(refresh_streams_button_);
-    recording_buttons->addWidget(start_recording_button_);
-    recording_buttons->addWidget(stop_recording_button_);
+    recording_buttons->addWidget(launch_labrecorder_button_, 0, 0);
+    recording_buttons->addWidget(connect_labrecorder_button_, 0, 1);
+    recording_buttons->addWidget(refresh_streams_button_, 0, 2);
+    recording_buttons->addWidget(start_recording_button_, 1, 0, 1, 2);
+    recording_buttons->addWidget(stop_recording_button_, 1, 2);
     recording_layout->addLayout(recording_buttons);
 
     labrecorder_status_label_ = new QLabel("Disconnected");
     labrecorder_status_label_->setWordWrap(true);
     recording_layout->addWidget(labrecorder_status_label_);
 
-    main_layout->addWidget(recording_group);
-
-    // Status
-    auto* status_group = new QGroupBox("Status");
-    auto* status_layout = new QFormLayout(status_group);
-
-    status_label_ = new QLabel("Disconnected");
-    gaze_status_label_ = new QLabel("Disabled");
-    markers_label_ = new QLabel("0");
-    segments_label_ = new QLabel("0");
-    frames_label_ = new QLabel("0");
-    frame_rate_label_ = new QLabel("0.0 Hz");
-    gaze_samples_label_ = new QLabel("0");
-    gaze_rate_label_ = new QLabel("0.0 Hz");
-    malformed_packets_label_ = new QLabel("0");
-    last_error_label_ = new QLabel("-");
-
-    status_layout->addRow("Bridge state:", status_label_);
-    status_layout->addRow("Gaze relay:", gaze_status_label_);
-    status_layout->addRow("Vicon frames:", frames_label_);
-    status_layout->addRow("Vicon rate:", frame_rate_label_);
-    status_layout->addRow("Markers:", markers_label_);
-    status_layout->addRow("Segments:", segments_label_);
-    status_layout->addRow("Gaze samples:", gaze_samples_label_);
-    status_layout->addRow("Gaze rate:", gaze_rate_label_);
-    status_layout->addRow("Malformed packets:", malformed_packets_label_);
-    status_layout->addRow("Last error:", last_error_label_);
-    main_layout->addWidget(status_group);
-
-    main_layout->addStretch();
+    right_layout->addWidget(recording_group);
+    right_layout->addStretch();
+    content_layout->addLayout(left_layout, 2);
+    content_layout->addLayout(right_layout, 3);
+    main_layout->addLayout(content_layout);
 
     connect(start_button_, &QPushButton::clicked, this, &BridgeWindow::onStart);
     connect(stop_button_, &QPushButton::clicked, this, &BridgeWindow::onStop);
