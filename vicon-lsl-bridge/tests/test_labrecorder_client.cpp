@@ -45,6 +45,44 @@ void testFilenameCommand() {
            "formats and sanitizes filename command");
 }
 
+void testRenderedFilenameUsesSharedSanitization() {
+    LabRecorderFilenameFields fields;
+    fields.templ = "sub-%p/ses-%s/task-%b/run-%r/repeat-%n/acq-%a/%m.xdf";
+    fields.participant = " P{001} ";
+    fields.session = "S\n001";
+    fields.task = "Reach\rTask";
+    fields.run = " 2 ";
+    fields.acquisition = "vicon";
+    fields.modality = " beh ";
+
+    expect(LabRecorderClient::renderedFilename(fields) ==
+               "sub-P_001_/ses-S 001/task-Reach Task/run-2/repeat-2/acq-vicon/beh.xdf",
+           "renders filename preview with shared sanitization");
+}
+
+void testUnresolvedFilenamePlaceholders() {
+    LabRecorderFilenameFields fields;
+    fields.templ = "sub-%p_task-%b_run-%r.xdf";
+    fields.participant = "P001";
+    fields.task = "Reach";
+    fields.run = "1";
+
+    expect(!LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields),
+           "detects no unresolved placeholders when required values are present");
+
+    fields.run = " \n ";
+    expect(LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields),
+           "detects unresolved placeholder after sanitization empties value");
+
+    fields.templ = "sub-%p.xdf";
+    expect(!LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields),
+           "ignores missing fields not referenced by template");
+
+    fields.templ = "sub-%p_unknown-%x.xdf";
+    expect(LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields),
+           "detects unknown unresolved placeholders after rendering");
+}
+
 void testStartRecordingCommands() {
     LabRecorderFilenameFields fields;
     fields.root = "/tmp/data";
@@ -145,6 +183,8 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
 
     testFilenameCommand();
+    testRenderedFilenameUsesSharedSanitization();
+    testUnresolvedFilenamePlaceholders();
     testStartRecordingCommands();
     testTcpCommandSequence();
     testTcpStartRecordingSequenceWithSelectAll();

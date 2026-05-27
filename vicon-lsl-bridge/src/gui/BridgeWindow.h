@@ -66,8 +66,10 @@ private:
     void setInputsEnabled(bool enabled);
     LabRecorderFilenameFields filenameFields() const;
     QString renderedFilenamePreview() const;
+    QString filenameValidationError() const;
     void setLabRecorderStatus(const QString& status);
     bool sendLabRecorderCommand(bool ok, const QString& success_message);
+    bool isFilenameValid() const;
     void updateRecordingButtons();
 
     QLineEdit* server_edit_;
@@ -97,7 +99,7 @@ private:
     QSpinBox* run_spin_;
     QLineEdit* acquisition_edit_;
     QLineEdit* modality_edit_;
-    QLabel* filename_preview_label_;
+    QLineEdit* filename_preview_label_;
     QCheckBox* select_all_before_start_check_;
     QLineEdit* labrecorder_executable_edit_;
     QLineEdit* labrecorder_host_edit_;

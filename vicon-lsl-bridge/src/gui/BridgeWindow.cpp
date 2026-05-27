@@ -168,10 +168,9 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     run_spin_->setValue(1);
     acquisition_edit_ = new QLineEdit("vicon");
     modality_edit_ = new QLineEdit("beh");
-    filename_preview_label_ = new QLabel();
-    filename_preview_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    filename_preview_label_->setWordWrap(true);
-    filename_preview_label_->setMaximumHeight(42);
+    filename_preview_label_ = new QLineEdit();
+    filename_preview_label_->setReadOnly(true);
+    filename_preview_label_->setPlaceholderText("Complete the recording fields to preview the output path");
 
     recording_form->addRow("Study root:", root_layout);
     recording_form->addRow("File template:", filename_template_edit_);
@@ -375,6 +374,12 @@ void BridgeWindow::onRefreshLabRecorder() {
 
 void BridgeWindow::onStartRecording() {
     saveSettings();
+    const QString validation_error = filenameValidationError();
+    if (!validation_error.isEmpty()) {
+        setLabRecorderStatus(validation_error);
+        return;
+    }
+
     if (sendLabRecorderCommand(
             labrecorder_client_.startRecording(filenameFields(), select_all_before_start_check_->isChecked()),
             "Recording start requested.")) {
@@ -392,8 +397,12 @@ void BridgeWindow::onStopRecording() {
 
 void BridgeWindow::updateFilenamePreview() {
     if (filename_preview_label_) {
-        filename_preview_label_->setText(renderedFilenamePreview());
+        const QString preview = renderedFilenamePreview();
+        filename_preview_label_->setText(preview);
+        filename_preview_label_->setToolTip(preview);
+        filename_preview_label_->setCursorPosition(0);
     }
+    updateRecordingButtons();
 }
 
 void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
@@ -528,18 +537,60 @@ LabRecorderFilenameFields BridgeWindow::filenameFields() const {
 }
 
 QString BridgeWindow::renderedFilenamePreview() const {
-    QString preview = filename_template_edit_->text();
-    preview.replace("%p", participant_edit_->text());
-    preview.replace("%s", session_edit_->text());
-    preview.replace("%b", task_edit_->text());
-    preview.replace("%r", QString::number(run_spin_->value()));
-    preview.replace("%n", QString::number(run_spin_->value()));
-    preview.replace("%a", acquisition_edit_->text());
-    preview.replace("%m", modality_edit_->text());
-    if (!study_root_edit_->text().isEmpty()) {
-        return QDir::toNativeSeparators(QDir(study_root_edit_->text()).filePath(preview));
+    const LabRecorderFilenameFields fields = filenameFields();
+    const QString rendered = LabRecorderClient::renderedFilename(fields);
+    const QString root = LabRecorderClient::sanitizedValue(fields.root);
+    if (!root.isEmpty()) {
+        return QDir::toNativeSeparators(QDir(root).filePath(rendered));
     }
-    return QDir::toNativeSeparators(preview);
+    return QDir::toNativeSeparators(rendered);
+}
+
+QString BridgeWindow::filenameValidationError() const {
+    const LabRecorderFilenameFields fields = filenameFields();
+    const QString root = LabRecorderClient::sanitizedValue(fields.root);
+    if (root.isEmpty()) {
+        return "Set a study root before starting recording.";
+    }
+
+    QFileInfo root_info(fields.root);
+    if (!root_info.exists() || !root_info.isDir()) {
+        return "Study root does not exist or is not a directory: " + fields.root;
+    }
+
+    if (LabRecorderClient::sanitizedValue(fields.templ).isEmpty()) {
+        return "Set a filename template before starting recording.";
+    }
+
+    QStringList missing_fields;
+    if (LabRecorderClient::sanitizedValue(fields.participant).isEmpty()) {
+        missing_fields.append("participant");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.session).isEmpty()) {
+        missing_fields.append("session");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.task).isEmpty()) {
+        missing_fields.append("task");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.acquisition).isEmpty()) {
+        missing_fields.append("acquisition");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.modality).isEmpty()) {
+        missing_fields.append("modality");
+    }
+    if (!missing_fields.isEmpty()) {
+        return "Complete recording metadata before starting: " + missing_fields.join(", ") + ".";
+    }
+
+    if (LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields)) {
+        return "Resolve all filename template placeholders before starting recording.";
+    }
+
+    if (renderedFilenamePreview().trimmed().isEmpty()) {
+        return "Filename preview is empty; check the study root and template.";
+    }
+
+    return {};
 }
 
 void BridgeWindow::setLabRecorderStatus(const QString& status) {
@@ -567,6 +618,10 @@ void BridgeWindow::updateRecordingButtons() {
 
     const bool connected = labrecorder_connected_ && labrecorder_client_.isConnected();
     refresh_streams_button_->setEnabled(connected && !recording_requested_);
-    start_recording_button_->setEnabled(connected && !recording_requested_);
+    start_recording_button_->setEnabled(connected && !recording_requested_ && isFilenameValid());
     stop_recording_button_->setEnabled(connected && recording_requested_);
+}
+
+bool BridgeWindow::isFilenameValid() const {
+    return filenameValidationError().isEmpty();
 }
