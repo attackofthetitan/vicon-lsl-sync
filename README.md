@@ -34,11 +34,22 @@ The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure an
 The GUI can also prepare and control a LabRecorder session over LabRecorder's remote-control socket:
 
 1. Start streaming from the bridge.
-2. In **Recording**, set the study root, filename template, participant/session/task/run fields, and LabRecorder RCS host/port.
-3. Launch LabRecorder from the GUI, or connect to an already-running LabRecorder with RCS enabled.
+2. In **Recording**, set the study root, filename template, participant/session/task/run fields, and LabRecorder RCS host/port. The default RCS host is `localhost` and the default port is `22345`.
+3. Launch LabRecorder from the GUI, or connect to an already-running LabRecorder with RCS enabled. LabRecorder must have RCS enabled and the GUI must be connected before recording controls become active.
 4. Use **Refresh Streams**, **Start Recording**, and **Stop Recording** from the bridge GUI.
 
-The recording controls do not block on required streams. They send LabRecorder commands and show command/connection errors without affecting bridge streaming.
+The filename preview shows the `.xdf` path that will be sent to LabRecorder after applying the template and operator fields. Validation is intended to catch empty or unsafe path components before recording starts, so operators can correct participant/session/task/run values instead of discovering the problem after a failed start.
+
+By default, the GUI selects all visible LabRecorder streams immediately before starting a recording. This helps include newly discovered bridge streams without a separate manual selection step. Disable **Select all streams before start** when LabRecorder stream selection should be managed manually, for example during partial-stream tests or when another device should stay visible but unrecorded.
+
+Before recording, confirm the operator preflight:
+
+- Bridge streaming is running and LabRecorder RCS is enabled, connected, and listening on the configured host/port.
+- **ViconMarkers** is visible in LabRecorder when marker data is expected.
+- **ViconSegments** is visible in LabRecorder when segment data is expected.
+- **HoloLensGaze** is visible only when the optional HoloLens gaze source or UDP relay is part of the session.
+
+The recording controls send LabRecorder commands and show command/connection errors without affecting bridge streaming.
 
 ## CLI Usage
 
