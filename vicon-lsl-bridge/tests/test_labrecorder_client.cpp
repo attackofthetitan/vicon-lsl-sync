@@ -45,6 +45,28 @@ void testFilenameCommand() {
            "formats and sanitizes filename command");
 }
 
+void testStartRecordingCommands() {
+    LabRecorderFilenameFields fields;
+    fields.root = "/tmp/data";
+    fields.templ = "sub-%p_task-%b.xdf";
+    fields.participant = "P002";
+    fields.task = "Walk";
+
+    QStringList without_select = LabRecorderClient::startRecordingCommands(fields, false);
+    expect(without_select.size() == 2, "start command sequence without select-all has two commands");
+    expect(without_select.value(0) ==
+               "filename {root:/tmp/data} {template:sub-%p_task-%b.xdf} {participant:P002} {task:Walk}",
+           "start command sequence includes filename command first");
+    expect(without_select.value(1) == "start", "start command sequence starts recording last");
+
+    QStringList with_select = LabRecorderClient::startRecordingCommands(fields, true);
+    expect(with_select.size() == 3, "start command sequence with select-all has three commands");
+    expect(with_select.value(0) == "select all", "start command sequence can select all first");
+    expect(with_select.value(1) == without_select.value(0),
+           "start command sequence reuses filename command after select-all");
+    expect(with_select.value(2) == "start", "start command sequence with select-all starts recording last");
+}
+
 void testTcpCommandSequence() {
     QTcpServer server;
     expect(server.listen(QHostAddress::LocalHost, 0), "fake LabRecorder server listens");
@@ -85,13 +107,47 @@ void testTcpCommandSequence() {
     expect(readCommand(socket.get()) == expected[3], "server receives stop");
 }
 
+void testTcpStartRecordingSequenceWithSelectAll() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "fake LabRecorder server listens for start sequence");
+
+    LabRecorderClient client;
+    expect(client.connectToServer("127.0.0.1", server.serverPort()),
+           "client connects to fake server for start sequence");
+    expect(server.waitForNewConnection(1000), "server accepts fake client for start sequence");
+    std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
+    expect(socket != nullptr, "server has pending socket for start sequence");
+    if (!socket) {
+        return;
+    }
+
+    LabRecorderFilenameFields fields;
+    fields.root = "/tmp/data";
+    fields.templ = "sub-%p_task-%b_run-%r.xdf";
+    fields.participant = "P003";
+    fields.task = "Jump";
+    fields.run = "4";
+
+    expect(client.startRecording(fields, true), "sends combined start sequence with select-all");
+    expect(readCommand(socket.get()) == "select all",
+           "server receives select-all before filename in combined start sequence");
+    expect(readCommand(socket.get()) ==
+               "filename {root:/tmp/data} {template:sub-%p_task-%b_run-%r.xdf} "
+               "{participant:P003} {task:Jump} {run:4}",
+           "server receives filename before start in combined start sequence");
+    expect(readCommand(socket.get()) == "start",
+           "server receives start after filename in combined start sequence");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
 
     testFilenameCommand();
+    testStartRecordingCommands();
     testTcpCommandSequence();
+    testTcpStartRecordingSequenceWithSelectAll();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " test failure(s)" << std::endl;
@@ -101,4 +157,3 @@ int main(int argc, char** argv) {
     std::cout << "All LabRecorder tests passed" << std::endl;
     return 0;
 }
-

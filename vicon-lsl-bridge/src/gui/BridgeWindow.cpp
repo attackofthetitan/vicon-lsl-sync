@@ -197,6 +197,10 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     recording_form->addRow("Filename preview:", filename_preview_label_);
     recording_layout->addLayout(recording_form);
 
+    select_all_before_start_check_ = new QCheckBox("Select all streams before start");
+    select_all_before_start_check_->setChecked(true);
+    recording_layout->addWidget(select_all_before_start_check_);
+
     auto* labrecorder_form = new QFormLayout();
     labrecorder_form->setVerticalSpacing(4);
     auto* executable_layout = new QHBoxLayout();
@@ -269,6 +273,7 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     loadSettings();
     updateFilenamePreview();
     status_timer_.start();
+    updateRecordingButtons();
 }
 
 BridgeWindow::~BridgeWindow() {
@@ -352,10 +357,16 @@ void BridgeWindow::onConnectLabRecorder() {
     saveSettings();
     if (labrecorder_client_.connectToServer(labrecorder_host_edit_->text(),
                                             static_cast<quint16>(labrecorder_port_spin_->value()))) {
+        labrecorder_connected_ = true;
+        recording_requested_ = false;
         setLabRecorderStatus("Connected to LabRecorder RCS.");
+        updateRecordingButtons();
         return;
     }
+    labrecorder_connected_ = false;
+    recording_requested_ = false;
     setLabRecorderStatus("LabRecorder connection failed: " + labrecorder_client_.lastError());
+    updateRecordingButtons();
 }
 
 void BridgeWindow::onRefreshLabRecorder() {
@@ -364,17 +375,19 @@ void BridgeWindow::onRefreshLabRecorder() {
 
 void BridgeWindow::onStartRecording() {
     saveSettings();
-    if (!sendLabRecorderCommand(labrecorder_client_.selectAll(), "Selected all streams.")) {
-        return;
+    if (sendLabRecorderCommand(
+            labrecorder_client_.startRecording(filenameFields(), select_all_before_start_check_->isChecked()),
+            "Recording start requested.")) {
+        recording_requested_ = true;
+        updateRecordingButtons();
     }
-    if (!sendLabRecorderCommand(labrecorder_client_.updateFilename(filenameFields()), "Filename command sent.")) {
-        return;
-    }
-    sendLabRecorderCommand(labrecorder_client_.startRecording(), "Recording start requested.");
 }
 
 void BridgeWindow::onStopRecording() {
-    sendLabRecorderCommand(labrecorder_client_.stopRecording(), "Recording stop requested.");
+    if (sendLabRecorderCommand(labrecorder_client_.stopRecording(), "Recording stop requested.")) {
+        recording_requested_ = false;
+        updateRecordingButtons();
+    }
 }
 
 void BridgeWindow::updateFilenamePreview() {
@@ -464,6 +477,7 @@ void BridgeWindow::loadSettings() {
     run_spin_->setValue(settings.value("run", 1).toInt());
     acquisition_edit_->setText(settings.value("acquisition", "vicon").toString());
     modality_edit_->setText(settings.value("modality", "beh").toString());
+    select_all_before_start_check_->setChecked(settings.value("selectAllBeforeStart", true).toBool());
     labrecorder_executable_edit_->setText(settings.value("labRecorderExecutable", "").toString());
     labrecorder_host_edit_->setText(settings.value("labRecorderHost", "localhost").toString());
     labrecorder_port_spin_->setValue(settings.value("labRecorderPort", 22345).toInt());
@@ -485,6 +499,7 @@ void BridgeWindow::saveSettings() const {
     settings.setValue("run", run_spin_->value());
     settings.setValue("acquisition", acquisition_edit_->text());
     settings.setValue("modality", modality_edit_->text());
+    settings.setValue("selectAllBeforeStart", select_all_before_start_check_->isChecked());
     settings.setValue("labRecorderExecutable", labrecorder_executable_edit_->text());
     settings.setValue("labRecorderHost", labrecorder_host_edit_->text());
     settings.setValue("labRecorderPort", labrecorder_port_spin_->value());
@@ -533,9 +548,25 @@ void BridgeWindow::setLabRecorderStatus(const QString& status) {
 
 bool BridgeWindow::sendLabRecorderCommand(bool ok, const QString& success_message) {
     if (!ok) {
+        if (!labrecorder_client_.isConnected()) {
+            labrecorder_connected_ = false;
+            recording_requested_ = false;
+            updateRecordingButtons();
+        }
         setLabRecorderStatus("LabRecorder command failed: " + labrecorder_client_.lastError());
         return false;
     }
     setLabRecorderStatus(success_message);
     return true;
+}
+
+void BridgeWindow::updateRecordingButtons() {
+    if (!refresh_streams_button_ || !start_recording_button_ || !stop_recording_button_) {
+        return;
+    }
+
+    const bool connected = labrecorder_connected_ && labrecorder_client_.isConnected();
+    refresh_streams_button_->setEnabled(connected && !recording_requested_);
+    start_recording_button_->setEnabled(connected && !recording_requested_);
+    stop_recording_button_->setEnabled(connected && recording_requested_);
 }
