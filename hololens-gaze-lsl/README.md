@@ -29,4 +29,6 @@ The DLL is a UWP ARM64 build of `liblsl` `v1.16.2`.
 
 Attach `GazeDataProvider` and `GazeLSLOutlet` to a scene object, then assign a `GazeLSLConfig` asset.
 
-`GazeLSLOutlet` creates a native LSL outlet first. If `liblsl.dll` cannot be loaded or the outlet fails to initialize, it falls back to sending UDP packets to `vicon-lsl-bridge`.
+`GazeLSLOutlet` creates a native LSL outlet first. If `liblsl.dll` cannot be loaded, the outlet fails to initialize, or `ForceUdpRelay` is enabled, it falls back to sending `HLGAZE1` UDP packets to `vicon-lsl-bridge`.
+
+The HoloLens gaze stream has 21 channels: combined, left-eye, and right-eye origin/direction plus valid flags. HoloLens 2 vergence data is not published.

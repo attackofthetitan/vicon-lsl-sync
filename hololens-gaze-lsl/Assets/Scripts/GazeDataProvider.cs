@@ -51,15 +51,12 @@ namespace GazeLSL
             public double RightEyeDirectionZ;
             public bool RightEyeValid;
 
-            public double VergenceDistance;
-            public bool VergenceValid;
         }
 
         [SerializeField] private GazeLSLConfig config;
 
         public bool IsTrackingAvailable { get; private set; }
         public bool AreIndividualEyeGazesSupported { get; private set; }
-        public bool IsVergenceSupported { get; private set; }
 
 #if ENABLE_WINMD_SUPPORT
         private readonly object trackerLock = new object();
@@ -151,7 +148,6 @@ namespace GazeLSL
                     lastConsumedReadingTimestamp = DateTime.Now;
 
                     AreIndividualEyeGazesSupported = newTracker.AreLeftAndRightGazesSupported;
-                    IsVergenceSupported = newTracker.IsVergenceDistanceSupported;
                     IsTrackingAvailable = true;
                 }
 
@@ -162,8 +158,7 @@ namespace GazeLSL
 
                 Debug.Log(
                     $"Extended eye tracking ready. " +
-                    $"Per-eye: {AreIndividualEyeGazesSupported}, " +
-                    $"Vergence: {IsVergenceSupported}"
+                    $"Per-eye: {AreIndividualEyeGazesSupported}"
                 );
             }
             catch (Exception e)
@@ -204,7 +199,6 @@ namespace GazeLSL
             SpatialCoordinateSystem currentWorldCoordinateSystem;
             DateTime previousTimestamp;
             bool includeIndividualEyes;
-            bool includeVergence;
 
             lock (trackerLock)
             {
@@ -213,7 +207,6 @@ namespace GazeLSL
                 currentWorldCoordinateSystem = worldCoordinateSystem;
                 previousTimestamp = lastConsumedReadingTimestamp;
                 includeIndividualEyes = AreIndividualEyeGazesSupported;
-                includeVergence = IsVergenceSupported;
             }
 
             if (currentTracker == null || currentTrackerLocator == null || currentWorldCoordinateSystem == null)
@@ -239,7 +232,7 @@ namespace GazeLSL
 
             if (trackerLocation != null)
             {
-                PopulateGazeSample(reading, trackerLocation, includeIndividualEyes, includeVergence, ref sample);
+                PopulateGazeSample(reading, trackerLocation, includeIndividualEyes, ref sample);
             }
 
             // Return true for every acquired tracker reading. Invalid gaze is represented
@@ -278,9 +271,7 @@ namespace GazeLSL
                 RightEyeOriginZ = double.NaN,
                 RightEyeDirectionX = double.NaN,
                 RightEyeDirectionY = double.NaN,
-                RightEyeDirectionZ = double.NaN,
-
-                VergenceDistance = double.NaN
+                RightEyeDirectionZ = double.NaN
             };
 
             return sample;
@@ -375,7 +366,6 @@ namespace GazeLSL
             EyeGazeTrackerReading reading,
             SpatialLocation trackerLocation,
             bool includeIndividualEyes,
-            bool includeVergence,
             ref GazeSample sample)
         {
             if (reading.TryGetCombinedEyeGazeInTrackerSpace(
@@ -416,11 +406,6 @@ namespace GazeLSL
                 sample.RightEyeValid = true;
             }
 
-            if (includeVergence && reading.TryGetVergenceDistance(out float vergenceDistance))
-            {
-                sample.VergenceDistance = vergenceDistance;
-                sample.VergenceValid = true;
-            }
         }
 
         private static bool IsUsableRay(
@@ -483,7 +468,6 @@ namespace GazeLSL
 #endif
 
             AreIndividualEyeGazesSupported = false;
-            IsVergenceSupported = false;
             IsTrackingAvailable = false;
         }
 
@@ -495,7 +479,6 @@ namespace GazeLSL
             worldCoordinateSystem = null;
             lastConsumedReadingTimestamp = DateTime.Now;
             AreIndividualEyeGazesSupported = false;
-            IsVergenceSupported = false;
             IsTrackingAvailable = false;
         }
 

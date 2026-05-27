@@ -1,4 +1,8 @@
 using System;
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using LSL;
 using UnityEngine;
@@ -12,7 +16,7 @@ namespace GazeLSL
     */
     public sealed class GazeLSLOutlet : MonoBehaviour
     {
-        private const int ChannelCount = 22;
+        private const int ChannelCount = 21;
         private const int StopTimeoutMilliseconds = 500;
 
         private static readonly DateTime UnixEpoch = new DateTime(
@@ -29,8 +33,7 @@ namespace GazeLSL
             "LeftEyeValid",
             "RightEyeOriginX", "RightEyeOriginY", "RightEyeOriginZ",
             "RightEyeDirectionX", "RightEyeDirectionY", "RightEyeDirectionZ",
-            "RightEyeValid",
-            "VergenceDistance"
+            "RightEyeValid"
         };
 
         private static readonly string[] ChannelUnits =
@@ -43,8 +46,7 @@ namespace GazeLSL
             "bool",
             "meters", "meters", "meters",
             "normalized", "normalized", "normalized",
-            "bool",
-            "meters"
+            "bool"
         };
 
         [SerializeField] private GazeLSLConfig config;
@@ -52,6 +54,8 @@ namespace GazeLSL
 
         private StreamInfo info;
         private StreamOutlet outlet;
+        private UdpClient udpClient;
+        private IPEndPoint udpEndpoint;
         private Thread workerThread;
         private ManualResetEventSlim stopSignal;
         private volatile bool workerRunning;
@@ -68,7 +72,17 @@ namespace GazeLSL
 
             nominalRate = Math.Max(1u, config.TargetFrameRate);
 
-            CreateOutlet();
+            try
+            {
+                CreatePublisher();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Could not initialize gaze publisher - {e.Message}");
+                enabled = false;
+                return;
+            }
+
             StartWorker();
         }
 
@@ -94,6 +108,26 @@ namespace GazeLSL
             return true;
         }
 
+        private void CreatePublisher()
+        {
+            if (!config.ForceUdpRelay)
+            {
+                try
+                {
+                    CreateOutlet();
+                    return;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"Could not create native LSL outlet; falling back to UDP relay - {e.Message}");
+                    outlet = null;
+                    info = null;
+                }
+            }
+
+            CreateUdpRelay();
+        }
+
         private void CreateOutlet()
         {
             info = new StreamInfo(
@@ -111,6 +145,19 @@ namespace GazeLSL
             outlet = new StreamOutlet(info);
 
             Debug.Log($"LSL outlet created: {config.StreamName}, {ChannelCount} channels, nominal {nominalRate} Hz");
+        }
+
+        private void CreateUdpRelay()
+        {
+            IPAddress[] addresses = Dns.GetHostAddresses(config.RelayHost);
+            if (addresses.Length == 0)
+            {
+                throw new InvalidOperationException($"Could not resolve UDP relay host {config.RelayHost}");
+            }
+
+            udpClient = new UdpClient();
+            udpEndpoint = new IPEndPoint(addresses[0], config.RelayPort);
+            Debug.Log($"UDP gaze relay configured: {config.RelayHost}:{config.RelayPort}, {ChannelCount} channels");
         }
 
         private static void AppendChannelMetadata(XMLElement channels)
@@ -197,12 +244,22 @@ namespace GazeLSL
             WriteSampleBuffer(gazeSample, sampleBuffer);
 
             StreamOutlet currentOutlet = outlet;
-            if (currentOutlet == null)
+            if (currentOutlet != null)
+            {
+                currentOutlet.push_sample(sampleBuffer, GetAcquisitionTimestampSeconds(gazeSample));
+                Interlocked.Increment(ref pushedSampleCount);
+                return;
+            }
+
+            UdpClient currentUdpClient = udpClient;
+            IPEndPoint currentEndpoint = udpEndpoint;
+            if (currentUdpClient == null || currentEndpoint == null)
             {
                 return;
             }
 
-            currentOutlet.push_sample(sampleBuffer, GetAcquisitionTimestampSeconds(gazeSample));
+            byte[] payload = Encoding.ASCII.GetBytes(BuildUdpPacket(GetAcquisitionTimestampSeconds(gazeSample), sampleBuffer));
+            currentUdpClient.Send(payload, payload.Length, currentEndpoint);
             Interlocked.Increment(ref pushedSampleCount);
         }
 
@@ -243,8 +300,22 @@ namespace GazeLSL
             sample[18] = frame.RightEyeDirectionY;
             sample[19] = frame.RightEyeDirectionZ;
             sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
+        }
 
-            sample[21] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
+        private static string BuildUdpPacket(double timestamp, double[] sample)
+        {
+            StringBuilder packet = new StringBuilder();
+            packet.Append("HLGAZE1,");
+            packet.Append(timestamp.ToString("R", CultureInfo.InvariantCulture));
+
+            for (int i = 0; i < ChannelCount; i++)
+            {
+                packet.Append(',');
+                double value = sample[i];
+                packet.Append(double.IsNaN(value) ? "NaN" : value.ToString("R", CultureInfo.InvariantCulture));
+            }
+
+            return packet.ToString();
         }
 
         private void OnDestroy()
@@ -267,8 +338,11 @@ namespace GazeLSL
 
             outlet = null;
             info = null;
+            udpEndpoint = null;
+            udpClient?.Close();
+            udpClient = null;
 
-            Debug.Log($"LSL outlet closed after pushing {pushedSampleCount} gaze samples");
+            Debug.Log($"Gaze publisher closed after pushing {pushedSampleCount} samples");
         }
     }
 }
