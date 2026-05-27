@@ -1,5 +1,6 @@
 #include "ViconLSLBridge.h"
 #include <lsl_cpp.h>
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <iostream>
@@ -16,19 +17,30 @@ ViconLSLBridge::ViconLSLBridge(const Config& config)
       hololens_gaze_receiver_(config.hololens_gaze_port,
                               config.hololens_gaze_stream_name,
                               config.hololens_gaze_stream_type,
-                              config.hololens_gaze_source_id) {}
+                              config.hololens_gaze_source_id) {
+    hololens_gaze_receiver_.setStatusCallback([this](const HoloLensGazeReceiver::Status&) {
+        reportStatus(current_state_);
+    });
+}
 
 void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
     status_callback_ = std::move(callback);
 }
 
 void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message) {
+    current_state_ = state;
     if (status_callback_) {
         BridgeStatus status;
         status.state = state;
         status.marker_count = known_markers_.size();
         status.segment_count = known_segments_.size();
         status.frame_count = frame_count_;
+        auto gaze_status = hololens_gaze_receiver_.status();
+        status.gaze_enabled = config_.enable_hololens_gaze && gaze_status.enabled;
+        status.gaze_listening = gaze_status.listening;
+        status.gaze_sample_count = gaze_status.sample_count;
+        status.gaze_malformed_packet_count = gaze_status.malformed_packet_count;
+        status.gaze_last_error = gaze_status.last_error;
         status.message = message;
         status_callback_(status);
     }
@@ -98,7 +110,12 @@ void ViconLSLBridge::connectWithRetry() {
     reportStatus(BridgeState::Connecting, "Connecting to " + config_.vicon_server);
     while (running_ && !client_.connect()) {
         reportStatus(BridgeState::Connecting, "Retrying in " + std::to_string(config_.reconnect_interval_ms) + "ms");
-        std::this_thread::sleep_for(std::chrono::milliseconds(config_.reconnect_interval_ms));
+        int remaining_ms = config_.reconnect_interval_ms;
+        while (running_ && remaining_ms > 0) {
+            int sleep_ms = std::min(remaining_ms, 100);
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+            remaining_ms -= sleep_ms;
+        }
     }
 }
 
