@@ -31,6 +31,15 @@ Each release also includes [LabRecorder](https://github.com/labstreaminglayer/Ap
 
 The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure and start streaming without using the command line. Enter the Vicon server address, optionally change stream names, and click Start.
 
+The GUI can also prepare and control a LabRecorder session over LabRecorder's remote-control socket:
+
+1. Start streaming from the bridge.
+2. In **Recording**, set the study root, filename template, participant/session/task/run fields, and LabRecorder RCS host/port.
+3. Launch LabRecorder from the GUI, or connect to an already-running LabRecorder with RCS enabled.
+4. Use **Refresh Streams**, **Start Recording**, and **Stop Recording** from the bridge GUI.
+
+The recording controls do not block on required streams. They send LabRecorder commands and show command/connection errors without affecting bridge streaming.
+
 ## CLI Usage
 
 A command-line version is also included for headless or scripted use:

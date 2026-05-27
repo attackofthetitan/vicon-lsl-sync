@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.0.0 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -60,19 +60,21 @@ add_executable(vicon-lsl-bridge src/main.cpp)
 target_link_libraries(vicon-lsl-bridge PRIVATE vicon-lsl-bridge-core)
 
 # Optional Qt6 GUI
-find_package(Qt6 COMPONENTS Core Widgets QUIET)
+find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
 if(Qt6_FOUND)
     set(CMAKE_AUTOMOC ON)
 
     add_executable(vicon-lsl-bridge-gui
         src/gui/main_gui.cpp
         src/gui/BridgeWindow.cpp
+        src/gui/LabRecorderClient.cpp
     )
 
     target_link_libraries(vicon-lsl-bridge-gui PRIVATE
         vicon-lsl-bridge-core
         Qt6::Core
         Qt6::Widgets
+        Qt6::Network
     )
 
     target_include_directories(vicon-lsl-bridge-gui PRIVATE src)
@@ -96,4 +98,14 @@ if(BUILD_TESTING)
     set_target_properties(vicon-lsl-bridge-tests PROPERTIES AUTOMOC OFF)
     target_link_libraries(vicon-lsl-bridge-tests PRIVATE vicon-lsl-bridge-core)
     add_test(NAME vicon-lsl-bridge-tests COMMAND vicon-lsl-bridge-tests)
+
+    if(Qt6_FOUND)
+        add_executable(vicon-lsl-labrecorder-tests
+            tests/test_labrecorder_client.cpp
+            src/gui/LabRecorderClient.cpp
+        )
+        target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
+        target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE Qt6::Core Qt6::Network)
+        add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)
+    endif()
 endif()
