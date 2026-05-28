@@ -1,8 +1,6 @@
 param(
     [ValidateSet("Debug", "Release", "RelWithDebInfo", "MinSizeRel")]
-    [string] $Config = "Release",
-
-    [switch] $Static
+    [string] $Config = "Release"
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,7 +27,6 @@ if (-not (Test-Path (Join-Path $LiblslSource "CMakeLists.txt"))) {
     throw "liblsl submodule is missing. Run: git submodule update --init --recursive hololens-gaze-lsl/external/liblsl"
 }
 
-$staticValue = if ($Static) { "ON" } else { "OFF" }
 $cmakeHelp = cmake --help
 $generator = if ($cmakeHelp -match "Visual Studio 18 2026") {
     "Visual Studio 18 2026"
@@ -53,7 +50,7 @@ Invoke-Native cmake `
     "-DCMAKE_SYSTEM_VERSION=10.0" `
     -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY `
     "-DCMAKE_INSTALL_PREFIX=$InstallDir" `
-    "-DLSL_BUILD_STATIC=$staticValue" `
+    -DLSL_BUILD_STATIC=OFF `
     -DLSL_BUILD_EXAMPLES=OFF `
     -DLSL_UNITTESTS=OFF `
     -DLSL_TOOLS=OFF `
