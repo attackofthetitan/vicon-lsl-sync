@@ -47,10 +47,6 @@ void MarkerStream::destroy() {
     std::cout << "Marker stream closed" << std::endl;
 }
 
-bool MarkerStream::isInitialized() const {
-    return outlet_ != nullptr;
-}
-
 void MarkerStream::pushSample(const std::vector<std::array<double, 4>>& markers, double timestamp) {
     if (!outlet_) return;
 
@@ -63,8 +59,4 @@ void MarkerStream::pushSample(const std::vector<std::array<double, 4>>& markers,
     }
 
     outlet_->push_sample(sample_buffer_, timestamp);
-}
-
-size_t MarkerStream::markerCount() const {
-    return marker_names_.size();
 }

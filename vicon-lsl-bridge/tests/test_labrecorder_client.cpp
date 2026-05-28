@@ -135,10 +135,10 @@ void testTcpCommandSequence() {
     expect(client.refreshStreams(), "sends update");
     expect(readCommand(socket.get()) == expected[0], "server receives update");
 
-    expect(client.updateFilename(fields), "sends filename");
+    expect(client.sendCommand(LabRecorderClient::filenameCommand(fields)), "sends filename");
     expect(readCommand(socket.get()) == expected[1], "server receives filename");
 
-    expect(client.startRecording(), "sends start");
+    expect(client.sendCommand("start"), "sends start");
     expect(readCommand(socket.get()) == expected[2], "server receives start");
 
     expect(client.stopRecording(), "sends stop");

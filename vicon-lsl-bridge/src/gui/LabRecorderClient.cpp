@@ -44,10 +44,6 @@ bool LabRecorderClient::connectToServer(const QString& host, quint16 port, int t
     return true;
 }
 
-void LabRecorderClient::disconnectFromServer() {
-    socket_.disconnectFromHost();
-}
-
 bool LabRecorderClient::isConnected() const {
     return socket_.state() == QAbstractSocket::ConnectedState;
 }
@@ -77,22 +73,6 @@ bool LabRecorderClient::sendCommand(const QString& command) {
 
 bool LabRecorderClient::refreshStreams() {
     return sendCommand("update");
-}
-
-bool LabRecorderClient::selectAll() {
-    return sendCommand("select all");
-}
-
-bool LabRecorderClient::selectNone() {
-    return sendCommand("select none");
-}
-
-bool LabRecorderClient::updateFilename(const LabRecorderFilenameFields& fields) {
-    return sendCommand(filenameCommand(fields));
-}
-
-bool LabRecorderClient::startRecording() {
-    return sendCommand("start");
 }
 
 bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields, bool select_all_first) {

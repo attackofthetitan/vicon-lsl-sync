@@ -11,13 +11,21 @@
 #include <unistd.h>
 #endif
 
+namespace {
+
+constexpr const char* kSourceIdPrefix = "vicon_";
+constexpr const char* kHoloLensGazeStreamType = "Gaze";
+constexpr const char* kHoloLensGazeSourceId = "hololens2_gaze";
+
+} // namespace
+
 ViconLSLBridge::ViconLSLBridge(const Config& config)
     : config_(config),
       client_(config.vicon_server),
       hololens_gaze_receiver_(config.hololens_gaze_port,
                               config.hololens_gaze_stream_name,
-                              config.hololens_gaze_stream_type,
-                              config.hololens_gaze_source_id) {
+                              kHoloLensGazeStreamType,
+                              kHoloLensGazeSourceId) {
     hololens_gaze_receiver_.setStatusCallback([this](const HoloLensGazeReceiver::Status&) {
         reportStatus(current_state_);
     });
@@ -145,9 +153,9 @@ void ViconLSLBridge::initializeStreams() {
     }
 
     marker_stream_.initialize(known_markers_, config_.marker_stream_name,
-                               config_.source_id_prefix + "markers_" + hostname);
+                               std::string(kSourceIdPrefix) + "markers_" + hostname);
     segment_stream_.initialize(known_segments_, config_.segment_stream_name,
-                                config_.source_id_prefix + "segments_" + hostname);
+                                std::string(kSourceIdPrefix) + "segments_" + hostname);
 }
 
 bool ViconLSLBridge::checkLayoutChanged() {
