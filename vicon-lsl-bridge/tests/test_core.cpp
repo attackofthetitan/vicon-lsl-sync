@@ -43,23 +43,42 @@ std::string gazePacket(size_t channel_count) {
 
 void testGazePacketParser() {
     std::array<double, HoloLensGazeReceiver::ChannelCount> sample{};
+    double timestamp = 0.0;
 
-    expect(HoloLensGazeReceiver::parsePacket(gazePacket(21), sample),
+    expect(HoloLensGazeReceiver::parsePacket(gazePacket(21), timestamp, sample),
            "accepts 21-channel gaze packet");
+    expect(timestamp == 123.456,
+           "parses gaze packet timestamp");
     expect(sample[0] == 1.0 && sample[20] == 21.0,
            "maps 21 gaze values after timestamp");
 
-    expect(!HoloLensGazeReceiver::parsePacket("BAD,123,1,2,3", sample),
+    expect(!HoloLensGazeReceiver::parsePacket("BAD,123,1,2,3", timestamp, sample),
            "rejects wrong gaze prefix");
-    expect(!HoloLensGazeReceiver::parsePacket(gazePacket(20), sample),
+    expect(!HoloLensGazeReceiver::parsePacket(gazePacket(20), timestamp, sample),
            "rejects short gaze packet");
-    expect(!HoloLensGazeReceiver::parsePacket(gazePacket(26), sample),
+    expect(!HoloLensGazeReceiver::parsePacket(gazePacket(26), timestamp, sample),
            "rejects legacy 26-channel gaze packet");
+
+    std::string malformed_timestamp = gazePacket(21);
+    malformed_timestamp.replace(
+        std::string("HLGAZE1,").size(),
+        std::string("123.456").size(),
+        "not-a-number");
+    expect(!HoloLensGazeReceiver::parsePacket(malformed_timestamp, timestamp, sample),
+           "rejects malformed gaze timestamp");
+
+    std::string nan_timestamp = gazePacket(21);
+    nan_timestamp.replace(
+        std::string("HLGAZE1,").size(),
+        std::string("123.456").size(),
+        "NaN");
+    expect(!HoloLensGazeReceiver::parsePacket(nan_timestamp, timestamp, sample),
+           "rejects non-finite gaze timestamp");
 
     std::string malformed = gazePacket(21);
     size_t last_comma = malformed.rfind(',');
     malformed.replace(last_comma + 1, std::string::npos, "not-a-number");
-    expect(!HoloLensGazeReceiver::parsePacket(malformed, sample),
+    expect(!HoloLensGazeReceiver::parsePacket(malformed, timestamp, sample),
            "rejects malformed gaze numeric field");
 }
 

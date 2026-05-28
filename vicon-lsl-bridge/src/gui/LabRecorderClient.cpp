@@ -2,11 +2,27 @@
 
 namespace {
 
+struct FilenameToken {
+    const char* placeholder;
+    QString LabRecorderFilenameFields::*field;
+};
+
+const FilenameToken kFilenameTokens[] = {
+    {"%p", &LabRecorderFilenameFields::participant},
+    {"%s", &LabRecorderFilenameFields::session},
+    {"%b", &LabRecorderFilenameFields::task},
+    {"%r", &LabRecorderFilenameFields::run},
+    {"%n", &LabRecorderFilenameFields::run},
+    {"%a", &LabRecorderFilenameFields::acquisition},
+    {"%m", &LabRecorderFilenameFields::modality},
+};
+
 void appendField(QString& command, const QString& key, const QString& value) {
-    if (value.isEmpty()) {
+    const QString sanitized = LabRecorderClient::sanitizedValue(value);
+    if (sanitized.isEmpty()) {
         return;
     }
-    command += " {" + key + ":" + LabRecorderClient::sanitizedValue(value) + "}";
+    command += " {" + key + ":" + sanitized + "}";
 }
 
 } // namespace
@@ -26,10 +42,6 @@ bool LabRecorderClient::connectToServer(const QString& host, quint16 port, int t
         return false;
     }
     return true;
-}
-
-void LabRecorderClient::disconnectFromServer() {
-    socket_.disconnectFromHost();
 }
 
 bool LabRecorderClient::isConnected() const {
@@ -63,20 +75,14 @@ bool LabRecorderClient::refreshStreams() {
     return sendCommand("update");
 }
 
-bool LabRecorderClient::selectAll() {
-    return sendCommand("select all");
-}
-
-bool LabRecorderClient::selectNone() {
-    return sendCommand("select none");
-}
-
-bool LabRecorderClient::updateFilename(const LabRecorderFilenameFields& fields) {
-    return sendCommand(filenameCommand(fields));
-}
-
-bool LabRecorderClient::startRecording() {
-    return sendCommand("start");
+bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields, bool select_all_first) {
+    const QStringList commands = startRecordingCommands(fields, select_all_first);
+    for (const QString& command : commands) {
+        if (!sendCommand(command)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool LabRecorderClient::stopRecording() {
@@ -96,6 +102,36 @@ QString LabRecorderClient::filenameCommand(const LabRecorderFilenameFields& fiel
     return command;
 }
 
+QString LabRecorderClient::renderedFilename(const LabRecorderFilenameFields& fields) {
+    QString rendered = sanitizedValue(fields.templ);
+    for (const FilenameToken& token : kFilenameTokens) {
+        rendered.replace(QLatin1String(token.placeholder), sanitizedValue(fields.*(token.field)));
+    }
+    return rendered;
+}
+
+bool LabRecorderClient::hasUnresolvedFilenamePlaceholders(const LabRecorderFilenameFields& fields) {
+    const QString templ = sanitizedValue(fields.templ);
+    for (const FilenameToken& token : kFilenameTokens) {
+        if (templ.contains(QLatin1String(token.placeholder)) &&
+            sanitizedValue(fields.*(token.field)).isEmpty()) {
+            return true;
+        }
+    }
+    return renderedFilename(fields).contains('%');
+}
+
+QStringList LabRecorderClient::startRecordingCommands(const LabRecorderFilenameFields& fields,
+                                                      bool select_all_first) {
+    QStringList commands;
+    if (select_all_first) {
+        commands.append("select all");
+    }
+    commands.append(filenameCommand(fields));
+    commands.append("start");
+    return commands;
+}
+
 QString LabRecorderClient::sanitizedValue(QString value) {
     value.replace('{', '_');
     value.replace('}', '_');
@@ -103,4 +139,3 @@ QString LabRecorderClient::sanitizedValue(QString value) {
     value.replace('\r', ' ');
     return value.trimmed();
 }
-

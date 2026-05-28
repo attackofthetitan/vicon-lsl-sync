@@ -1,6 +1,6 @@
 # HoloLens Gaze LSL
 
-This project contains the HoloLens gaze Unity scripts and the local `liblsl` UWP ARM64 build.
+This project contains the HoloLens gaze Unity scripts and the local `liblsl` UWP ARM64 build. The `external/liblsl` submodule points to [`attackofthetitan/liblsl-uwp-arm64`](https://github.com/attackofthetitan/liblsl-uwp-arm64), a public patched source repository based on `sccn/liblsl` `v1.16.2`.
 
 ## liblsl UWP ARM64
 

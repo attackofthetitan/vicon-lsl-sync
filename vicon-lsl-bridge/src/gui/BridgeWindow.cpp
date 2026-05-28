@@ -4,8 +4,6 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
-#include <QMessageBox>
-#include <QApplication>
 #include <QSettings>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -168,10 +166,9 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     run_spin_->setValue(1);
     acquisition_edit_ = new QLineEdit("vicon");
     modality_edit_ = new QLineEdit("beh");
-    filename_preview_label_ = new QLabel();
-    filename_preview_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    filename_preview_label_->setWordWrap(true);
-    filename_preview_label_->setMaximumHeight(42);
+    filename_preview_label_ = new QLineEdit();
+    filename_preview_label_->setReadOnly(true);
+    filename_preview_label_->setPlaceholderText("Complete the recording fields to preview the output path");
 
     recording_form->addRow("Study root:", root_layout);
     recording_form->addRow("File template:", filename_template_edit_);
@@ -196,6 +193,10 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     recording_form->addRow("Metadata:", metadata_grid);
     recording_form->addRow("Filename preview:", filename_preview_label_);
     recording_layout->addLayout(recording_form);
+
+    select_all_before_start_check_ = new QCheckBox("Select all streams before start");
+    select_all_before_start_check_->setChecked(true);
+    recording_layout->addWidget(select_all_before_start_check_);
 
     auto* labrecorder_form = new QFormLayout();
     labrecorder_form->setVerticalSpacing(4);
@@ -237,6 +238,9 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     labrecorder_status_label_ = new QLabel("Disconnected");
     labrecorder_status_label_->setWordWrap(true);
     recording_layout->addWidget(labrecorder_status_label_);
+    readiness_label_ = new QLabel();
+    readiness_label_->setWordWrap(true);
+    recording_layout->addWidget(readiness_label_);
 
     right_layout->addWidget(recording_group);
     right_layout->addStretch();
@@ -269,6 +273,12 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     loadSettings();
     updateFilenamePreview();
     status_timer_.start();
+    status_stale_timer_ = new QTimer(this);
+    status_stale_timer_->setInterval(500);
+    connect(status_stale_timer_, &QTimer::timeout, this, &BridgeWindow::onStatusStaleCheck);
+    status_stale_timer_->start();
+    updateRecordingButtons();
+    updateReadiness();
 }
 
 BridgeWindow::~BridgeWindow() {
@@ -352,10 +362,18 @@ void BridgeWindow::onConnectLabRecorder() {
     saveSettings();
     if (labrecorder_client_.connectToServer(labrecorder_host_edit_->text(),
                                             static_cast<quint16>(labrecorder_port_spin_->value()))) {
+        labrecorder_connected_ = true;
+        recording_requested_ = false;
         setLabRecorderStatus("Connected to LabRecorder RCS.");
+        updateRecordingButtons();
+        updateReadiness();
         return;
     }
+    labrecorder_connected_ = false;
+    recording_requested_ = false;
     setLabRecorderStatus("LabRecorder connection failed: " + labrecorder_client_.lastError());
+    updateRecordingButtons();
+    updateReadiness();
 }
 
 void BridgeWindow::onRefreshLabRecorder() {
@@ -364,23 +382,55 @@ void BridgeWindow::onRefreshLabRecorder() {
 
 void BridgeWindow::onStartRecording() {
     saveSettings();
-    if (!sendLabRecorderCommand(labrecorder_client_.selectAll(), "Selected all streams.")) {
+    const QString validation_error = filenameValidationError();
+    if (!validation_error.isEmpty()) {
+        setLabRecorderStatus(validation_error);
         return;
     }
-    if (!sendLabRecorderCommand(labrecorder_client_.updateFilename(filenameFields()), "Filename command sent.")) {
-        return;
+
+    if (sendLabRecorderCommand(
+            labrecorder_client_.startRecording(filenameFields(), select_all_before_start_check_->isChecked()),
+            "Recording start requested.")) {
+        recording_requested_ = true;
+        updateRecordingButtons();
+        updateReadiness();
     }
-    sendLabRecorderCommand(labrecorder_client_.startRecording(), "Recording start requested.");
 }
 
 void BridgeWindow::onStopRecording() {
-    sendLabRecorderCommand(labrecorder_client_.stopRecording(), "Recording stop requested.");
+    if (sendLabRecorderCommand(labrecorder_client_.stopRecording(), "Recording stop requested.")) {
+        recording_requested_ = false;
+        updateRecordingButtons();
+        updateReadiness();
+    }
 }
 
 void BridgeWindow::updateFilenamePreview() {
     if (filename_preview_label_) {
-        filename_preview_label_->setText(renderedFilenamePreview());
+        const QString preview = renderedFilenamePreview();
+        filename_preview_label_->setText(preview);
+        filename_preview_label_->setToolTip(preview);
+        filename_preview_label_->setCursorPosition(0);
     }
+    updateRecordingButtons();
+    updateReadiness();
+}
+
+void BridgeWindow::onStatusStaleCheck() {
+    if (!bridge_streaming_ || !have_previous_status_) {
+        return;
+    }
+
+    const qint64 now_ms = status_timer_.elapsed();
+    if (now_ms - previous_status_ms_ <= 3000 || bridge_status_stale_) {
+        return;
+    }
+
+    bridge_status_stale_ = true;
+    frame_rate_label_->setText("0.0 Hz");
+    gaze_rate_label_->setText("0.0 Hz");
+    status_label_->setText(status_label_->text() + " - stale status");
+    updateReadiness();
 }
 
 void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
@@ -403,6 +453,8 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
     }
 
     status_label_->setText(state_text);
+    bridge_streaming_ = bridge_state == BridgeState::Streaming;
+    bridge_status_stale_ = false;
     if (!gaze_enabled) {
         gaze_status_label_->setText("Disabled");
     } else if (gaze_listening) {
@@ -436,12 +488,19 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
     previous_frames_ = frames;
     previous_gaze_samples_ = gaze_samples;
     have_previous_status_ = true;
+    updateReadiness();
 }
 
 void BridgeWindow::onWorkerFinished() {
     start_button_->setEnabled(true);
     stop_button_->setEnabled(false);
     setInputsEnabled(true);
+    bridge_streaming_ = false;
+    bridge_status_stale_ = false;
+    have_previous_status_ = false;
+    frame_rate_label_->setText("0.0 Hz");
+    gaze_rate_label_->setText("0.0 Hz");
+    updateReadiness();
 
     worker_->deleteLater();
     worker_ = nullptr;
@@ -464,6 +523,7 @@ void BridgeWindow::loadSettings() {
     run_spin_->setValue(settings.value("run", 1).toInt());
     acquisition_edit_->setText(settings.value("acquisition", "vicon").toString());
     modality_edit_->setText(settings.value("modality", "beh").toString());
+    select_all_before_start_check_->setChecked(settings.value("selectAllBeforeStart", true).toBool());
     labrecorder_executable_edit_->setText(settings.value("labRecorderExecutable", "").toString());
     labrecorder_host_edit_->setText(settings.value("labRecorderHost", "localhost").toString());
     labrecorder_port_spin_->setValue(settings.value("labRecorderPort", 22345).toInt());
@@ -485,6 +545,7 @@ void BridgeWindow::saveSettings() const {
     settings.setValue("run", run_spin_->value());
     settings.setValue("acquisition", acquisition_edit_->text());
     settings.setValue("modality", modality_edit_->text());
+    settings.setValue("selectAllBeforeStart", select_all_before_start_check_->isChecked());
     settings.setValue("labRecorderExecutable", labrecorder_executable_edit_->text());
     settings.setValue("labRecorderHost", labrecorder_host_edit_->text());
     settings.setValue("labRecorderPort", labrecorder_port_spin_->value());
@@ -513,18 +574,60 @@ LabRecorderFilenameFields BridgeWindow::filenameFields() const {
 }
 
 QString BridgeWindow::renderedFilenamePreview() const {
-    QString preview = filename_template_edit_->text();
-    preview.replace("%p", participant_edit_->text());
-    preview.replace("%s", session_edit_->text());
-    preview.replace("%b", task_edit_->text());
-    preview.replace("%r", QString::number(run_spin_->value()));
-    preview.replace("%n", QString::number(run_spin_->value()));
-    preview.replace("%a", acquisition_edit_->text());
-    preview.replace("%m", modality_edit_->text());
-    if (!study_root_edit_->text().isEmpty()) {
-        return QDir::toNativeSeparators(QDir(study_root_edit_->text()).filePath(preview));
+    const LabRecorderFilenameFields fields = filenameFields();
+    const QString rendered = LabRecorderClient::renderedFilename(fields);
+    const QString root = LabRecorderClient::sanitizedValue(fields.root);
+    if (!root.isEmpty()) {
+        return QDir::toNativeSeparators(QDir(root).filePath(rendered));
     }
-    return QDir::toNativeSeparators(preview);
+    return QDir::toNativeSeparators(rendered);
+}
+
+QString BridgeWindow::filenameValidationError() const {
+    const LabRecorderFilenameFields fields = filenameFields();
+    const QString root = LabRecorderClient::sanitizedValue(fields.root);
+    if (root.isEmpty()) {
+        return "Set a study root before starting recording.";
+    }
+
+    QFileInfo root_info(fields.root);
+    if (!root_info.exists() || !root_info.isDir()) {
+        return "Study root does not exist or is not a directory: " + fields.root;
+    }
+
+    if (LabRecorderClient::sanitizedValue(fields.templ).isEmpty()) {
+        return "Set a filename template before starting recording.";
+    }
+
+    QStringList missing_fields;
+    if (LabRecorderClient::sanitizedValue(fields.participant).isEmpty()) {
+        missing_fields.append("participant");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.session).isEmpty()) {
+        missing_fields.append("session");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.task).isEmpty()) {
+        missing_fields.append("task");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.acquisition).isEmpty()) {
+        missing_fields.append("acquisition");
+    }
+    if (LabRecorderClient::sanitizedValue(fields.modality).isEmpty()) {
+        missing_fields.append("modality");
+    }
+    if (!missing_fields.isEmpty()) {
+        return "Complete recording metadata before starting: " + missing_fields.join(", ") + ".";
+    }
+
+    if (LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields)) {
+        return "Resolve all filename template placeholders before starting recording.";
+    }
+
+    if (renderedFilenamePreview().trimmed().isEmpty()) {
+        return "Filename preview is empty; check the study root and template.";
+    }
+
+    return {};
 }
 
 void BridgeWindow::setLabRecorderStatus(const QString& status) {
@@ -533,9 +636,44 @@ void BridgeWindow::setLabRecorderStatus(const QString& status) {
 
 bool BridgeWindow::sendLabRecorderCommand(bool ok, const QString& success_message) {
     if (!ok) {
+        if (!labrecorder_client_.isConnected()) {
+            labrecorder_connected_ = false;
+            recording_requested_ = false;
+            updateRecordingButtons();
+            updateReadiness();
+        }
         setLabRecorderStatus("LabRecorder command failed: " + labrecorder_client_.lastError());
         return false;
     }
     setLabRecorderStatus(success_message);
     return true;
+}
+
+void BridgeWindow::updateRecordingButtons() {
+    if (!refresh_streams_button_ || !start_recording_button_ || !stop_recording_button_) {
+        return;
+    }
+
+    const bool connected = labrecorder_connected_ && labrecorder_client_.isConnected();
+    refresh_streams_button_->setEnabled(connected && !recording_requested_);
+    start_recording_button_->setEnabled(connected && !recording_requested_ && isFilenameValid());
+    stop_recording_button_->setEnabled(connected && recording_requested_);
+}
+
+bool BridgeWindow::isFilenameValid() const {
+    return filenameValidationError().isEmpty();
+}
+
+void BridgeWindow::updateReadiness() {
+    if (!readiness_label_) {
+        return;
+    }
+
+    const QString bridge_text = bridge_streaming_
+        ? QString("Bridge streaming at %1").arg(bridge_status_stale_ ? "0.0 Hz (stale)" : frame_rate_label_->text())
+        : "Bridge not streaming";
+    const QString labrecorder_text = labrecorder_connected_ ? "LabRecorder connected" : "LabRecorder disconnected";
+    const QString filename_text = isFilenameValid() ? "filename valid" : "filename incomplete";
+    readiness_label_->setText(QString("Readiness: %1; %2; %3.")
+                                  .arg(bridge_text, labrecorder_text, filename_text));
 }

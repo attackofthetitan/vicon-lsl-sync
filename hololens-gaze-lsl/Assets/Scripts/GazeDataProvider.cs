@@ -24,8 +24,6 @@ namespace GazeLSL
         public struct GazeSample
         {
             public DateTime TrackerTimestamp;
-            public TimeSpan TrackerSystemRelativeTime;
-            public bool CalibrationValid;
 
             public double CombinedOriginX;
             public double CombinedOriginY;
@@ -249,8 +247,6 @@ namespace GazeLSL
             GazeSample sample = new GazeSample
             {
                 TrackerTimestamp = reading.Timestamp,
-                TrackerSystemRelativeTime = reading.SystemRelativeTime,
-                CalibrationValid = reading.IsCalibrationValid,
 
                 CombinedOriginX = double.NaN,
                 CombinedOriginY = double.NaN,
