@@ -78,7 +78,9 @@ if(Qt6_FOUND)
     )
 
     target_include_directories(vicon-lsl-bridge-gui PRIVATE src)
-    target_compile_definitions(vicon-lsl-bridge-gui PRIVATE _BUILD_STATIC_LIB)
+    target_compile_definitions(vicon-lsl-bridge-gui PRIVATE
+        VICON_LSL_BRIDGE_VERSION="${PROJECT_VERSION}"
+    )
 
     if(WIN32)
         target_link_libraries(vicon-lsl-bridge-gui PRIVATE ws2_32)

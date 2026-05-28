@@ -13,12 +13,9 @@ public:
                     const std::string& stream_name,
                     const std::string& source_id);
     void destroy();
-    bool isInitialized() const;
 
     // Push one sample for all markers. Each entry: {x, y, z, valid}
     void pushSample(const std::vector<std::array<double, 4>>& markers, double timestamp);
-
-    size_t markerCount() const;
 
 private:
     std::unique_ptr<lsl::stream_outlet> outlet_;

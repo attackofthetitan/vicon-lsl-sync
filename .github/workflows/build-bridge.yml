@@ -23,11 +23,11 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: x64
-            artifact: vicon-lsl-sync-linux-x64
+            artifact: vicon-lsl-bridge-linux-x64
           - os: windows-latest
             arch: x64
             triplet: x64-windows-static-md
-            artifact: vicon-lsl-sync-windows-x64
+            artifact: vicon-lsl-bridge-windows-x64
     runs-on: ${{ matrix.os }}
 
     steps:

@@ -3,6 +3,7 @@
 #include <lsl_cpp.h>
 
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -254,6 +255,7 @@ void HoloLensGazeReceiver::run() {
 
     std::array<char, 4096> buffer{};
     std::array<double, ChannelCount> sample{};
+    double timestamp = 0.0;
 
     while (running_) {
         sockaddr_in sender{};
@@ -271,7 +273,7 @@ void HoloLensGazeReceiver::run() {
         }
 
         std::string packet(buffer.data(), static_cast<size_t>(received));
-        if (!parsePacket(packet, sample)) {
+        if (!parsePacket(packet, timestamp, sample)) {
             unsigned long long malformed = ++malformed_packet_count_;
             if (malformed % 100 == 0) {
                 std::cerr << "Ignored " << malformed << " malformed HoloLens gaze UDP packets" << std::endl;
@@ -280,7 +282,7 @@ void HoloLensGazeReceiver::run() {
             continue;
         }
 
-        outlet_->push_sample(sample.data(), lsl::local_clock());
+        outlet_->push_sample(sample.data(), timestamp);
         unsigned long long count = ++sample_count_;
         if (count % 900 == 0) {
             std::cout << "Relayed " << count << " HoloLens gaze samples" << std::endl;
@@ -297,6 +299,7 @@ void HoloLensGazeReceiver::run() {
 }
 
 bool HoloLensGazeReceiver::parsePacket(const std::string& packet,
+                                       double& timestamp,
                                        std::array<double, ChannelCount>& sample) {
     std::string_view view(packet);
     constexpr std::string_view prefix = "HLGAZE1,";
@@ -317,7 +320,12 @@ bool HoloLensGazeReceiver::parsePacket(const std::string& packet,
             return false;
         }
 
-        if (field_index > 0) {
+        if (field_index == 0) {
+            if (!std::isfinite(parsed)) {
+                return false;
+            }
+            timestamp = parsed;
+        } else {
             sample[field_index - 1] = parsed;
         }
 

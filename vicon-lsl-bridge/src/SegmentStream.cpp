@@ -45,10 +45,6 @@ void SegmentStream::destroy() {
     std::cout << "Segment stream closed" << std::endl;
 }
 
-bool SegmentStream::isInitialized() const {
-    return outlet_ != nullptr;
-}
-
 void SegmentStream::pushSample(const std::vector<std::array<double, 7>>& segments, double timestamp) {
     if (!outlet_) return;
 
@@ -60,8 +56,4 @@ void SegmentStream::pushSample(const std::vector<std::array<double, 7>>& segment
     }
 
     outlet_->push_sample(sample_buffer_, timestamp);
-}
-
-size_t SegmentStream::segmentCount() const {
-    return segment_names_.size();
 }
