@@ -40,7 +40,9 @@ public:
     void stop();
     Status status() const;
     void setStatusCallback(StatusCallback callback);
-    static bool parsePacket(const std::string& packet, std::array<double, ChannelCount>& sample);
+    static bool parsePacket(const std::string& packet,
+                            double& timestamp,
+                            std::array<double, ChannelCount>& sample);
 
 private:
     void run();
