@@ -10,7 +10,7 @@ Stream Vicon motion capture data into [Lab Streaming Layer (LSL)](https://labstr
 
 ## Overview
 
-The bridge connects to a Vicon DataStream server and creates two LSL outlets:
+The bridge connects to a Vicon DataStream server and creates marker/segment LSL outlets, plus an optional HoloLens gaze outlet:
 
 - **ViconMarkers** — 4 channels per marker (X, Y, Z in mm, Valid flag). Occluded markers are sent as NaN with Valid=0.
 - **ViconSegments** — 7 channels per segment (X, Y, Z in mm, QX, QY, QZ, QW quaternion rotation).
