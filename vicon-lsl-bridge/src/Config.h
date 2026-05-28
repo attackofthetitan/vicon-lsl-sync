@@ -6,12 +6,9 @@ struct Config {
     std::string vicon_server = "localhost:801";
     std::string marker_stream_name = "ViconMarkers";
     std::string segment_stream_name = "ViconSegments";
-    std::string source_id_prefix = "vicon_";
     int reconnect_interval_ms = 3000;
 
     bool enable_hololens_gaze = true;
     unsigned short hololens_gaze_port = 16571;
     std::string hololens_gaze_stream_name = "HoloLensGaze";
-    std::string hololens_gaze_stream_type = "Gaze";
-    std::string hololens_gaze_source_id = "hololens2_gaze";
 };

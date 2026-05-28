@@ -4,8 +4,6 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGroupBox>
-#include <QMessageBox>
-#include <QApplication>
 #include <QSettings>
 #include <QFileDialog>
 #include <QFileInfo>

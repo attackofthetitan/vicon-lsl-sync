@@ -22,16 +22,11 @@ public:
     explicit LabRecorderClient(QObject* parent = nullptr);
 
     bool connectToServer(const QString& host, quint16 port, int timeout_ms = 1000);
-    void disconnectFromServer();
     bool isConnected() const;
     QString lastError() const;
 
     bool sendCommand(const QString& command);
     bool refreshStreams();
-    bool selectAll();
-    bool selectNone();
-    bool updateFilename(const LabRecorderFilenameFields& fields);
-    bool startRecording();
     bool startRecording(const LabRecorderFilenameFields& fields, bool select_all_first);
     bool stopRecording();
 
