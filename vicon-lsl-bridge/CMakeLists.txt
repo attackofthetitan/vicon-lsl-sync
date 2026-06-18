@@ -33,6 +33,7 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/HoloLensGazePacket.cpp
     src/StreamSchema.cpp
     src/CommandLine.cpp
+    src/ViconFrameMapper.cpp
 )
 
 target_include_directories(vicon-lsl-bridge-logic PUBLIC src)
@@ -140,6 +141,7 @@ if(BUILD_TESTING)
         tests/HoloLensGazePacketTests.cpp
         tests/StreamSchemaTests.cpp
         tests/CommandLineTests.cpp
+        tests/ViconFrameMapperTests.cpp
     )
 
     find_package(Catch2 3 QUIET)

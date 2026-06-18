@@ -1,7 +1,8 @@
 #pragma once
 
+#include "ViconFrameMapper.h"
+
 #include <lsl_cpp.h>
-#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,8 +15,8 @@ public:
                     const std::string& source_id);
     void destroy();
 
-    // Push one sample for all segments. Each entry: {x, y, z, qx, qy, qz, qw}
-    void pushSample(const std::vector<std::array<double, 7>>& segments, double timestamp);
+    // Converts status-bearing reads to fixed-shape LSL samples at the outlet boundary.
+    void pushSample(const std::vector<vicon_lsl::SegmentObjectRead>& segments, double timestamp);
 
 private:
     std::unique_ptr<lsl::stream_outlet> outlet_;
