@@ -1,40 +1,114 @@
 #include "CommandLine.h"
 
-#include <cerrno>
-#include <climits>
-#include <cstdlib>
-#include <cstring>
+#include <charconv>
+#include <limits>
 #include <sstream>
-#include <string>
+#include <utility>
 
+namespace vicon_lsl {
 namespace {
 
-bool parsePositiveInt(const char* text, int min_value, int max_value, int& value) {
-    if (text == nullptr || *text == '\0') {
+CommandLineResult helpResult(const Config& config) {
+    CommandLineResult result;
+    result.action = CommandLineAction::Help;
+    result.config = config;
+    return result;
+}
+
+CommandLineResult errorResult(const Config& config, std::string message) {
+    CommandLineResult result;
+    result.action = CommandLineAction::Error;
+    result.config = config;
+    result.message = std::move(message);
+    return result;
+}
+
+bool parseInt(std::string_view text, int min_value, int max_value, int& value) {
+    if (text.empty()) {
         return false;
     }
 
-    char* end = nullptr;
-    errno = 0;
-    long parsed = std::strtol(text, &end, 10);
-    if (errno != 0 || end == text || *end != '\0') {
+    int parsed = 0;
+    const char* begin = text.data();
+    const char* end = text.data() + text.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, parsed);
+    if (ec != std::errc{} || ptr != end) {
         return false;
     }
     if (parsed < min_value || parsed > max_value) {
         return false;
     }
 
-    value = static_cast<int>(parsed);
+    value = parsed;
     return true;
 }
 
-bool hasValue(int index, int argc, char* argv[]) {
-    return index + 1 < argc && argv[index + 1] != nullptr && argv[index + 1][0] != '-';
+bool needsValue(std::string_view option) {
+    return option == "--server" || option == "--marker-stream" ||
+           option == "--segment-stream" || option == "--gaze-port" ||
+           option == "--gaze-stream" || option == "--reconnect-interval";
 }
 
 } // namespace
 
-std::string usageText(const char* program) {
+CommandLineResult parseCommandLine(int argc, const char* const argv[]) {
+    std::vector<std::string> args;
+    args.reserve(argc > 0 ? static_cast<std::size_t>(argc) : 0);
+    for (int i = 0; i < argc; ++i) {
+        args.emplace_back(argv[i] == nullptr ? "" : argv[i]);
+    }
+    return parseCommandLine(args);
+}
+
+CommandLineResult parseCommandLine(const std::vector<std::string>& args) {
+    Config config;
+
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        const std::string& option = args[i];
+
+        if (option == "--help") {
+            return helpResult(config);
+        }
+
+        if (needsValue(option) && i + 1 >= args.size()) {
+            return errorResult(config, "Missing value for option: " + option);
+        }
+
+        if (option == "--server") {
+            config.vicon_server = args[++i];
+        } else if (option == "--marker-stream") {
+            config.marker_stream_name = args[++i];
+        } else if (option == "--segment-stream") {
+            config.segment_stream_name = args[++i];
+        } else if (option == "--no-hololens-gaze") {
+            config.enable_hololens_gaze = false;
+        } else if (option == "--gaze-port") {
+            int port = 0;
+            const std::string& value = args[++i];
+            if (!parseInt(value, 1, std::numeric_limits<unsigned short>::max(), port)) {
+                return errorResult(config, "Invalid UDP port for --gaze-port: " + value);
+            }
+            config.hololens_gaze_port = static_cast<unsigned short>(port);
+        } else if (option == "--gaze-stream") {
+            config.hololens_gaze_stream_name = args[++i];
+        } else if (option == "--reconnect-interval") {
+            int interval_ms = 0;
+            const std::string& value = args[++i];
+            if (!parseInt(value, 1, std::numeric_limits<int>::max(), interval_ms)) {
+                return errorResult(config, "Invalid milliseconds for --reconnect-interval: " + value);
+            }
+            config.reconnect_interval_ms = interval_ms;
+        } else {
+            return errorResult(config, "Unknown option: " + option);
+        }
+    }
+
+    CommandLineResult result;
+    result.config = config;
+    return result;
+}
+
+std::string formatUsage(std::string_view program) {
     std::ostringstream out;
     out << "Usage: " << program << " [options]\n"
         << "Options:\n"
@@ -42,80 +116,29 @@ std::string usageText(const char* program) {
         << "  --marker-stream <name>      LSL marker stream name (default: ViconMarkers)\n"
         << "  --segment-stream <name>     LSL segment stream name (default: ViconSegments)\n"
         << "  --no-hololens-gaze          Disable embedded HoloLens gaze UDP-to-LSL receiver\n"
-        << "  --gaze-port <port>          HoloLens gaze UDP port, 1-65535 (default: 16571)\n"
+        << "  --gaze-port <port>          HoloLens gaze UDP port (default: 16571)\n"
         << "  --gaze-stream <name>        HoloLens gaze LSL stream name (default: HoloLensGaze)\n"
-        << "  --reconnect-interval <ms>   Reconnection interval in ms, positive (default: 3000)\n"
+        << "  --reconnect-interval <ms>   Reconnection interval in ms (default: 3000)\n"
         << "  --help                      Show this help message\n";
     return out.str();
 }
 
-ParseResult parseCommandLine(int argc, char* argv[]) {
-    ParseResult result;
-    result.config = Config{};
+std::string formatStartupDiagnostics(const Config& config) {
+    std::ostringstream out;
+    out << "Vicon-LSL Bridge\n"
+        << "  Server: " << config.vicon_server << "\n"
+        << "  Marker stream: " << config.marker_stream_name << "\n"
+        << "  Segment stream: " << config.segment_stream_name << "\n";
 
-    for (int i = 1; i < argc; ++i) {
-        const char* option = argv[i];
-
-        if (std::strcmp(option, "--help") == 0) {
-            result.ok = true;
-            result.help_requested = true;
-            return result;
-        }
-
-        if (std::strcmp(option, "--server") == 0) {
-            if (!hasValue(i, argc, argv)) {
-                result.error = "--server requires a value";
-                return result;
-            }
-            result.config.vicon_server = argv[++i];
-        } else if (std::strcmp(option, "--marker-stream") == 0) {
-            if (!hasValue(i, argc, argv)) {
-                result.error = "--marker-stream requires a value";
-                return result;
-            }
-            result.config.marker_stream_name = argv[++i];
-        } else if (std::strcmp(option, "--segment-stream") == 0) {
-            if (!hasValue(i, argc, argv)) {
-                result.error = "--segment-stream requires a value";
-                return result;
-            }
-            result.config.segment_stream_name = argv[++i];
-        } else if (std::strcmp(option, "--no-hololens-gaze") == 0) {
-            result.config.enable_hololens_gaze = false;
-        } else if (std::strcmp(option, "--gaze-port") == 0) {
-            if (!hasValue(i, argc, argv)) {
-                result.error = "--gaze-port requires a value";
-                return result;
-            }
-            int port = 0;
-            if (!parsePositiveInt(argv[++i], 1, 65535, port)) {
-                result.error = "--gaze-port must be an integer from 1 to 65535";
-                return result;
-            }
-            result.config.hololens_gaze_port = static_cast<unsigned short>(port);
-        } else if (std::strcmp(option, "--gaze-stream") == 0) {
-            if (!hasValue(i, argc, argv)) {
-                result.error = "--gaze-stream requires a value";
-                return result;
-            }
-            result.config.hololens_gaze_stream_name = argv[++i];
-        } else if (std::strcmp(option, "--reconnect-interval") == 0) {
-            if (!hasValue(i, argc, argv)) {
-                result.error = "--reconnect-interval requires a value";
-                return result;
-            }
-            int interval = 0;
-            if (!parsePositiveInt(argv[++i], 1, INT_MAX, interval)) {
-                result.error = "--reconnect-interval must be a positive integer";
-                return result;
-            }
-            result.config.reconnect_interval_ms = interval;
-        } else {
-            result.error = std::string("Unknown option: ") + option;
-            return result;
-        }
+    if (config.enable_hololens_gaze) {
+        out << "  HoloLens gaze stream: " << config.hololens_gaze_stream_name
+            << " on UDP port " << config.hololens_gaze_port << "\n";
+    } else {
+        out << "  HoloLens gaze stream: disabled\n";
     }
 
-    result.ok = true;
-    return result;
+    out << "Press Ctrl+C to stop.\n";
+    return out.str();
 }
+
+} // namespace vicon_lsl

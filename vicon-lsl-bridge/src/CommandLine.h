@@ -3,13 +3,29 @@
 #include "Config.h"
 
 #include <string>
+#include <string_view>
+#include <vector>
 
-struct ParseResult {
-    bool ok = false;
-    bool help_requested = false;
-    Config config;
-    std::string error;
+namespace vicon_lsl {
+
+enum class CommandLineAction {
+    Run,
+    Help,
+    Error
 };
 
-ParseResult parseCommandLine(int argc, char* argv[]);
-std::string usageText(const char* program);
+struct CommandLineResult {
+    CommandLineAction action = CommandLineAction::Run;
+    Config config{};
+    std::string message;
+
+    bool shouldRun() const { return action == CommandLineAction::Run; }
+};
+
+CommandLineResult parseCommandLine(int argc, const char* const argv[]);
+CommandLineResult parseCommandLine(const std::vector<std::string>& args);
+
+std::string formatUsage(std::string_view program);
+std::string formatStartupDiagnostics(const Config& config);
+
+} // namespace vicon_lsl
