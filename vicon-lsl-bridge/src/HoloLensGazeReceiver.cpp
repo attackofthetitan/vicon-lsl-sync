@@ -3,12 +3,9 @@
 #include <lsl_cpp.h>
 
 #include <cerrno>
-#include <cmath>
-#include <cstdlib>
 #include <exception>
 #include <iostream>
-#include <limits>
-#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #ifdef _WIN32
@@ -23,35 +20,6 @@
 
 namespace {
 
-struct ChannelMeta {
-    const char* label;
-    const char* unit;
-};
-
-constexpr std::array<ChannelMeta, HoloLensGazeReceiver::ChannelCount> kChannels{{
-    {"CombinedOriginX", "meters"},
-    {"CombinedOriginY", "meters"},
-    {"CombinedOriginZ", "meters"},
-    {"CombinedDirectionX", "normalized"},
-    {"CombinedDirectionY", "normalized"},
-    {"CombinedDirectionZ", "normalized"},
-    {"CombinedValid", "bool"},
-    {"LeftEyeOriginX", "meters"},
-    {"LeftEyeOriginY", "meters"},
-    {"LeftEyeOriginZ", "meters"},
-    {"LeftEyeDirectionX", "normalized"},
-    {"LeftEyeDirectionY", "normalized"},
-    {"LeftEyeDirectionZ", "normalized"},
-    {"LeftEyeValid", "bool"},
-    {"RightEyeOriginX", "meters"},
-    {"RightEyeOriginY", "meters"},
-    {"RightEyeOriginZ", "meters"},
-    {"RightEyeDirectionX", "normalized"},
-    {"RightEyeDirectionY", "normalized"},
-    {"RightEyeDirectionZ", "normalized"},
-    {"RightEyeValid", "bool"},
-}};
-
 #ifdef _WIN32
 using SocketHandle = SOCKET;
 constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
@@ -62,6 +30,10 @@ void closeSocket(SocketHandle socket) {
 
 int lastSocketError() {
     return WSAGetLastError();
+}
+
+bool isReceiveTimeoutError(int error) {
+    return error == WSAETIMEDOUT || error == WSAEWOULDBLOCK;
 }
 #else
 using SocketHandle = int;
@@ -74,20 +46,11 @@ void closeSocket(SocketHandle socket) {
 int lastSocketError() {
     return errno;
 }
-#endif
 
-bool parseDouble(std::string_view text, double& value) {
-    if (text == "NaN") {
-        value = std::numeric_limits<double>::quiet_NaN();
-        return true;
-    }
-
-    std::string copy(text);
-    char* end = nullptr;
-    errno = 0;
-    value = std::strtod(copy.c_str(), &end);
-    return errno == 0 && end == copy.c_str() + copy.size();
+bool isReceiveTimeoutError(int error) {
+    return error == EAGAIN || error == EWOULDBLOCK;
 }
+#endif
 
 } // namespace
 
@@ -107,6 +70,9 @@ HoloLensGazeReceiver::~HoloLensGazeReceiver() {
 void HoloLensGazeReceiver::start() {
     if (running_) {
         return;
+    }
+    if (thread_.joinable()) {
+        thread_.join();
     }
 
     sample_count_ = 0;
@@ -167,10 +133,10 @@ void HoloLensGazeReceiver::initializeOutlet() {
         source_id_);
 
     lsl::xml_element channels = info_->desc().append_child("channels");
-    for (const auto& channel_meta : kChannels) {
+    for (const auto& channel_meta : vicon_lsl::holoLensGazeChannels()) {
         lsl::xml_element channel = channels.append_child("channel");
-        channel.append_child_value("label", channel_meta.label);
-        channel.append_child_value("unit", channel_meta.unit);
+        channel.append_child_value("label", std::string(channel_meta.label));
+        channel.append_child_value("unit", std::string(channel_meta.unit));
     }
 
     lsl::xml_element acquisition = info_->desc().append_child("acquisition");
@@ -227,19 +193,19 @@ void HoloLensGazeReceiver::run() {
 
 #ifdef _WIN32
     DWORD timeout_ms = 250;
-    setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO,
-               reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+    const int timeout_result =
+        setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO,
+                   reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
 #else
     timeval timeout{};
     timeout.tv_sec = 0;
     timeout.tv_usec = 250000;
-    setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    const int timeout_result =
+        setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 #endif
-
-    try {
-        initializeOutlet();
-    } catch (const std::exception& e) {
-        const std::string error = "Failed to create HoloLens gaze LSL outlet: " + std::string(e.what());
+    if (timeout_result != 0) {
+        const std::string error = "Failed to configure HoloLens gaze socket timeout: " +
+            std::to_string(lastSocketError());
         std::cerr << error << std::endl;
         running_ = false;
         reportStatus(error);
@@ -249,13 +215,29 @@ void HoloLensGazeReceiver::run() {
 #endif
         return;
     }
+
+    try {
+        initializeOutlet();
+    } catch (const std::exception& ex) {
+        const std::string error =
+            "Failed to create HoloLens gaze LSL outlet: " + std::string(ex.what());
+        std::cerr << error << std::endl;
+        running_ = false;
+        reportStatus(error);
+        closeSocket(socket_handle);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        return;
+    }
+
     listening_ = true;
     std::cout << "HoloLens gaze UDP receiver listening on port " << port_ << std::endl;
     reportStatus();
 
     std::array<char, 4096> buffer{};
-    std::array<double, ChannelCount> sample{};
-    double timestamp = 0.0;
+    unsigned long long receive_error_count = 0;
+    std::unordered_map<std::string, unsigned long long> parse_error_counts;
 
     while (running_) {
         sockaddr_in sender{};
@@ -268,22 +250,62 @@ void HoloLensGazeReceiver::run() {
         ssize_t received = recvfrom(socket_handle, buffer.data(), buffer.size() - 1, 0,
                                     reinterpret_cast<sockaddr*>(&sender), &sender_size);
 #endif
-        if (received <= 0) {
+        if (received < 0) {
+            const int socket_error = lastSocketError();
+            if (!isReceiveTimeoutError(socket_error)) {
+                ++receive_error_count;
+                if (receive_error_count == 1 || receive_error_count % 100 == 0) {
+                    std::string error = "HoloLens gaze UDP receive failed: error=" +
+                        std::to_string(socket_error);
+                    if (receive_error_count > 1) {
+                        error += " (repeated " + std::to_string(receive_error_count) + " times)";
+                    }
+                    std::cerr << error << std::endl;
+                    reportStatus(error);
+                }
+            }
             continue;
         }
 
-        std::string packet(buffer.data(), static_cast<size_t>(received));
-        if (!parsePacket(packet, timestamp, sample)) {
-            unsigned long long malformed = ++malformed_packet_count_;
-            if (malformed % 100 == 0) {
-                std::cerr << "Ignored " << malformed << " malformed HoloLens gaze UDP packets" << std::endl;
+        const std::string packet(buffer.data(), static_cast<std::size_t>(received));
+        const auto parsed = vicon_lsl::parseHoloLensGazePacket(packet);
+        if (!parsed.ok()) {
+            const unsigned long long malformed = ++malformed_packet_count_;
+            const std::string key =
+                std::string(vicon_lsl::toString(parsed.error)) + "|" +
+                std::to_string(parsed.field_index);
+            const auto error_count = ++parse_error_counts[key];
+            if (error_count == 1 || error_count % 100 == 0) {
+                std::string error = "HoloLens gaze packet rejected: error=" +
+                    std::string(vicon_lsl::toString(parsed.error)) +
+                    " field_index=" + std::to_string(parsed.field_index);
+                if (!parsed.field.empty()) {
+                    error += " field=" + parsed.field.substr(0, 64);
+                }
+                if (error_count > 1) {
+                    error += " (repeated " + std::to_string(error_count) + " times)";
+                }
+                std::cerr << error << std::endl;
+                reportStatus(error);
+            } else if (malformed % 100 == 0) {
                 reportStatus();
             }
             continue;
         }
 
-        outlet_->push_sample(sample.data(), timestamp);
-        unsigned long long count = ++sample_count_;
+        try {
+            outlet_->push_sample(
+                parsed.packet.sample.data(), parsed.packet.device_timestamp);
+        } catch (const std::exception& ex) {
+            const std::string error =
+                "Failed to push HoloLens gaze LSL sample: " + std::string(ex.what());
+            std::cerr << error << std::endl;
+            running_ = false;
+            reportStatus(error);
+            break;
+        }
+
+        const unsigned long long count = ++sample_count_;
         if (count % 900 == 0) {
             std::cout << "Relayed " << count << " HoloLens gaze samples" << std::endl;
             reportStatus();
@@ -291,51 +313,10 @@ void HoloLensGazeReceiver::run() {
     }
 
     listening_ = false;
+    running_ = false;
     closeSocket(socket_handle);
 #ifdef _WIN32
     WSACleanup();
 #endif
     reportStatus();
-}
-
-bool HoloLensGazeReceiver::parsePacket(const std::string& packet,
-                                       double& timestamp,
-                                       std::array<double, ChannelCount>& sample) {
-    std::string_view view(packet);
-    constexpr std::string_view prefix = "HLGAZE1,";
-    if (view.substr(0, prefix.size()) != prefix) {
-        return false;
-    }
-
-    view.remove_prefix(prefix.size());
-
-    size_t field_index = 0;
-    bool consumed_all = false;
-    while (field_index < ChannelCount + 1) {
-        size_t comma = view.find(',');
-        std::string_view field = comma == std::string_view::npos ? view : view.substr(0, comma);
-
-        double parsed = 0.0;
-        if (!parseDouble(field, parsed)) {
-            return false;
-        }
-
-        if (field_index == 0) {
-            if (!std::isfinite(parsed)) {
-                return false;
-            }
-            timestamp = parsed;
-        } else {
-            sample[field_index - 1] = parsed;
-        }
-
-        ++field_index;
-        if (comma == std::string_view::npos) {
-            consumed_all = true;
-            break;
-        }
-        view.remove_prefix(comma + 1);
-    }
-
-    return consumed_all && field_index == ChannelCount + 1;
 }
