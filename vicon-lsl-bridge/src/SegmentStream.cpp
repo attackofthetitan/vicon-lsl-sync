@@ -1,10 +1,20 @@
 #include "SegmentStream.h"
+#include "StreamSchema.h"
+
+#include <exception>
 #include <iostream>
+#include <utility>
 
 void SegmentStream::initialize(const std::vector<std::pair<std::string, std::string>>& segment_names,
                                 const std::string& stream_name,
                                 const std::string& source_id) {
+    destroy();
     segment_names_ = segment_names;
+    if (segment_names_.empty()) {
+        std::cout << "No segments discovered; segment stream not created" << std::endl;
+        return;
+    }
+
     int channel_count = static_cast<int>(segment_names_.size()) * 7;
 
     info_ = std::make_unique<lsl::stream_info>(
@@ -12,22 +22,10 @@ void SegmentStream::initialize(const std::vector<std::pair<std::string, std::str
         lsl::IRREGULAR_RATE, lsl::cf_double64, source_id);
 
     lsl::xml_element channels = info_->desc().append_child("channels");
-    for (const auto& [subject, segment] : segment_names_) {
-        std::string prefix = subject + ":" + segment;
-
-        const char* pos_labels[] = {"X", "Y", "Z"};
-        for (auto label : pos_labels) {
-            auto ch = channels.append_child("channel");
-            ch.append_child_value("label", prefix + ":" + label);
-            ch.append_child_value("unit", "mm");
-        }
-
-        const char* rot_labels[] = {"QX", "QY", "QZ", "QW"};
-        for (auto label : rot_labels) {
-            auto ch = channels.append_child("channel");
-            ch.append_child_value("label", prefix + ":" + label);
-            ch.append_child_value("unit", "quaternion");
-        }
+    for (const auto& spec : vicon_lsl::buildSegmentStreamSchema(segment_names_, stream_name).channels) {
+        auto channel = channels.append_child("channel");
+        channel.append_child_value("label", spec.label);
+        channel.append_child_value("unit", spec.unit);
     }
 
     sample_buffer_.resize(channel_count);
@@ -38,22 +36,38 @@ void SegmentStream::initialize(const std::vector<std::pair<std::string, std::str
 }
 
 void SegmentStream::destroy() {
+    const bool was_initialized = outlet_ != nullptr || info_ != nullptr;
     outlet_.reset();
     info_.reset();
     segment_names_.clear();
     sample_buffer_.clear();
-    std::cout << "Segment stream closed" << std::endl;
+    if (was_initialized) {
+        std::cout << "Segment stream closed" << std::endl;
+    }
 }
 
-void SegmentStream::pushSample(const std::vector<std::array<double, 7>>& segments, double timestamp) {
+void SegmentStream::pushSample(const std::vector<vicon_lsl::SegmentObjectRead>& segments,
+                               double timestamp) {
     if (!outlet_) return;
 
-    for (size_t i = 0; i < segments.size(); ++i) {
-        size_t offset = i * 7;
-        for (int j = 0; j < 7; ++j) {
-            sample_buffer_[offset + j] = segments[i][j];
-        }
+    std::vector<vicon_lsl::SegmentSample> samples;
+    samples.reserve(segments.size());
+    for (const auto& segment : segments) {
+        samples.push_back(
+            vicon_lsl::segmentSampleForLsl(segment.translation, segment.rotation));
     }
+    auto flattened = vicon_lsl::flattenSegmentSamples(samples);
+    if (flattened.size() != sample_buffer_.size()) {
+        std::cerr << "Segment sample channel mismatch: expected " << sample_buffer_.size()
+                  << ", got " << flattened.size() << std::endl;
+        return;
+    }
+    sample_buffer_ = std::move(flattened);
 
-    outlet_->push_sample(sample_buffer_, timestamp);
+    try {
+        outlet_->push_sample(sample_buffer_, timestamp);
+    } catch (const std::exception& ex) {
+        std::cerr << "Failed to push segment LSL sample: " << ex.what() << std::endl;
+        destroy();
+    }
 }

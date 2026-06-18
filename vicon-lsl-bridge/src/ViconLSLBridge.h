@@ -1,10 +1,11 @@
 #pragma once
 
 #include "Config.h"
-#include "ViconClient.h"
+#include "HoloLensGazeReceiver.h"
 #include "MarkerStream.h"
 #include "SegmentStream.h"
-#include "HoloLensGazeReceiver.h"
+#include "ViconClient.h"
+#include "ViconFrameMapper.h"
 
 #include <atomic>
 #include <functional>
@@ -42,10 +43,12 @@ public:
 
 private:
     void connectWithRetry();
-    void initializeStreams();
+    bool initializeStreams();
     bool checkLayoutChanged();
     void streamFrame(double timestamp);
     void reportStatus(BridgeState state, const std::string& message = "");
+    void handleDiagnostics(const std::vector<vicon_lsl::ViconDiagnostic>& diagnostics,
+                           BridgeState state = BridgeState::Streaming);
 
     Config config_;
     ViconClient client_;
@@ -56,8 +59,9 @@ private:
     std::atomic<BridgeState> current_state_{BridgeState::Disconnected};
     StatusCallback status_callback_;
 
-    // Cached layout for change detection
-    std::vector<std::pair<std::string, std::string>> known_markers_;
-    std::vector<std::pair<std::string, std::string>> known_segments_;
+    vicon_lsl::ViconLayout known_layout_;
     unsigned int frame_count_ = 0;
+    unsigned int frames_since_layout_check_ = 0;
+    vicon_lsl::DiagnosticAggregator diagnostic_aggregator_;
+    std::string last_diagnostic_message_;
 };

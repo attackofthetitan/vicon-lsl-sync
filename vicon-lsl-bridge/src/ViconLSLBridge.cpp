@@ -1,10 +1,14 @@
 #include "ViconLSLBridge.h"
+
 #include <lsl_cpp.h>
+
 #include <algorithm>
-#include <cmath>
 #include <chrono>
+#include <exception>
 #include <iostream>
 #include <thread>
+#include <utility>
+
 #ifdef _WIN32
 #include <winsock2.h>
 #else
@@ -40,16 +44,16 @@ void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message)
     if (status_callback_) {
         BridgeStatus status;
         status.state = state;
-        status.marker_count = known_markers_.size();
-        status.segment_count = known_segments_.size();
+        status.marker_count = known_layout_.markers.size();
+        status.segment_count = known_layout_.segments.size();
         status.frame_count = frame_count_;
-        auto gaze_status = hololens_gaze_receiver_.status();
+        const auto gaze_status = hololens_gaze_receiver_.status();
         status.gaze_enabled = config_.enable_hololens_gaze && gaze_status.enabled;
         status.gaze_listening = gaze_status.listening;
         status.gaze_sample_count = gaze_status.sample_count;
         status.gaze_malformed_packet_count = gaze_status.malformed_packet_count;
         status.gaze_last_error = gaze_status.last_error;
-        status.message = message;
+        status.message = message.empty() ? last_diagnostic_message_ : message;
         status_callback_(status);
     }
 }
@@ -66,7 +70,9 @@ void ViconLSLBridge::run() {
 
     while (running_) {
         connectWithRetry();
-        if (!running_) break;
+        if (!running_) {
+            break;
+        }
 
         if (!client_.getFrame()) {
             std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
@@ -74,8 +80,13 @@ void ViconLSLBridge::run() {
             client_.disconnect();
             continue;
         }
+        frame_count_ = client_.frameNumber();
 
-        initializeStreams();
+        if (!initializeStreams()) {
+            reportStatus(BridgeState::Connecting, last_diagnostic_message_);
+            client_.disconnect();
+            continue;
+        }
 
         std::cout << "Streaming started" << std::endl;
         reportStatus(BridgeState::Streaming, "Streaming started");
@@ -85,18 +96,22 @@ void ViconLSLBridge::run() {
                 reportStatus(BridgeState::Connecting, "Lost connection, will reconnect");
                 break;
             }
+            frame_count_ = client_.frameNumber();
 
-            double timestamp = lsl::local_clock();
+            const double timestamp = lsl::local_clock();
             streamFrame(timestamp);
 
-            frame_count_++;
-            if (frame_count_ % 100 == 0) {
+            if (++frames_since_layout_check_ >= 100) {
+                frames_since_layout_check_ = 0;
                 reportStatus(BridgeState::Streaming);
                 if (checkLayoutChanged()) {
                     std::cout << "Layout changed, reinitializing streams" << std::endl;
                     marker_stream_.destroy();
                     segment_stream_.destroy();
-                    initializeStreams();
+                    if (!initializeStreams()) {
+                        reportStatus(BridgeState::Connecting, last_diagnostic_message_);
+                        break;
+                    }
                     reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
                 }
             }
@@ -106,6 +121,10 @@ void ViconLSLBridge::run() {
         segment_stream_.destroy();
         client_.disconnect();
         frame_count_ = 0;
+        frames_since_layout_check_ = 0;
+        known_layout_ = {};
+        diagnostic_aggregator_.clear();
+        last_diagnostic_message_.clear();
         reportStatus(BridgeState::Disconnected, "Disconnected");
     }
 
@@ -117,101 +136,96 @@ void ViconLSLBridge::run() {
 void ViconLSLBridge::connectWithRetry() {
     reportStatus(BridgeState::Connecting, "Connecting to " + config_.vicon_server);
     while (running_ && !client_.connect()) {
-        reportStatus(BridgeState::Connecting, "Retrying in " + std::to_string(config_.reconnect_interval_ms) + "ms");
+        reportStatus(
+            BridgeState::Connecting,
+            "Retrying in " + std::to_string(config_.reconnect_interval_ms) + "ms");
         int remaining_ms = config_.reconnect_interval_ms;
         while (running_ && remaining_ms > 0) {
-            int sleep_ms = (std::min)(remaining_ms, 100);
+            const int sleep_ms = (std::min)(remaining_ms, 100);
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
             remaining_ms -= sleep_ms;
         }
     }
 }
 
-void ViconLSLBridge::initializeStreams() {
-    known_markers_.clear();
-    known_segments_.clear();
-
-    unsigned int subject_count = client_.getSubjectCount();
-    for (unsigned int s = 0; s < subject_count; ++s) {
-        std::string subject = client_.getSubjectName(s);
-
-        unsigned int marker_count = client_.getMarkerCount(subject);
-        for (unsigned int m = 0; m < marker_count; ++m) {
-            known_markers_.emplace_back(subject, client_.getMarkerName(subject, m));
-        }
-
-        unsigned int segment_count = client_.getSegmentCount(subject);
-        for (unsigned int seg = 0; seg < segment_count; ++seg) {
-            known_segments_.emplace_back(subject, client_.getSegmentName(subject, seg));
-        }
+bool ViconLSLBridge::initializeStreams() {
+    const auto discovery = vicon_lsl::discoverLayout(client_, frame_count_);
+    if (!discovery.ok()) {
+        handleDiagnostics(discovery.diagnostics, BridgeState::Connecting);
+        return false;
     }
+
+    known_layout_ = discovery.layout;
+    diagnostic_aggregator_.clear();
+    last_diagnostic_message_.clear();
+
+    std::cout << "Discovered " << known_layout_.markers.size() << " markers and "
+              << known_layout_.segments.size() << " segments" << std::endl;
 
     std::string hostname = "default";
-    char buf[256];
-    if (gethostname(buf, sizeof(buf)) == 0) {
-        hostname = buf;
+    char buffer[256];
+    if (gethostname(buffer, sizeof(buffer)) == 0) {
+        hostname = buffer;
+    } else {
+        std::cerr << "Failed to resolve local hostname; using default LSL source suffix"
+                  << std::endl;
     }
 
-    marker_stream_.initialize(known_markers_, config_.marker_stream_name,
-                               std::string(kSourceIdPrefix) + "markers_" + hostname);
-    segment_stream_.initialize(known_segments_, config_.segment_stream_name,
-                                std::string(kSourceIdPrefix) + "segments_" + hostname);
+    try {
+        marker_stream_.initialize(
+            known_layout_.markers,
+            config_.marker_stream_name,
+            vicon_lsl::buildStreamSourceId(kSourceIdPrefix, "markers", hostname));
+        segment_stream_.initialize(
+            known_layout_.segments,
+            config_.segment_stream_name,
+            vicon_lsl::buildStreamSourceId(kSourceIdPrefix, "segments", hostname));
+    } catch (const std::exception& ex) {
+        marker_stream_.destroy();
+        segment_stream_.destroy();
+        last_diagnostic_message_ =
+            std::string("Failed to initialize LSL streams: ") + ex.what();
+        std::cerr << last_diagnostic_message_ << std::endl;
+        return false;
+    }
+    return true;
 }
 
 bool ViconLSLBridge::checkLayoutChanged() {
-    std::vector<std::pair<std::string, std::string>> current_markers;
-    std::vector<std::pair<std::string, std::string>> current_segments;
-
-    unsigned int subject_count = client_.getSubjectCount();
-    for (unsigned int s = 0; s < subject_count; ++s) {
-        std::string subject = client_.getSubjectName(s);
-
-        unsigned int marker_count = client_.getMarkerCount(subject);
-        for (unsigned int m = 0; m < marker_count; ++m) {
-            current_markers.emplace_back(subject, client_.getMarkerName(subject, m));
-        }
-
-        unsigned int segment_count = client_.getSegmentCount(subject);
-        for (unsigned int seg = 0; seg < segment_count; ++seg) {
-            current_segments.emplace_back(subject, client_.getSegmentName(subject, seg));
-        }
+    const auto discovery = vicon_lsl::discoverLayout(client_, frame_count_);
+    if (!discovery.ok()) {
+        handleDiagnostics(discovery.diagnostics);
+        return false;
     }
-
-    return current_markers != known_markers_ || current_segments != known_segments_;
+    return vicon_lsl::layoutChanged(discovery.layout, known_layout_);
 }
 
 void ViconLSLBridge::streamFrame(double timestamp) {
-    std::vector<std::array<double, 4>> marker_data(known_markers_.size());
-    for (size_t i = 0; i < known_markers_.size(); ++i) {
-        double x, y, z;
-        bool occluded;
-        if (client_.getMarkerGlobalTranslation(known_markers_[i].first, known_markers_[i].second,
-                                                x, y, z, occluded)) {
-            if (occluded) {
-                marker_data[i] = {std::nan(""), std::nan(""), std::nan(""), 0.0};
-            } else {
-                marker_data[i] = {x, y, z, 1.0};
-            }
-        } else {
-            marker_data[i] = {std::nan(""), std::nan(""), std::nan(""), 0.0};
-        }
-    }
-    marker_stream_.pushSample(marker_data, timestamp);
+    const auto frame = vicon_lsl::buildViconFrame(client_, known_layout_, frame_count_);
+    marker_stream_.pushSample(frame.markers, timestamp);
+    segment_stream_.pushSample(frame.segments, timestamp);
+    handleDiagnostics(frame.diagnostics);
+}
 
-    std::vector<std::array<double, 7>> segment_data(known_segments_.size());
-    for (size_t i = 0; i < known_segments_.size(); ++i) {
-        double x, y, z, qx, qy, qz, qw;
-        bool pos_ok = client_.getSegmentGlobalTranslation(
-            known_segments_[i].first, known_segments_[i].second, x, y, z);
-        bool rot_ok = client_.getSegmentGlobalRotationQuaternion(
-            known_segments_[i].first, known_segments_[i].second, qx, qy, qz, qw);
-
-        if (pos_ok && rot_ok) {
-            segment_data[i] = {x, y, z, qx, qy, qz, qw};
-        } else {
-            segment_data[i] = {std::nan(""), std::nan(""), std::nan(""),
-                               std::nan(""), std::nan(""), std::nan(""), std::nan("")};
+void ViconLSLBridge::handleDiagnostics(
+    const std::vector<vicon_lsl::ViconDiagnostic>& diagnostics,
+    BridgeState state) {
+    if (diagnostics.empty()) {
+        if (!last_diagnostic_message_.empty()) {
+            last_diagnostic_message_.clear();
+            diagnostic_aggregator_.clear();
+            reportStatus(state, "Vicon reads recovered");
         }
+        return;
     }
-    segment_stream_.pushSample(segment_data, timestamp);
+
+    const auto emission = diagnostic_aggregator_.record(diagnostics);
+    for (const auto& line : emission.log_lines) {
+        std::cerr << line << std::endl;
+    }
+
+    if (emission.shouldReportStatus()) {
+        last_diagnostic_message_ = emission.status_message;
+        reportStatus(state, last_diagnostic_message_);
+    }
 }
