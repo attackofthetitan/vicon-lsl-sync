@@ -1,6 +1,7 @@
 #pragma once
 
-#include <array>
+#include "HoloLensGazePacket.h"
+
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -15,7 +16,7 @@ class stream_outlet;
 
 class HoloLensGazeReceiver {
 public:
-    static constexpr size_t ChannelCount = 21;
+    static constexpr std::size_t ChannelCount = vicon_lsl::HoloLensGazePacket::ChannelCount;
 
     struct Status {
         bool enabled = false;
@@ -40,9 +41,6 @@ public:
     void stop();
     Status status() const;
     void setStatusCallback(StatusCallback callback);
-    static bool parsePacket(const std::string& packet,
-                            double& timestamp,
-                            std::array<double, ChannelCount>& sample);
 
 private:
     void run();
