@@ -1,5 +1,6 @@
 # build artifacts
 build/
+build-*/
 cmake-build-*/
 *.o
 *.obj
@@ -44,7 +45,9 @@ dist/
 *.egg
 .venv/
 venv/
-/tests/
+tests/
+!vicon-lsl-bridge/tests/
+!vicon-lsl-bridge/tests/**
 
 # Data output
 *.csv
