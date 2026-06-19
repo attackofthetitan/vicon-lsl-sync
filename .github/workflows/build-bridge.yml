@@ -144,29 +144,32 @@ jobs:
       - name: Package portable GUI single exe (Windows)
         if: runner.os == 'Windows'
         run: |
-          if (Test-Path vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe) {
-            cmake --build vicon-lsl-bridge\build --config Release --target vicon-lsl-bridge-gui-portable
-            Copy-Item `
-              vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable.exe `
-              "${{ matrix.artifact }}-gui-portable.exe"
-          } else {
-            Write-Host "GUI executable was not built; skipping portable GUI package."
+          $gui = "vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe"
+          if (-not (Test-Path $gui)) {
+            throw "GUI executable was not built: $gui"
           }
+          cmake --build vicon-lsl-bridge\build --config Release --target vicon-lsl-bridge-gui-portable
+          $portable = "vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable.exe"
+          if (-not (Test-Path $portable)) {
+            throw "Portable GUI target completed without producing: $portable"
+          }
+          Copy-Item $portable "${{ matrix.artifact }}-gui-portable.exe"
         shell: pwsh
 
       - name: Smoke test portable GUI (Windows)
         if: runner.os == 'Windows'
         run: |
           $portable = "${{ matrix.artifact }}-gui-portable.exe"
-          if (Test-Path $portable) {
-            $process = Start-Process `
-              -FilePath ".\$portable" `
-              -ArgumentList "--smoke-test" `
-              -Wait `
-              -PassThru
-            if ($process.ExitCode -ne 0) {
-              throw "Portable GUI smoke test failed with exit code $($process.ExitCode)."
-            }
+          if (-not (Test-Path $portable)) {
+            throw "Portable GUI artifact was not created: $portable"
+          }
+          $process = Start-Process `
+            -FilePath ".\$portable" `
+            -ArgumentList "--smoke-test" `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Portable GUI smoke test failed with exit code $($process.ExitCode)."
           }
         shell: pwsh
 
