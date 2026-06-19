@@ -24,6 +24,10 @@ option(VICON_LSL_USE_SYSTEM_LIBLSL
     "Use an installed liblsl package instead of FetchContent"
     OFF
 )
+set(VICON_LSL_ENIGMA_PROJECT "" CACHE FILEPATH
+    "Optional Enigma Virtual Box .evb project used by the portable GUI target")
+set(VICON_LSL_ENIGMA_CONSOLE "" CACHE FILEPATH
+    "Optional path to enigmavbconsole.exe used by the portable GUI target")
 
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
@@ -38,6 +42,13 @@ add_library(vicon-lsl-bridge-logic STATIC
 
 target_include_directories(vicon-lsl-bridge-logic PUBLIC src)
 target_compile_features(vicon-lsl-bridge-logic PUBLIC cxx_std_17)
+
+if(WIN32)
+    add_executable(vicon-lsl-bridge-portable-launcher WIN32
+        packaging/windows/portable_launcher.cpp
+    )
+    target_compile_features(vicon-lsl-bridge-portable-launcher PRIVATE cxx_std_17)
+endif()
 
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     if(NOT VICON_LSL_BRIDGE_HAS_VICON_SDK)
@@ -122,6 +133,51 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
             if(WIN32)
                 target_link_libraries(vicon-lsl-bridge-gui PRIVATE ws2_32)
                 set_target_properties(vicon-lsl-bridge-gui PROPERTIES WIN32_EXECUTABLE TRUE)
+
+                find_program(VICON_LSL_POWERSHELL pwsh powershell)
+                find_program(VICON_LSL_WINDEPLOYQT windeployqt)
+                if(VICON_LSL_POWERSHELL AND VICON_LSL_WINDEPLOYQT)
+                    set(VICON_LSL_PORTABLE_STAGE
+                        "${CMAKE_CURRENT_BINARY_DIR}/vicon-lsl-bridge-gui-portable-stage")
+                    set(VICON_LSL_PORTABLE_PACKAGE_ARGS
+                        -DeployDir "${VICON_LSL_PORTABLE_STAGE}"
+                        -OutputExe "${CMAKE_CURRENT_BINARY_DIR}/vicon-lsl-bridge-gui-portable.exe"
+                        -LauncherExe "$<TARGET_FILE:vicon-lsl-bridge-portable-launcher>"
+                    )
+                    if(VICON_LSL_ENIGMA_PROJECT)
+                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
+                            -Mode Enigma
+                            -ProjectFile "${VICON_LSL_ENIGMA_PROJECT}")
+                    endif()
+                    if(VICON_LSL_ENIGMA_CONSOLE)
+                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
+                            -EnigmaConsole "${VICON_LSL_ENIGMA_CONSOLE}")
+                    endif()
+
+                    add_custom_target(vicon-lsl-bridge-gui-portable
+                        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${VICON_LSL_PORTABLE_STAGE}"
+                        COMMAND "${CMAKE_COMMAND}" -E make_directory "${VICON_LSL_PORTABLE_STAGE}"
+                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                            "$<TARGET_FILE:vicon-lsl-bridge-gui>"
+                            "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge-gui.exe"
+                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                            "$<TARGET_FILE:${VICON_LSL_LIB_TARGET}>"
+                            "${VICON_LSL_PORTABLE_STAGE}/$<TARGET_FILE_NAME:${VICON_LSL_LIB_TARGET}>"
+                        COMMAND "${VICON_LSL_WINDEPLOYQT}"
+                            --dir "${VICON_LSL_PORTABLE_STAGE}"
+                            "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge-gui.exe"
+                        COMMAND "${VICON_LSL_POWERSHELL}"
+                            -ExecutionPolicy Bypass
+                            -File "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/package_gui_single_exe.ps1"
+                            ${VICON_LSL_PORTABLE_PACKAGE_ARGS}
+                        DEPENDS vicon-lsl-bridge-gui vicon-lsl-bridge-portable-launcher
+                        COMMENT "Package vicon-lsl-bridge-gui as a single portable Windows executable"
+                        VERBATIM
+                    )
+                else()
+                    message(STATUS
+                        "pwsh/powershell or windeployqt not found - portable GUI target unavailable")
+                endif()
             endif()
 
             message(STATUS "Qt6 found - building vicon-lsl-bridge-gui")
