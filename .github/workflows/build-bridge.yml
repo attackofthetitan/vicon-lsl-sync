@@ -1,6 +1,7 @@
 name: Build Vicon LSL Bridge
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -17,6 +18,24 @@ on:
       - ".github/workflows/build-bridge.yml"
 
 jobs:
+  logic-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure dependency-light tests
+        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DBUILD_TESTING=ON
+
+      - name: Build dependency-light tests
+        run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests
+
+      - name: Run dependency-light tests
+        run: ctest --test-dir build-logic --build-config Release --output-on-failure
+
   build:
     strategy:
       matrix:
@@ -61,17 +80,21 @@ jobs:
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build
+        run: cmake -B build -DBUILD_TESTING=ON
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+        run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DBUILD_TESTING=ON
         working-directory: vicon-lsl-bridge
         shell: cmd
 
       - name: Build bridge
         run: cmake --build build --config Release
+        working-directory: vicon-lsl-bridge
+
+      - name: Test bridge
+        run: ctest --test-dir build --build-config Release --output-on-failure
         working-directory: vicon-lsl-bridge
 
       # Build LabRecorder (skip x86)
@@ -118,14 +141,45 @@ jobs:
           Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip
         shell: pwsh
 
+      - name: Package portable GUI single exe (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          if (Test-Path vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe) {
+            cmake --build vicon-lsl-bridge\build --config Release --target vicon-lsl-bridge-gui-portable
+            Copy-Item `
+              vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable.exe `
+              "${{ matrix.artifact }}-gui-portable.exe"
+          } else {
+            Write-Host "GUI executable was not built; skipping portable GUI package."
+          }
+        shell: pwsh
+
+      - name: Smoke test portable GUI (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $portable = "${{ matrix.artifact }}-gui-portable.exe"
+          if (Test-Path $portable) {
+            $process = Start-Process `
+              -FilePath ".\$portable" `
+              -ArgumentList "--smoke-test" `
+              -Wait `
+              -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "Portable GUI smoke test failed with exit code $($process.ExitCode)."
+            }
+          }
+        shell: pwsh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.*
+          path: |
+            ${{ matrix.artifact }}.*
+            ${{ matrix.artifact }}-gui-portable.exe
 
   release:
-    needs: [build]
+    needs: [logic-tests, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
