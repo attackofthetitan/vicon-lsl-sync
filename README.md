@@ -26,6 +26,7 @@ Pre-built binaries are available on the [Releases](../../releases) page for:
 - Windows x64
 
 Each release also includes [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) builds for convenient recording.
+There is also a seperate GUI app for windows.
 
 ## GUI Application
 
