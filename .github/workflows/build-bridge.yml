@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Configure dependency-light tests
         run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DBUILD_TESTING=ON
@@ -50,7 +50,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
