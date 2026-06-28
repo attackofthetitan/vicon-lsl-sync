@@ -66,7 +66,7 @@ jobs:
 
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~\AppData\Local\vcpkg\archives
           key: vcpkg-${{ matrix.triplet }}-boost-${{ hashFiles('vicon-lsl-bridge/external/vicon-datastream-sdk/CMakeLists.txt') }}
