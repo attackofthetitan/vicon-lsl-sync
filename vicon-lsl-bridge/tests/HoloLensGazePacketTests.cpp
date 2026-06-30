@@ -9,7 +9,7 @@ namespace {
 
 std::string validPacket() {
     std::ostringstream packet;
-    packet << "HLGAZE1,123.5";
+    packet << "HLGAZE1";
     for (std::size_t i = 0; i < vicon_lsl::HoloLensGazePacket::ChannelCount; ++i) {
         packet << "," << i;
     }
@@ -18,10 +18,9 @@ std::string validPacket() {
 
 } // namespace
 
-TEST_CASE("HoloLens parser accepts valid packets and ignores timestamp in sample") {
+TEST_CASE("HoloLens parser accepts valid packets without a device timestamp") {
     const auto parsed = vicon_lsl::parseHoloLensGazePacket(validPacket());
     REQUIRE(parsed.ok());
-    REQUIRE_EQ(parsed.packet.device_timestamp, 123.5);
     REQUIRE_EQ(parsed.packet.sample[0], 0.0);
     REQUIRE_EQ(parsed.packet.sample[20], 20.0);
 }
@@ -38,27 +37,16 @@ TEST_CASE("HoloLens parser accepts NaN fields") {
     REQUIRE(std::isnan(parsed.packet.sample[5]));
 }
 
-TEST_CASE("HoloLens parser rejects non-finite timestamps") {
-    std::string packet = validPacket();
-    const std::string timestamp = "123.5";
-    const auto pos = packet.find(timestamp);
-    REQUIRE(pos != std::string::npos);
-    packet.replace(pos, timestamp.size(), "NaN");
-
-    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket(packet).error,
-               vicon_lsl::HoloLensGazeParseError::InvalidNumber);
-}
-
 TEST_CASE("HoloLens parser rejects malformed packets") {
     REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("BAD,123").error,
                vicon_lsl::HoloLensGazeParseError::MissingPrefix);
-    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("HLGAZE1,123,1,2").error,
+    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("HLGAZE1,1,2").error,
                vicon_lsl::HoloLensGazeParseError::WrongFieldCount);
     REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket(validPacket() + ",27").error,
                vicon_lsl::HoloLensGazeParseError::WrongFieldCount);
-    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("HLGAZE1,123,,1").error,
+    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("HLGAZE1,,1").error,
                vicon_lsl::HoloLensGazeParseError::InvalidNumber);
-    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("HLGAZE1,123,abc").error,
+    REQUIRE_EQ(vicon_lsl::parseHoloLensGazePacket("HLGAZE1,abc").error,
                vicon_lsl::HoloLensGazeParseError::InvalidNumber);
     REQUIRE_EQ(std::string(vicon_lsl::toString(
                    vicon_lsl::HoloLensGazeParseError::InvalidNumber)),

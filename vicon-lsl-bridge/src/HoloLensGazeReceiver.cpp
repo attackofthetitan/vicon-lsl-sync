@@ -267,6 +267,7 @@ void HoloLensGazeReceiver::run() {
             continue;
         }
 
+        const double receive_timestamp = lsl::local_clock();
         const std::string packet(buffer.data(), static_cast<std::size_t>(received));
         const auto parsed = vicon_lsl::parseHoloLensGazePacket(packet);
         if (!parsed.ok()) {
@@ -295,7 +296,7 @@ void HoloLensGazeReceiver::run() {
 
         try {
             outlet_->push_sample(
-                parsed.packet.sample.data(), parsed.packet.device_timestamp);
+                parsed.packet.sample.data(), receive_timestamp);
         } catch (const std::exception& ex) {
             const std::string error =
                 "Failed to push HoloLens gaze LSL sample: " + std::string(ex.what());

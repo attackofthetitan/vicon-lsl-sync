@@ -15,7 +15,6 @@ struct HoloLensGazeChannel {
 struct HoloLensGazePacket {
     static constexpr std::size_t ChannelCount = 21;
 
-    double device_timestamp = 0.0;
     std::array<double, ChannelCount> sample{};
 };
 

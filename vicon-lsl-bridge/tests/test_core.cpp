@@ -1,7 +1,6 @@
 #include "CommandLine.h"
-#include "HoloLensGazeReceiver.h"
+#include "HoloLensGazePacket.h"
 
-#include <array>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -34,7 +33,7 @@ ParseResult parseArgs(std::vector<std::string> args) {
 
 std::string gazePacket(size_t channel_count) {
     std::ostringstream packet;
-    packet << "HLGAZE1,123.456";
+    packet << "HLGAZE1";
     for (size_t i = 0; i < channel_count; ++i) {
         packet << ',' << (i + 1);
     }
@@ -42,43 +41,23 @@ std::string gazePacket(size_t channel_count) {
 }
 
 void testGazePacketParser() {
-    std::array<double, HoloLensGazeReceiver::ChannelCount> sample{};
-    double timestamp = 0.0;
-
-    expect(HoloLensGazeReceiver::parsePacket(gazePacket(21), timestamp, sample),
+    const auto parsed = vicon_lsl::parseHoloLensGazePacket(gazePacket(21));
+    expect(parsed.ok(),
            "accepts 21-channel gaze packet");
-    expect(timestamp == 123.456,
-           "parses gaze packet timestamp");
-    expect(sample[0] == 1.0 && sample[20] == 21.0,
-           "maps 21 gaze values after timestamp");
+    expect(parsed.packet.sample[0] == 1.0 && parsed.packet.sample[20] == 21.0,
+           "maps 21 gaze values");
 
-    expect(!HoloLensGazeReceiver::parsePacket("BAD,123,1,2,3", timestamp, sample),
+    expect(!vicon_lsl::parseHoloLensGazePacket("BAD,1,2,3").ok(),
            "rejects wrong gaze prefix");
-    expect(!HoloLensGazeReceiver::parsePacket(gazePacket(20), timestamp, sample),
+    expect(!vicon_lsl::parseHoloLensGazePacket(gazePacket(20)).ok(),
            "rejects short gaze packet");
-    expect(!HoloLensGazeReceiver::parsePacket(gazePacket(26), timestamp, sample),
-           "rejects legacy 26-channel gaze packet");
-
-    std::string malformed_timestamp = gazePacket(21);
-    malformed_timestamp.replace(
-        std::string("HLGAZE1,").size(),
-        std::string("123.456").size(),
-        "not-a-number");
-    expect(!HoloLensGazeReceiver::parsePacket(malformed_timestamp, timestamp, sample),
-           "rejects malformed gaze timestamp");
-
-    std::string nan_timestamp = gazePacket(21);
-    nan_timestamp.replace(
-        std::string("HLGAZE1,").size(),
-        std::string("123.456").size(),
-        "NaN");
-    expect(!HoloLensGazeReceiver::parsePacket(nan_timestamp, timestamp, sample),
-           "rejects non-finite gaze timestamp");
+    expect(!vicon_lsl::parseHoloLensGazePacket(gazePacket(26)).ok(),
+           "rejects legacy overlong gaze packet");
 
     std::string malformed = gazePacket(21);
     size_t last_comma = malformed.rfind(',');
     malformed.replace(last_comma + 1, std::string::npos, "not-a-number");
-    expect(!HoloLensGazeReceiver::parsePacket(malformed, timestamp, sample),
+    expect(!vicon_lsl::parseHoloLensGazePacket(malformed).ok(),
            "rejects malformed gaze numeric field");
 }
 

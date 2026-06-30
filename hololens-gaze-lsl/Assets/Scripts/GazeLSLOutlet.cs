@@ -19,10 +19,6 @@ namespace GazeLSL
         private const int ChannelCount = 21;
         private const int StopTimeoutMilliseconds = 500;
 
-        private static readonly DateTime UnixEpoch = new DateTime(
-            1970, 1, 1, 0, 0, 0, DateTimeKind.Utc
-        );
-
         private static readonly string[] ChannelLabels =
         {
             "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
@@ -176,7 +172,7 @@ namespace GazeLSL
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
             acquisition.append_child_value("acquisition_mode", "worker_thread_rate_limited");
-            acquisition.append_child_value("timestamp", "eye_tracker_acquisition_time_unix_seconds");
+            acquisition.append_child_value("timestamp", "lsl_local_clock_at_push");
         }
 
         private void StartWorker()
@@ -246,7 +242,7 @@ namespace GazeLSL
             StreamOutlet currentOutlet = outlet;
             if (currentOutlet != null)
             {
-                currentOutlet.push_sample(sampleBuffer, GetAcquisitionTimestampSeconds(gazeSample));
+                currentOutlet.push_sample(sampleBuffer);
                 Interlocked.Increment(ref pushedSampleCount);
                 return;
             }
@@ -258,21 +254,9 @@ namespace GazeLSL
                 return;
             }
 
-            byte[] payload = Encoding.ASCII.GetBytes(BuildUdpPacket(GetAcquisitionTimestampSeconds(gazeSample), sampleBuffer));
+            byte[] payload = Encoding.ASCII.GetBytes(BuildUdpPacket(sampleBuffer));
             currentUdpClient.Send(payload, payload.Length, currentEndpoint);
             Interlocked.Increment(ref pushedSampleCount);
-        }
-
-        private static double GetAcquisitionTimestampSeconds(GazeDataProvider.GazeSample gazeSample)
-        {
-            DateTime acquisitionTime = gazeSample.TrackerTimestamp;
-
-            if (acquisitionTime.Kind != DateTimeKind.Utc)
-            {
-                acquisitionTime = acquisitionTime.ToUniversalTime();
-            }
-
-            return (acquisitionTime - UnixEpoch).TotalSeconds;
         }
 
         private static void WriteSampleBuffer(GazeDataProvider.GazeSample frame, double[] sample)
@@ -302,11 +286,10 @@ namespace GazeLSL
             sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
         }
 
-        private static string BuildUdpPacket(double timestamp, double[] sample)
+        private static string BuildUdpPacket(double[] sample)
         {
             StringBuilder packet = new StringBuilder();
-            packet.Append("HLGAZE1,");
-            packet.Append(timestamp.ToString("R", CultureInfo.InvariantCulture));
+            packet.Append("HLGAZE1");
 
             for (int i = 0; i < ChannelCount; i++)
             {

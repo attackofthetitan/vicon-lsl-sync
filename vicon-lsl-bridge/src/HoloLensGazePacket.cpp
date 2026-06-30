@@ -85,7 +85,7 @@ HoloLensGazeParseResult parseHoloLensGazePacket(std::string_view packet) {
     packet.remove_prefix(prefix_with_comma.size());
 
     HoloLensGazeParseResult result;
-    constexpr std::size_t expected_fields = HoloLensGazePacket::ChannelCount + 1;
+    constexpr std::size_t expected_fields = HoloLensGazePacket::ChannelCount;
 
     for (std::size_t field_index = 0; field_index < expected_fields; ++field_index) {
         const std::size_t comma = packet.find(',');
@@ -97,14 +97,7 @@ HoloLensGazeParseResult parseHoloLensGazePacket(std::string_view packet) {
             return parseError(HoloLensGazeParseError::InvalidNumber, field_index, field);
         }
 
-        if (field_index == 0) {
-            if (!std::isfinite(parsed)) {
-                return parseError(HoloLensGazeParseError::InvalidNumber, field_index, field);
-            }
-            result.packet.device_timestamp = parsed;
-        } else {
-            result.packet.sample[field_index - 1] = parsed;
-        }
+        result.packet.sample[field_index] = parsed;
 
         if (field_index + 1 == expected_fields) {
             if (comma != std::string_view::npos) {

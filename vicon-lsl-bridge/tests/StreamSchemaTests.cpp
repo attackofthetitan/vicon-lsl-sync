@@ -81,7 +81,6 @@ TEST_CASE("HoloLens schema and flattening omit the device timestamp") {
     REQUIRE_EQ(schema.channels.back().label, std::string("RightEyeValid"));
 
     vicon_lsl::HoloLensGazePacket packet;
-    packet.device_timestamp = 123456.0;
     for (std::size_t i = 0; i < packet.sample.size(); ++i) {
         packet.sample[i] = static_cast<double>(i + 1);
     }
