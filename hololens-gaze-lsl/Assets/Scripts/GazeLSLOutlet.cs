@@ -26,8 +26,7 @@ namespace GazeLSL
             "LeftEyeValid",
             "RightEyeOriginX", "RightEyeOriginY", "RightEyeOriginZ",
             "RightEyeDirectionX", "RightEyeDirectionY", "RightEyeDirectionZ",
-            "RightEyeValid",
-            "VergenceDistance"
+            "RightEyeValid"
         };
 
         private static readonly string[] ChannelUnits =
@@ -40,8 +39,7 @@ namespace GazeLSL
             "bool",
             "meters", "meters", "meters",
             "normalized", "normalized", "normalized",
-            "bool",
-            "meters"
+            "bool"
         };
 
         [SerializeField] private GazeLSLConfig config;
@@ -229,9 +227,6 @@ namespace GazeLSL
             sample[18] = frame.RightEyeDirectionY;
             sample[19] = frame.RightEyeDirectionZ;
             sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
-
-            sample[21] = frame.VergenceValid ? frame.VergenceDistance : double.NaN;
-
         }
 
         private void OnDestroy()
