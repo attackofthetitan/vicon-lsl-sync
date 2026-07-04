@@ -6,7 +6,7 @@ TEST_CASE("Command line parser returns defaults") {
     REQUIRE_EQ(parsed.action, vicon_lsl::CommandLineAction::Run);
     REQUIRE_EQ(parsed.config.vicon_server, std::string("localhost:801"));
     REQUIRE_EQ(parsed.config.marker_stream_name, std::string("ViconMarkers"));
-    REQUIRE(parsed.config.enable_hololens_gaze);
+    REQUIRE_EQ(parsed.config.segment_stream_name, std::string("ViconSegments"));
 }
 
 TEST_CASE("Command line parser handles valid options") {
@@ -15,9 +15,6 @@ TEST_CASE("Command line parser handles valid options") {
         "--server", "192.168.1.10:801",
         "--marker-stream", "Markers",
         "--segment-stream", "Segments",
-        "--no-hololens-gaze",
-        "--gaze-port", "16000",
-        "--gaze-stream", "Gaze",
         "--reconnect-interval", "42",
     });
 
@@ -25,9 +22,6 @@ TEST_CASE("Command line parser handles valid options") {
     REQUIRE_EQ(parsed.config.vicon_server, std::string("192.168.1.10:801"));
     REQUIRE_EQ(parsed.config.marker_stream_name, std::string("Markers"));
     REQUIRE_EQ(parsed.config.segment_stream_name, std::string("Segments"));
-    REQUIRE(!parsed.config.enable_hololens_gaze);
-    REQUIRE_EQ(parsed.config.hololens_gaze_port, static_cast<unsigned short>(16000));
-    REQUIRE_EQ(parsed.config.hololens_gaze_stream_name, std::string("Gaze"));
     REQUIRE_EQ(parsed.config.reconnect_interval_ms, 42);
 }
 
@@ -40,18 +34,16 @@ TEST_CASE("Command line parser handles help and errors") {
              "--server",
              "--marker-stream",
              "--segment-stream",
-             "--gaze-port",
-             "--gaze-stream",
              "--reconnect-interval",
          }) {
         REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", option}).action,
                    vicon_lsl::CommandLineAction::Error);
     }
-    REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--gaze-port", "0"}).action,
+    REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--no-hololens-gaze"}).action,
                vicon_lsl::CommandLineAction::Error);
-    REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--gaze-port", "abc"}).action,
+    REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--gaze-port", "16000"}).action,
                vicon_lsl::CommandLineAction::Error);
-    REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--gaze-port", "65536"}).action,
+    REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--gaze-stream", "Gaze"}).action,
                vicon_lsl::CommandLineAction::Error);
     REQUIRE_EQ(vicon_lsl::parseCommandLine({"bridge", "--reconnect-interval", "0"}).action,
                vicon_lsl::CommandLineAction::Error);
@@ -61,8 +53,8 @@ TEST_CASE("Command line parser handles help and errors") {
 
 TEST_CASE("Startup diagnostics include configured fields") {
     Config config;
-    config.enable_hololens_gaze = false;
     const auto startup = vicon_lsl::formatStartupDiagnostics(config);
     REQUIRE(startup.find("Vicon-LSL Bridge") != std::string::npos);
-    REQUIRE(startup.find("HoloLens gaze stream: disabled") != std::string::npos);
+    REQUIRE(startup.find("Marker stream: ViconMarkers") != std::string::npos);
+    REQUIRE(startup.find("HoloLens gaze") == std::string::npos);
 }

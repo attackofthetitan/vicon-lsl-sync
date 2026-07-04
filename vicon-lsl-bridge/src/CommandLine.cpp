@@ -45,8 +45,7 @@ bool parseInt(std::string_view text, int min_value, int max_value, int& value) {
 
 bool needsValue(std::string_view option) {
     return option == "--server" || option == "--marker-stream" ||
-           option == "--segment-stream" || option == "--gaze-port" ||
-           option == "--gaze-stream" || option == "--reconnect-interval";
+           option == "--segment-stream" || option == "--reconnect-interval";
 }
 
 } // namespace
@@ -80,17 +79,6 @@ CommandLineResult parseCommandLine(const std::vector<std::string>& args) {
             config.marker_stream_name = args[++i];
         } else if (option == "--segment-stream") {
             config.segment_stream_name = args[++i];
-        } else if (option == "--no-hololens-gaze") {
-            config.enable_hololens_gaze = false;
-        } else if (option == "--gaze-port") {
-            int port = 0;
-            const std::string& value = args[++i];
-            if (!parseInt(value, 1, std::numeric_limits<unsigned short>::max(), port)) {
-                return errorResult(config, "Invalid UDP port for --gaze-port: " + value);
-            }
-            config.hololens_gaze_port = static_cast<unsigned short>(port);
-        } else if (option == "--gaze-stream") {
-            config.hololens_gaze_stream_name = args[++i];
         } else if (option == "--reconnect-interval") {
             int interval_ms = 0;
             const std::string& value = args[++i];
@@ -115,9 +103,6 @@ std::string formatUsage(std::string_view program) {
         << "  --server <ip:port>          Vicon server address (default: localhost:801)\n"
         << "  --marker-stream <name>      LSL marker stream name (default: ViconMarkers)\n"
         << "  --segment-stream <name>     LSL segment stream name (default: ViconSegments)\n"
-        << "  --no-hololens-gaze          Disable embedded HoloLens gaze UDP-to-LSL receiver\n"
-        << "  --gaze-port <port>          HoloLens gaze UDP port (default: 16571)\n"
-        << "  --gaze-stream <name>        HoloLens gaze LSL stream name (default: HoloLensGaze)\n"
         << "  --reconnect-interval <ms>   Reconnection interval in ms (default: 3000)\n"
         << "  --help                      Show this help message\n";
     return out.str();
@@ -128,16 +113,8 @@ std::string formatStartupDiagnostics(const Config& config) {
     out << "Vicon-LSL Bridge\n"
         << "  Server: " << config.vicon_server << "\n"
         << "  Marker stream: " << config.marker_stream_name << "\n"
-        << "  Segment stream: " << config.segment_stream_name << "\n";
-
-    if (config.enable_hololens_gaze) {
-        out << "  HoloLens gaze stream: " << config.hololens_gaze_stream_name
-            << " on UDP port " << config.hololens_gaze_port << "\n";
-    } else {
-        out << "  HoloLens gaze stream: disabled\n";
-    }
-
-    out << "Press Ctrl+C to stop.\n";
+        << "  Segment stream: " << config.segment_stream_name << "\n"
+        << "Press Ctrl+C to stop.\n";
     return out.str();
 }
 

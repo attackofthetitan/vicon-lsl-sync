@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Config.h"
-#include "HoloLensGazeReceiver.h"
 #include "MarkerStream.h"
 #include "SegmentStream.h"
 #include "ViconClient.h"
@@ -24,11 +23,6 @@ struct BridgeStatus {
     size_t marker_count = 0;
     size_t segment_count = 0;
     unsigned int frame_count = 0;
-    bool gaze_enabled = false;
-    bool gaze_listening = false;
-    unsigned long long gaze_sample_count = 0;
-    unsigned long long gaze_malformed_packet_count = 0;
-    std::string gaze_last_error;
     std::string message;
 };
 
@@ -54,7 +48,6 @@ private:
     ViconClient client_;
     MarkerStream marker_stream_;
     SegmentStream segment_stream_;
-    HoloLensGazeReceiver hololens_gaze_receiver_;
     std::atomic<bool> running_{true};
     std::atomic<BridgeState> current_state_{BridgeState::Disconnected};
     StatusCallback status_callback_;

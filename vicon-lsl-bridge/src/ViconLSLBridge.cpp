@@ -18,22 +18,12 @@
 namespace {
 
 constexpr const char* kSourceIdPrefix = "vicon_";
-constexpr const char* kHoloLensGazeStreamType = "Gaze";
-constexpr const char* kHoloLensGazeSourceId = "hololens2_gaze";
 
 } // namespace
 
 ViconLSLBridge::ViconLSLBridge(const Config& config)
     : config_(config),
-      client_(config.vicon_server),
-      hololens_gaze_receiver_(config.hololens_gaze_port,
-                              config.hololens_gaze_stream_name,
-                              kHoloLensGazeStreamType,
-                              kHoloLensGazeSourceId) {
-    hololens_gaze_receiver_.setStatusCallback([this](const HoloLensGazeReceiver::Status&) {
-        reportStatus(current_state_);
-    });
-}
+      client_(config.vicon_server) {}
 
 void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
     status_callback_ = std::move(callback);
@@ -47,12 +37,6 @@ void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message)
         status.marker_count = known_layout_.markers.size();
         status.segment_count = known_layout_.segments.size();
         status.frame_count = frame_count_;
-        const auto gaze_status = hololens_gaze_receiver_.status();
-        status.gaze_enabled = config_.enable_hololens_gaze && gaze_status.enabled;
-        status.gaze_listening = gaze_status.listening;
-        status.gaze_sample_count = gaze_status.sample_count;
-        status.gaze_malformed_packet_count = gaze_status.malformed_packet_count;
-        status.gaze_last_error = gaze_status.last_error;
         status.message = message.empty() ? last_diagnostic_message_ : message;
         status_callback_(status);
     }
@@ -60,14 +44,9 @@ void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message)
 
 void ViconLSLBridge::stop() {
     running_ = false;
-    hololens_gaze_receiver_.stop();
 }
 
 void ViconLSLBridge::run() {
-    if (config_.enable_hololens_gaze) {
-        hololens_gaze_receiver_.start();
-    }
-
     while (running_) {
         connectWithRetry();
         if (!running_) {
@@ -129,7 +108,6 @@ void ViconLSLBridge::run() {
     }
 
     reportStatus(BridgeState::Stopped, "Stopped");
-    hololens_gaze_receiver_.stop();
     std::cout << "Stopped" << std::endl;
 }
 
