@@ -10,11 +10,11 @@ Stream Vicon motion capture data into [Lab Streaming Layer (LSL)](https://labstr
 
 ## Overview
 
-The bridge connects to a Vicon DataStream server and creates marker/segment LSL outlets, plus an optional HoloLens gaze outlet:
+The bridge connects to a Vicon DataStream server and creates marker/segment LSL outlets. HoloLens gaze is published by the Unity app as its own native LSL stream:
 
 - **ViconMarkers** — 4 channels per marker (X, Y, Z in mm, Valid flag). Occluded markers are sent as NaN with Valid=0.
 - **ViconSegments** — 7 channels per segment (X, Y, Z in mm, QX, QY, QZ, QW quaternion rotation).
-- **HoloLensGaze** — optional embedded UDP receiver for the HoloLens gaze Unity app. The stream has 21 channels: combined, left-eye, and right-eye origin/direction plus valid flags.
+- **HoloLensGaze** — native LSL stream from the HoloLens Unity app. The stream has 21 channels: combined, left-eye, and right-eye origin/direction plus valid flags.
 
 If the marker/segment layout changes mid-session (e.g., subjects added or removed), streams are automatically destroyed and recreated.
 
@@ -32,6 +32,8 @@ There is also a seperate GUI app for windows.
 
 The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure and start streaming without using the command line. Enter the Vicon server address, optionally change stream names, and click Start.
 
+The GUI also includes an embedded native OpenGL preview. The preview subscribes to the same LSL streams that LabRecorder records (`ViconMarkers`, `ViconSegments`, and `HoloLensGaze` by default), combines them into one 3D scene, and applies saved per-stream transforms so Vicon, HoloLens gaze, and the stair model can share one coordinate frame.
+
 The GUI can also prepare and control a LabRecorder session over LabRecorder's remote-control socket:
 
 1. Start streaming from the bridge.
@@ -48,7 +50,7 @@ Before recording, confirm the operator preflight:
 - Bridge streaming is running and LabRecorder RCS is enabled, connected, and listening on the configured host/port.
 - **ViconMarkers** is visible in LabRecorder when marker data is expected.
 - **ViconSegments** is visible in LabRecorder when segment data is expected.
-- **HoloLensGaze** is visible only when the optional HoloLens gaze source or UDP relay is part of the session.
+- **HoloLensGaze** is visible when the HoloLens Unity app is publishing native LSL gaze.
 
 The recording controls send LabRecorder commands and show command/connection errors without affecting bridge streaming.
 
@@ -63,9 +65,6 @@ Options:
   --server <ip:port>          Vicon server address (default: localhost:801)
   --marker-stream <name>      LSL marker stream name (default: ViconMarkers)
   --segment-stream <name>     LSL segment stream name (default: ViconSegments)
-  --no-hololens-gaze          Disable embedded HoloLens gaze UDP-to-LSL receiver
-  --gaze-port <port>          HoloLens gaze UDP port, 1-65535 (default: 16571)
-  --gaze-stream <name>        HoloLens gaze LSL stream name (default: HoloLensGaze)
   --reconnect-interval <ms>   Reconnection interval in ms (default: 3000)
   --help                      Show this help message
 ```
@@ -78,9 +77,7 @@ Options:
 
 ## Recording
 
-Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file with synchronized timestamps.
-
-The HoloLens Unity outlet uses native LSL when `liblsl.dll` loads successfully. If it cannot load LSL, or if `GazeLSLConfig.ForceUdpRelay` is enabled, it sends 21-channel `HLGAZE1` UDP packets to `vicon-lsl-bridge`; in that mode, run `vicon-lsl-bridge` and LabRecorder, and set `GazeLSLConfig.RelayHost`/`RelayPort` to the desktop running the bridge.
+Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file with synchronized timestamps. The bridge records Vicon streams; the HoloLens Unity app publishes gaze directly as native LSL.
 
 ## Building from source
 
@@ -91,7 +88,7 @@ The HoloLens Unity outlet uses native LSL when `liblsl.dll` loads successfully. 
 - Boost (thread, chrono, and header-only components)
 - liblsl (fetched automatically via CMake)
 - Vicon DataStream SDK (included as a submodule)
-- Qt6 (Core, Widgets) — optional, for the GUI app
+- Qt6 (Core, Widgets, Network, OpenGLWidgets) — optional, for the GUI app
 
 ### Linux
 

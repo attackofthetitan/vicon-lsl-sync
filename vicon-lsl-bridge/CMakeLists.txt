@@ -24,6 +24,10 @@ option(VICON_LSL_USE_SYSTEM_LIBLSL
     "Use an installed liblsl package instead of FetchContent"
     OFF
 )
+option(VICON_LSL_DEPLOY_QT_RUNTIME
+    "Run windeployqt after building the Windows GUI so the build output can run directly"
+    ON
+)
 set(VICON_LSL_ENIGMA_PROJECT "" CACHE FILEPATH
     "Optional Enigma Virtual Box .evb project used by the portable GUI target")
 set(VICON_LSL_ENIGMA_CONSOLE "" CACHE FILEPATH
@@ -35,6 +39,11 @@ endif()
 
 add_library(vicon-lsl-bridge-logic STATIC
     src/HoloLensGazePacket.cpp
+    src/preview/ObjMesh.cpp
+    src/preview/PreviewCsv.cpp
+    src/preview/PreviewMath.cpp
+    src/preview/PreviewParsing.cpp
+    src/preview/PreviewXdf.cpp
     src/StreamSchema.cpp
     src/CommandLine.cpp
     src/ViconFrameMapper.cpp
@@ -87,7 +96,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
 
     add_library(vicon-lsl-bridge-runtime STATIC
         src/ViconClient.cpp
-        src/HoloLensGazeReceiver.cpp
         src/MarkerStream.cpp
         src/SegmentStream.cpp
         src/ViconLSLBridge.cpp
@@ -109,7 +117,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     target_link_libraries(vicon-lsl-bridge PRIVATE vicon-lsl-bridge-runtime)
 
     if(VICON_LSL_BRIDGE_BUILD_GUI)
-        find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
+        find_package(Qt6 COMPONENTS Core Widgets Network OpenGLWidgets QUIET)
         if(Qt6_FOUND)
             set(CMAKE_AUTOMOC ON)
 
@@ -117,6 +125,9 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/main_gui.cpp
                 src/gui/BridgeWindow.cpp
                 src/gui/LabRecorderClient.cpp
+                src/gui/PreviewPanel.cpp
+                src/gui/PreviewStreamWorker.cpp
+                src/gui/PreviewWidget.cpp
             )
 
             target_link_libraries(vicon-lsl-bridge-gui PRIVATE
@@ -124,6 +135,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 Qt6::Core
                 Qt6::Widgets
                 Qt6::Network
+                Qt6::OpenGLWidgets
             )
             target_include_directories(vicon-lsl-bridge-gui PRIVATE src)
             target_compile_definitions(vicon-lsl-bridge-gui PRIVATE
@@ -136,6 +148,19 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
 
                 find_program(VICON_LSL_POWERSHELL pwsh powershell)
                 find_program(VICON_LSL_WINDEPLOYQT windeployqt)
+
+                if(VICON_LSL_DEPLOY_QT_RUNTIME AND VICON_LSL_WINDEPLOYQT)
+                    add_custom_command(TARGET vicon-lsl-bridge-gui POST_BUILD
+                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                            "$<TARGET_FILE:${VICON_LSL_LIB_TARGET}>"
+                            "$<TARGET_FILE_DIR:vicon-lsl-bridge-gui>/$<TARGET_FILE_NAME:${VICON_LSL_LIB_TARGET}>"
+                        COMMAND "${VICON_LSL_WINDEPLOYQT}"
+                            "$<TARGET_FILE:vicon-lsl-bridge-gui>"
+                        COMMENT "Deploy Qt and liblsl runtime files next to vicon-lsl-bridge-gui"
+                        VERBATIM
+                    )
+                endif()
+
                 if(VICON_LSL_POWERSHELL AND VICON_LSL_WINDEPLOYQT)
                     set(VICON_LSL_PORTABLE_STAGE
                         "${CMAKE_CURRENT_BINARY_DIR}/vicon-lsl-bridge-gui-portable-stage")
@@ -194,9 +219,9 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     set(VICON_LSL_BRIDGE_TEST_SOURCES
-        tests/HoloLensGazePacketTests.cpp
         tests/StreamSchemaTests.cpp
         tests/CommandLineTests.cpp
+        tests/PreviewCoreTests.cpp
         tests/ViconFrameMapperTests.cpp
     )
 
@@ -233,6 +258,9 @@ if(BUILD_TESTING)
     endif()
 
     if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
+        set(VICON_LSL_QT_TEST_ENV
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
         add_executable(vicon-lsl-labrecorder-tests
             tests/test_labrecorder_client.cpp
             src/gui/LabRecorderClient.cpp
@@ -240,5 +268,21 @@ if(BUILD_TESTING)
         target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
         target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE Qt6::Core Qt6::Network)
         add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)
+        set_tests_properties(vicon-lsl-labrecorder-tests PROPERTIES
+            TIMEOUT 30
+            ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
+        )
+
+        if(TARGET vicon-lsl-bridge-gui)
+            set(VICON_LSL_GUI_TEST_ENV
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
+            add_test(NAME vicon-lsl-bridge-gui-test
+                COMMAND vicon-lsl-bridge-gui --test)
+            set_tests_properties(vicon-lsl-bridge-gui-test PROPERTIES
+                TIMEOUT 30
+                ENVIRONMENT_MODIFICATION "${VICON_LSL_GUI_TEST_ENV}"
+            )
+        endif()
     endif()
 endif()
