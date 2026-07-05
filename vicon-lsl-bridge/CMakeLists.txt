@@ -279,7 +279,7 @@ if(BUILD_TESTING)
 
         if(TARGET vicon-lsl-bridge-gui)
             set(VICON_LSL_GUI_TEST_ENV
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+                ${VICON_LSL_QT_TEST_ENV}
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
             add_test(NAME vicon-lsl-bridge-gui-test
                 COMMAND vicon-lsl-bridge-gui --test)
