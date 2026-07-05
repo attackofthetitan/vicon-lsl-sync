@@ -44,7 +44,9 @@ private:
     };
 
     ProjectedPoint project(const PreviewVec3& point, const Bounds& bounds) const;
-    Bounds sceneBounds() const;
+    Bounds currentSceneBounds() const;
+    void resetViewFit();
+    void lockViewToCurrentScene();
     void includePoint(Bounds& bounds, const PreviewVec3& point) const;
     std::optional<PreviewVec3> gazeEndpoint(const PreviewGazeRay& ray, const Bounds& bounds) const;
 
@@ -52,11 +54,14 @@ private:
     PreviewMesh stair_mesh_;
     PreviewTransformProfile stair_transform_;
     std::vector<PreviewTriangle> stair_triangles_;
+    Bounds view_bounds_;
     std::map<std::string, std::deque<PreviewVec3>> marker_trails_;
     int trail_point_limit_ = 24;
     double azimuth_degrees_ = -64.0;
     double elevation_degrees_ = 24.0;
     double zoom_ = 1.0;
+    bool have_previous_frame_timestamp_ = false;
+    double previous_frame_timestamp_ = 0.0;
     QPoint last_mouse_pos_;
 };
 

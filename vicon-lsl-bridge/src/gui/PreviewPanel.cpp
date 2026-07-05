@@ -27,11 +27,11 @@ namespace vicon_lsl {
 namespace {
 
 // Fixed physical-stair placement from the Python preview auto-alignment.
-// Y is intentionally locked: in the recorded Vicon/stair data it is stair width,
-// not the riser axis, and zeroing it preserves the measured foot clearances.
+// Z is the height axis in the Vicon/stair data; Y centers the walking path
+// across the measured physical stair width.
 constexpr PreviewVec3 kPhysicalStairTranslationM{
-    -2.851259974167,
-    0.0,
+    -2.853343307500,
+    0.292672723112,
     0.006432986454,
 };
 

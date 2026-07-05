@@ -22,6 +22,8 @@ QColor segmentZColor() { return QColor("#4da3ff"); }
 QColor stairColor() { return QColor(150, 158, 168, 82); }
 QColor gridColor() { return QColor(70, 80, 88, 130); }
 
+constexpr double kPi = 3.14159265358979323846;
+
 QColor gazeColor(const std::string& name) {
     if (name == "Combined") {
         return QColor("#ffd166");
@@ -39,6 +41,10 @@ double spanAxis(double lower, double upper) {
     return std::max(upper - lower, 0.05);
 }
 
+double radians(double degrees) {
+    return degrees * kPi / 180.0;
+}
+
 } // namespace
 
 PreviewWidget::PreviewWidget(QWidget* parent) : QOpenGLWidget(parent) {
@@ -50,6 +56,8 @@ void PreviewWidget::setStairMesh(const PreviewMesh& mesh, const PreviewTransform
     stair_mesh_ = mesh;
     stair_transform_ = transform;
     stair_triangles_ = triangulateMesh(stair_mesh_, stair_transform_);
+    resetViewFit();
+    lockViewToCurrentScene();
     update();
 }
 
@@ -58,6 +66,10 @@ void PreviewWidget::setTrailPointLimit(int points) {
 }
 
 void PreviewWidget::setFrame(PreviewFrame frame) {
+    const bool rewound = have_previous_frame_timestamp_
+        && std::isfinite(frame.timestamp)
+        && frame.timestamp + 1e-6 < previous_frame_timestamp_;
+
     frame_ = std::move(frame);
     for (const auto& marker : frame_.markers) {
         if (!marker.valid || !isFinite(marker.position)) {
@@ -68,6 +80,14 @@ void PreviewWidget::setFrame(PreviewFrame frame) {
         while (static_cast<int>(trail.size()) > trail_point_limit_) {
             trail.pop_front();
         }
+    }
+    if (rewound) {
+        resetViewFit();
+    }
+    lockViewToCurrentScene();
+    if (std::isfinite(frame_.timestamp)) {
+        previous_frame_timestamp_ = frame_.timestamp;
+        have_previous_frame_timestamp_ = true;
     }
     update();
 }
@@ -80,7 +100,7 @@ void PreviewWidget::paintGL() {
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.fillRect(rect(), QColor("#0e1419"));
 
-    const Bounds bounds = sceneBounds();
+    const Bounds bounds = view_bounds_.valid ? view_bounds_ : currentSceneBounds();
     if (!bounds.valid) {
         painter.setPen(QColor("#b8c1cc"));
         painter.drawText(rect(), Qt::AlignCenter, "Preview waiting for LSL stream samples");
@@ -193,20 +213,34 @@ void PreviewWidget::wheelEvent(QWheelEvent* event) {
 
 PreviewWidget::ProjectedPoint PreviewWidget::project(const PreviewVec3& point, const Bounds& bounds) const {
     const PreviewVec3 center = (bounds.lower + bounds.upper) * 0.5;
-    PreviewVec3 view = point - center;
-    view = rotateEulerDegrees(view, {elevation_degrees_, 0.0, azimuth_degrees_});
+    const PreviewVec3 view = point - center;
+    const double azimuth = radians(azimuth_degrees_);
+    const double elevation = radians(elevation_degrees_);
+    const PreviewVec3 camera_direction = normalize({
+        std::cos(elevation) * std::cos(azimuth),
+        std::cos(elevation) * std::sin(azimuth),
+        std::sin(elevation),
+    });
+    const PreviewVec3 forward = camera_direction * -1.0;
+    PreviewVec3 right = cross(forward, {0.0, 0.0, 1.0});
+    if (length(right) <= 1e-9) {
+        right = {1.0, 0.0, 0.0};
+    } else {
+        right = normalize(right);
+    }
+    const PreviewVec3 up = normalize(cross(right, forward));
     const double span = std::max({spanAxis(bounds.lower.x, bounds.upper.x),
                                   spanAxis(bounds.lower.y, bounds.upper.y),
                                   spanAxis(bounds.lower.z, bounds.upper.z)});
     const double scale = std::min(width(), height()) * 0.74 * zoom_ / span;
     return {
-        QPointF(width() * 0.5 + view.x * scale,
-                height() * 0.56 - view.y * scale),
-        view.z,
+        QPointF(width() * 0.5 + dot(view, right) * scale,
+                height() * 0.56 - dot(view, up) * scale),
+        dot(view, camera_direction),
     };
 }
 
-PreviewWidget::Bounds PreviewWidget::sceneBounds() const {
+PreviewWidget::Bounds PreviewWidget::currentSceneBounds() const {
     Bounds bounds;
     for (const auto& marker : frame_.markers) {
         if (marker.valid) {
@@ -241,6 +275,20 @@ PreviewWidget::Bounds PreviewWidget::sceneBounds() const {
     bounds.lower = bounds.lower - pad;
     bounds.upper = bounds.upper + pad;
     return bounds;
+}
+
+void PreviewWidget::resetViewFit() {
+    view_bounds_ = {};
+}
+
+void PreviewWidget::lockViewToCurrentScene() {
+    if (view_bounds_.valid) {
+        return;
+    }
+    const Bounds bounds = currentSceneBounds();
+    if (bounds.valid) {
+        view_bounds_ = bounds;
+    }
 }
 
 void PreviewWidget::includePoint(Bounds& bounds, const PreviewVec3& point) const {
