@@ -26,6 +26,15 @@
 namespace vicon_lsl {
 namespace {
 
+// Fixed physical-stair placement from the Python preview auto-alignment.
+// Y is intentionally locked: in the recorded Vicon/stair data it is stair width,
+// not the riser axis, and zeroing it preserves the measured foot clearances.
+constexpr PreviewVec3 kPhysicalStairTranslationM{
+    -2.851259974167,
+    0.0,
+    0.006432986454,
+};
+
 QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
     auto* spin = new QDoubleSpinBox();
     spin->setRange(-100.0, 100.0);
@@ -357,7 +366,7 @@ PreviewTransformProfile PreviewPanel::stairTransform() const {
     PreviewTransformProfile transform;
     transform.name = "Stair";
     transform.scale = 0.001;
-    transform.translation = {0.0, 0.0, 0.0};
+    transform.translation = kPhysicalStairTranslationM;
     transform.rotation_degrees = {0.0, 0.0, 0.0};
     return transform;
 }
