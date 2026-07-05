@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.6.0 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -260,6 +260,10 @@ if(BUILD_TESTING)
     if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
         set(VICON_LSL_QT_TEST_ENV
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        if(NOT WIN32)
+            list(APPEND VICON_LSL_QT_TEST_ENV
+                "QT_QPA_PLATFORM=set:offscreen")
+        endif()
 
         add_executable(vicon-lsl-labrecorder-tests
             tests/test_labrecorder_client.cpp
