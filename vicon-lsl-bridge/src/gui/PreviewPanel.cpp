@@ -162,6 +162,7 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
 
     csv_timer_ = new QTimer(this);
     csv_timer_->setInterval(16);
+    playback_elapsed_.start();
 
     connect(start_button_, &QPushButton::clicked, this, &PreviewPanel::startPreview);
     connect(stop_button_, &QPushButton::clicked, this, &PreviewPanel::stopPreview);
@@ -169,6 +170,10 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     connect(open_xdf_button_, &QPushButton::clicked, this, &PreviewPanel::openXdf);
     connect(play_csv_button_, &QPushButton::clicked, this, &PreviewPanel::toggleCsvPlayback);
     connect(csv_timer_, &QTimer::timeout, this, &PreviewPanel::advanceCsvPlayback);
+    connect(playback_speed_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double speed) {
+                playback_clock_.setSpeed(speed, playback_elapsed_.elapsed() / 1000.0);
+            });
     connect(browse_stair_button, &QPushButton::clicked, this, &PreviewPanel::browseStairModel);
     connect(reload_stair_button, &QPushButton::clicked, this, &PreviewPanel::reloadStairModel);
     connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
@@ -347,7 +352,12 @@ void PreviewPanel::openMergedCsv() {
         vicon_transform.scale = 0.001;
         const auto recording = loadMergedPreviewCsv(path.toStdString(), vicon_transform, gazeTransform());
         csv_frames_ = recording.frames;
-        csv_frame_cursor_ = 0.0;
+        std::vector<double> timestamps;
+        timestamps.reserve(csv_frames_.size());
+        for (const auto& frame : csv_frames_) timestamps.push_back(frame.timestamp);
+        playback_clock_.setTimeline(timestamps);
+        playback_clock_.setSpeed(playback_speed_spin_->value(),
+                                 playback_elapsed_.elapsed() / 1000.0);
         if (csv_frames_.empty()) {
             play_csv_button_->setEnabled(false);
             setStatus("CSV has no preview frames");
@@ -387,7 +397,12 @@ void PreviewPanel::openXdf() {
                                                        gazeTransform(),
                                                        tolerance_spin_->value());
         csv_frames_ = recording.frames;
-        csv_frame_cursor_ = 0.0;
+        std::vector<double> timestamps;
+        timestamps.reserve(csv_frames_.size());
+        for (const auto& frame : csv_frames_) timestamps.push_back(frame.timestamp);
+        playback_clock_.setTimeline(timestamps);
+        playback_clock_.setSpeed(playback_speed_spin_->value(),
+                                 playback_elapsed_.elapsed() / 1000.0);
         if (csv_frames_.empty()) {
             play_csv_button_->setEnabled(false);
             setStatus("XDF has no preview frames");
@@ -409,9 +424,11 @@ void PreviewPanel::toggleCsvPlayback() {
         return;
     }
     if (csv_timer_->isActive()) {
+        playback_clock_.pause(playback_elapsed_.elapsed() / 1000.0);
         csv_timer_->stop();
         play_csv_button_->setText("Play Recording");
     } else {
+        playback_clock_.play(playback_elapsed_.elapsed() / 1000.0);
         csv_timer_->start();
         play_csv_button_->setText("Pause Recording");
     }
@@ -423,11 +440,8 @@ void PreviewPanel::advanceCsvPlayback() {
         play_csv_button_->setText("Play Recording");
         return;
     }
-    csv_frame_cursor_ += playback_speed_spin_->value();
-    if (csv_frame_cursor_ >= static_cast<double>(csv_frames_.size())) {
-        csv_frame_cursor_ = 0.0;
-    }
-    widget_->setFrame(csv_frames_[static_cast<std::size_t>(csv_frame_cursor_)]);
+    widget_->setFrame(csv_frames_[playback_clock_.frameIndex(
+        playback_elapsed_.elapsed() / 1000.0)]);
 }
 
 void PreviewPanel::browseStairModel() {

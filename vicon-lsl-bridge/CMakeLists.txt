@@ -43,6 +43,7 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/preview/PreviewCalibration.cpp
     src/preview/PreviewCsv.cpp
     src/preview/PreviewMath.cpp
+    src/preview/PreviewPlaybackClock.cpp
     src/preview/PreviewParsing.cpp
     src/preview/PreviewXdf.cpp
     src/StreamSchema.cpp

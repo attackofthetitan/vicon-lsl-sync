@@ -3,7 +3,9 @@
 #include "gui/PreviewStreamWorker.h"
 #include "gui/PreviewWidget.h"
 #include "preview/PreviewCalibration.h"
+#include "preview/PreviewPlaybackClock.h"
 
+#include <QElapsedTimer>
 #include <QWidget>
 
 #include <vector>
@@ -78,7 +80,8 @@ private:
     QLabel* status_label_ = nullptr;
     QTimer* csv_timer_ = nullptr;
     std::vector<PreviewFrame> csv_frames_;
-    double csv_frame_cursor_ = 0.0;
+    QElapsedTimer playback_elapsed_;
+    PreviewPlaybackClock playback_clock_;
     PreviewStreamWorker* worker_ = nullptr;
     WorkerState worker_state_ = WorkerState::Idle;
     CalibrationState calibration_state_ = CalibrationState::Manual;
