@@ -12,7 +12,6 @@ struct HoloLensGazeChannel {
 };
 
 inline constexpr std::size_t kHoloLensGazeChannelCount = 21;
-
 const std::array<HoloLensGazeChannel, kHoloLensGazeChannelCount>&
 holoLensGazeChannels();
 

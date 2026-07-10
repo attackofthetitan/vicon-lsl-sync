@@ -1,6 +1,6 @@
 #include "preview/PreviewParsing.h"
 
-#include "HoloLensGazePacket.h"
+#include "HoloLensGazeSchema.h"
 #include "StreamDefaults.h"
 #include "preview/PreviewMath.h"
 

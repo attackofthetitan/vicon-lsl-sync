@@ -38,7 +38,7 @@ if(WIN32)
 endif()
 
 add_library(vicon-lsl-bridge-logic STATIC
-    src/HoloLensGazePacket.cpp
+    src/HoloLensGazeSchema.cpp
     src/preview/ObjMesh.cpp
     src/preview/PreviewCalibration.cpp
     src/preview/PreviewCsv.cpp

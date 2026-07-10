@@ -1,4 +1,4 @@
-#include "HoloLensGazePacket.h"
+#include "HoloLensGazeSchema.h"
 
 namespace vicon_lsl {
 namespace {

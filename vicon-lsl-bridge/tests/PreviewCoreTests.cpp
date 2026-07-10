@@ -1,4 +1,4 @@
-#include "HoloLensGazePacket.h"
+#include "HoloLensGazeSchema.h"
 #include "preview/ObjMesh.h"
 #include "preview/PreviewCsv.h"
 #include "preview/PreviewCalibration.h"

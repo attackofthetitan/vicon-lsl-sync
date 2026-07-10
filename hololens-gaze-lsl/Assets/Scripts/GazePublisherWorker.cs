@@ -16,7 +16,7 @@ namespace GazeLSL
 
     public static class GazeSampleEncoder
     {
-        public const int ChannelCount = 21;
+        public const int ChannelCount = GazeStreamContract.ChannelCount;
 
         public static void WriteSample(GazeSample frame, double[] sample)
         {

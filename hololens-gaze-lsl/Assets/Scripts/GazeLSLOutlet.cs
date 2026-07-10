@@ -10,34 +10,8 @@ namespace GazeLSL
     */
     public sealed class GazeLSLOutlet : MonoBehaviour
     {
-        private const int ChannelCount = GazeSampleEncoder.ChannelCount;
+        private const int ChannelCount = GazeStreamContract.ChannelCount;
         private const int StopTimeoutMilliseconds = 500;
-
-        private static readonly string[] ChannelLabels =
-        {
-            "CombinedOriginX", "CombinedOriginY", "CombinedOriginZ",
-            "CombinedDirectionX", "CombinedDirectionY", "CombinedDirectionZ",
-            "CombinedValid",
-            "LeftEyeOriginX", "LeftEyeOriginY", "LeftEyeOriginZ",
-            "LeftEyeDirectionX", "LeftEyeDirectionY", "LeftEyeDirectionZ",
-            "LeftEyeValid",
-            "RightEyeOriginX", "RightEyeOriginY", "RightEyeOriginZ",
-            "RightEyeDirectionX", "RightEyeDirectionY", "RightEyeDirectionZ",
-            "RightEyeValid"
-        };
-
-        private static readonly string[] ChannelUnits =
-        {
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized",
-            "bool",
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized",
-            "bool",
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized",
-            "bool"
-        };
 
         [SerializeField] private GazeLSLConfig config;
         [SerializeField] private GazeDataProvider gazeProvider;
@@ -121,8 +95,8 @@ namespace GazeLSL
             for (int i = 0; i < ChannelCount; i++)
             {
                 XMLElement channel = channels.append_child("channel");
-                channel.append_child_value("label", ChannelLabels[i]);
-                channel.append_child_value("unit", ChannelUnits[i]);
+                channel.append_child_value("label", GazeStreamContract.Labels[i]);
+                channel.append_child_value("unit", GazeStreamContract.Units[i]);
             }
         }
 

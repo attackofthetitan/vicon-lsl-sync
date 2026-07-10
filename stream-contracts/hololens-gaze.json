@@ -1,0 +1,26 @@
+{
+  "name": "HoloLensGaze",
+  "channels": [
+    {"label": "CombinedOriginX", "unit": "meters"},
+    {"label": "CombinedOriginY", "unit": "meters"},
+    {"label": "CombinedOriginZ", "unit": "meters"},
+    {"label": "CombinedDirectionX", "unit": "normalized"},
+    {"label": "CombinedDirectionY", "unit": "normalized"},
+    {"label": "CombinedDirectionZ", "unit": "normalized"},
+    {"label": "CombinedValid", "unit": "bool"},
+    {"label": "LeftEyeOriginX", "unit": "meters"},
+    {"label": "LeftEyeOriginY", "unit": "meters"},
+    {"label": "LeftEyeOriginZ", "unit": "meters"},
+    {"label": "LeftEyeDirectionX", "unit": "normalized"},
+    {"label": "LeftEyeDirectionY", "unit": "normalized"},
+    {"label": "LeftEyeDirectionZ", "unit": "normalized"},
+    {"label": "LeftEyeValid", "unit": "bool"},
+    {"label": "RightEyeOriginX", "unit": "meters"},
+    {"label": "RightEyeOriginY", "unit": "meters"},
+    {"label": "RightEyeOriginZ", "unit": "meters"},
+    {"label": "RightEyeDirectionX", "unit": "normalized"},
+    {"label": "RightEyeDirectionY", "unit": "normalized"},
+    {"label": "RightEyeDirectionZ", "unit": "normalized"},
+    {"label": "RightEyeValid", "unit": "bool"}
+  ]
+}
