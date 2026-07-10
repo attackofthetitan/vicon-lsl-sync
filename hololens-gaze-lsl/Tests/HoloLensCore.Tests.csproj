@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\Assets\Scripts\GazePublisherWorker.cs" Link="GazePublisherWorker.cs" />
+    <Compile Include="..\Assets\Scripts\GazeSample.cs" Link="GazeSample.cs" />
+    <Compile Include="..\Assets\Scripts\ModelTargetPoseEncoder.cs" Link="ModelTargetPoseEncoder.cs" />
+    <Compile Include="..\Assets\Scripts\TrackerSessionCoordinator.cs" Link="TrackerSessionCoordinator.cs" />
+  </ItemGroup>
+</Project>
