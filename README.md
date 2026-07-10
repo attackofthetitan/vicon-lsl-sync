@@ -39,7 +39,7 @@ The GUI also includes an embedded native OpenGL preview. The preview subscribes 
 
 Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` without modifying the raw gaze stream.
 
-In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and saves the resulting HoloLens-to-Vicon rigid transform. **Use Manual Transform** returns to the existing translation/Euler controls.
+In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and applies the resulting HoloLens-to-Vicon rigid transform for the current preview session only; automatic alignment is not saved. **Use Manual Transform** returns to the persistent translation/Euler controls.
 
 The Vicon-side stair pose is currently the best fixed estimate used by the preview. Repeat calibration after restarting the HoloLens world frame; if the physical stairs are relocated, update that fixed estimate until an editable stair-pose workflow is added.
 
