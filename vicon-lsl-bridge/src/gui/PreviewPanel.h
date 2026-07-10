@@ -38,6 +38,12 @@ private slots:
     void handleTargetPose(vicon_lsl::CalibrationTargetPose pose);
 
 private:
+    enum class WorkerState {
+        Idle,
+        Running,
+        Stopping,
+    };
+
     PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
@@ -73,6 +79,7 @@ private:
     std::vector<PreviewFrame> csv_frames_;
     double csv_frame_cursor_ = 0.0;
     PreviewStreamWorker* worker_ = nullptr;
+    WorkerState worker_state_ = WorkerState::Idle;
     bool calibration_collecting_ = false;
     bool has_automatic_calibration_ = false;
     PreviewRigidTransform automatic_gaze_transform_;

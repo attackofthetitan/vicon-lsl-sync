@@ -216,12 +216,20 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
 }
 
 PreviewPanel::~PreviewPanel() {
-    stopPreview();
+    if (worker_) {
+        worker_->requestInterruption();
+        worker_->wait();
+    }
     saveSettings();
 }
 
 void PreviewPanel::startPreview() {
-    stopPreview();
+    if (worker_) {
+        stopPreview();
+        if (worker_) {
+            return;
+        }
+    }
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
     saveSettings();
@@ -238,14 +246,21 @@ void PreviewPanel::startPreview() {
     config.gaze_transform = gazeTransform();
 
     worker_ = new PreviewStreamWorker(config, this);
+    worker_state_ = WorkerState::Running;
+    PreviewStreamWorker* const started_worker = worker_;
     connect(worker_, &PreviewStreamWorker::frameReady, widget_, &PreviewWidget::setFrame);
     connect(worker_, &PreviewStreamWorker::targetPoseReady, this, &PreviewPanel::handleTargetPose);
     connect(worker_, &PreviewStreamWorker::statusChanged, this, &PreviewPanel::setStatus);
     connect(worker_, &QThread::finished, worker_, &QObject::deleteLater);
-    connect(worker_, &QThread::finished, this, [this]() {
+    connect(worker_, &QThread::finished, this, [this, started_worker]() {
+        if (worker_ != started_worker) {
+            return;
+        }
         worker_ = nullptr;
+        worker_state_ = WorkerState::Idle;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
+        setStatus("Preview stopped");
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
@@ -255,16 +270,24 @@ void PreviewPanel::startPreview() {
 
 void PreviewPanel::stopPreview() {
     if (!worker_) {
+        worker_state_ = WorkerState::Idle;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
         return;
     }
-    worker_->requestInterruption();
-    worker_->wait(1000);
-    worker_ = nullptr;
-    start_button_->setEnabled(true);
+    if (worker_state_ == WorkerState::Stopping) {
+        return;
+    }
+
+    worker_state_ = WorkerState::Stopping;
+    PreviewStreamWorker* const stopping_worker = worker_;
+    stopping_worker->requestInterruption();
+    start_button_->setEnabled(false);
     stop_button_->setEnabled(false);
-    setStatus("Preview stopped");
+    setStatus("Preview stopping...");
+    if (!stopping_worker->wait(1000)) {
+        setStatus("Preview is still stopping; restart is disabled until it finishes");
+    }
 }
 
 void PreviewPanel::beginCalibration() {

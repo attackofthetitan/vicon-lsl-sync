@@ -77,7 +77,7 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
 
 PreviewStreamWorker::~PreviewStreamWorker() {
     requestInterruption();
-    wait(1000);
+    wait();
 }
 
 void PreviewStreamWorker::setGazeTransform(PreviewTransformProfile transform) {
