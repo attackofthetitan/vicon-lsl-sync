@@ -1,10 +1,13 @@
 #include "gui/LabRecorderClient.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QTcpServer>
 #include <QTcpSocket>
 
 #include <iostream>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,8 +23,18 @@ void expect(bool condition, const std::string& name) {
     }
 }
 
+bool waitUntil(const std::function<bool()>& condition, int timeout_ms = 1000) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!condition() && timer.elapsed() < timeout_ms) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    return condition();
+}
+
 QString readCommand(QTcpSocket* socket) {
-    if (!socket->canReadLine() && !socket->waitForReadyRead(1000)) {
+    if (!waitUntil([socket]() { return socket->canReadLine(); })) {
         return {};
     }
     return QString::fromUtf8(socket->readLine()).trimmed();
@@ -110,8 +123,9 @@ void testTcpCommandSequence() {
     expect(server.listen(QHostAddress::LocalHost, 0), "fake LabRecorder server listens");
 
     LabRecorderClient client;
-    expect(client.connectToServer("127.0.0.1", server.serverPort()), "client connects to fake server");
-    expect(server.waitForNewConnection(1000), "server accepts fake client");
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&client]() { return client.isConnected(); }), "client connects to fake server");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }), "server accepts fake client");
     std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
     expect(socket != nullptr, "server has pending socket");
     if (!socket) {
@@ -150,9 +164,11 @@ void testTcpStartRecordingSequenceWithSelectAll() {
     expect(server.listen(QHostAddress::LocalHost, 0), "fake LabRecorder server listens for start sequence");
 
     LabRecorderClient client;
-    expect(client.connectToServer("127.0.0.1", server.serverPort()),
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&client]() { return client.isConnected(); }),
            "client connects to fake server for start sequence");
-    expect(server.waitForNewConnection(1000), "server accepts fake client for start sequence");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
+           "server accepts fake client for start sequence");
     std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
     expect(socket != nullptr, "server has pending socket for start sequence");
     if (!socket) {
@@ -177,6 +193,33 @@ void testTcpStartRecordingSequenceWithSelectAll() {
            "server receives start after filename in combined start sequence");
 }
 
+void testConnectionStateTracksIdleDisconnectAndReconnect() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "state server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&client]() { return client.isConnected(); }),
+           "state client connects");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
+           "state server accepts client");
+    std::unique_ptr<QTcpSocket> first(server.nextPendingConnection());
+    expect(first != nullptr, "state server owns first connection");
+    if (!first) return;
+
+    first->disconnectFromHost();
+    expect(waitUntil([&client]() {
+        return client.connectionState() == RecorderConnectionState::Disconnected;
+    }), "idle remote disconnect updates client state");
+    expect(client.recordingState() == RecorderRecordingState::Unknown,
+           "idle disconnect resets recording state");
+
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&client]() { return client.isConnected(); }),
+           "client reconnects after idle disconnect");
+    expect(client.recordingState() == RecorderRecordingState::Stopped,
+           "reconnect establishes stopped recording state");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -188,6 +231,7 @@ int main(int argc, char** argv) {
     testStartRecordingCommands();
     testTcpCommandSequence();
     testTcpStartRecordingSequenceWithSelectAll();
+    testConnectionStateTracksIdleDisconnectAndReconnect();
 
     if (g_failures > 0) {
         std::cerr << g_failures << " test failure(s)" << std::endl;

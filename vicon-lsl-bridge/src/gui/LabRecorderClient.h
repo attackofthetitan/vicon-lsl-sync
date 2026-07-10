@@ -1,9 +1,25 @@
 #pragma once
 
 #include <QObject>
+#include <QMetaType>
 #include <QString>
 #include <QStringList>
+#include <QQueue>
+#include <QTimer>
 #include <QTcpSocket>
+
+enum class RecorderConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Error,
+};
+
+enum class RecorderRecordingState {
+    Unknown,
+    Stopped,
+    Recording,
+};
 
 struct LabRecorderFilenameFields {
     QString root;
@@ -21,8 +37,10 @@ class LabRecorderClient : public QObject {
 public:
     explicit LabRecorderClient(QObject* parent = nullptr);
 
-    bool connectToServer(const QString& host, quint16 port, int timeout_ms = 1000);
+    void connectToServer(const QString& host, quint16 port, int timeout_ms = 1000);
     bool isConnected() const;
+    RecorderConnectionState connectionState() const { return connection_state_; }
+    RecorderRecordingState recordingState() const { return recording_state_; }
     QString lastError() const;
 
     bool sendCommand(const QString& command);
@@ -36,7 +54,46 @@ public:
     static QStringList startRecordingCommands(const LabRecorderFilenameFields& fields, bool select_all_first);
     static QString sanitizedValue(QString value);
 
+signals:
+    void connectionStateChanged(RecorderConnectionState state, const QString& message);
+    void recordingStateChanged(RecorderRecordingState state);
+    void commandFinished(const QString& operation, bool ok, const QString& message);
+
+private slots:
+    void onConnected();
+    void onDisconnected();
+    void onSocketError(QAbstractSocket::SocketError error);
+    void onBytesWritten(qint64 bytes);
+    void onReadyRead();
+    void onCommandTimeout();
+
 private:
+    struct CommandBatch {
+        QString operation;
+        QStringList commands;
+        qsizetype next_command = 0;
+        RecorderRecordingState success_state = RecorderRecordingState::Unknown;
+    };
+
+    bool enqueueCommands(QString operation,
+                         QStringList commands,
+                         RecorderRecordingState success_state);
+    void startNextBatch();
+    void writeNextCommand();
+    void finishActiveBatch(bool ok, const QString& message);
+    void setConnectionState(RecorderConnectionState state, const QString& message = {});
+    void setRecordingState(RecorderRecordingState state);
+
     QTcpSocket socket_;
+    QTimer command_timeout_;
+    QQueue<CommandBatch> batches_;
+    CommandBatch active_batch_;
+    bool have_active_batch_ = false;
+    QByteArray response_buffer_;
     QString last_error_;
+    RecorderConnectionState connection_state_ = RecorderConnectionState::Disconnected;
+    RecorderRecordingState recording_state_ = RecorderRecordingState::Unknown;
 };
+
+Q_DECLARE_METATYPE(RecorderConnectionState)
+Q_DECLARE_METATYPE(RecorderRecordingState)

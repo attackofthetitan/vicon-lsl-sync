@@ -74,7 +74,6 @@ private:
     QString renderedFilenamePreview() const;
     QString filenameValidationError() const;
     void setLabRecorderStatus(const QString& status);
-    bool sendLabRecorderCommand(bool ok, const QString& success_message);
     bool isFilenameValid() const;
     void updateReadiness();
     void updateRecordingButtons();
@@ -122,9 +121,6 @@ private:
     qint64 previous_status_ms_ = 0;
     bool bridge_streaming_ = false;
     bool bridge_status_stale_ = false;
-    bool labrecorder_connected_ = false;
-    bool recording_requested_ = false;
-
     BridgeWorker* worker_ = nullptr;
     bool close_pending_ = false;
 };
