@@ -8,6 +8,12 @@
 
 namespace vicon_lsl {
 
+enum class CalibrationState {
+    Manual,
+    Collecting,
+    AutomaticSession,
+};
+
 struct PreviewRigidTransform {
     PreviewVec3 translation{};
     PreviewQuaternion rotation{};

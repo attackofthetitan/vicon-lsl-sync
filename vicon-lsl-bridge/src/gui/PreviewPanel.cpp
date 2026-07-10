@@ -269,6 +269,7 @@ void PreviewPanel::startPreview() {
 }
 
 void PreviewPanel::stopPreview() {
+    resetCalibrationSession();
     if (!worker_) {
         worker_state_ = WorkerState::Idle;
         start_button_->setEnabled(true);
@@ -296,14 +297,13 @@ void PreviewPanel::beginCalibration() {
         return;
     }
     calibration_samples_.clear();
-    calibration_collecting_ = true;
+    calibration_state_ = CalibrationState::Collecting;
     setStatus("Waiting for 20 stable tracked stair-target poses...");
 }
 
 void PreviewPanel::useManualTransform() {
-    calibration_collecting_ = false;
+    calibration_state_ = CalibrationState::Manual;
     calibration_samples_.clear();
-    has_automatic_calibration_ = false;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
@@ -312,7 +312,7 @@ void PreviewPanel::useManualTransform() {
 }
 
 void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
-    if (!calibration_collecting_) {
+    if (calibration_state_ != CalibrationState::Collecting) {
         return;
     }
     if (!pose.tracked) {
@@ -338,7 +338,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     }
 
     const auto holo_from_stair = averageTrackedTargetPoses(calibration_samples_);
-    calibration_collecting_ = false;
+    calibration_state_ = CalibrationState::Manual;
     calibration_samples_.clear();
     if (!holo_from_stair) {
         setStatus("Calibration failed: no valid tracked stair-target poses");
@@ -347,19 +347,11 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
 
     automatic_gaze_transform_ = composeRigidTransforms(
         viconFromStairTarget(), inverseRigidTransform(*holo_from_stair));
-    has_automatic_calibration_ = true;
-    const PreviewVec3 display_euler = eulerDegreesFromQuaternion(automatic_gaze_transform_.rotation);
-    gaze_tx_spin_->setValue(automatic_gaze_transform_.translation.x);
-    gaze_ty_spin_->setValue(automatic_gaze_transform_.translation.y);
-    gaze_tz_spin_->setValue(automatic_gaze_transform_.translation.z);
-    gaze_rx_spin_->setValue(display_euler.x);
-    gaze_ry_spin_->setValue(display_euler.y);
-    gaze_rz_spin_->setValue(display_euler.z);
+    calibration_state_ = CalibrationState::AutomaticSession;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
-    saveSettings();
-    setStatus("Stair-target calibration applied and saved");
+    setStatus("Stair-target calibration applied for this preview session");
 }
 
 void PreviewPanel::openMergedCsv() {
@@ -503,10 +495,16 @@ PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
 }
 
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
-    if (has_automatic_calibration_) {
+    if (calibration_state_ == CalibrationState::AutomaticSession) {
         return transformProfileFromRigid(automatic_gaze_transform_, "HoloLens");
     }
     return manualGazeTransform();
+}
+
+void PreviewPanel::resetCalibrationSession() {
+    calibration_samples_.clear();
+    calibration_state_ = CalibrationState::Manual;
+    automatic_gaze_transform_ = {};
 }
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
@@ -533,18 +531,15 @@ void PreviewPanel::loadSettings() {
     gaze_rx_spin_->setValue(settings.value("preview/gazeRx", 0.0).toDouble());
     gaze_ry_spin_->setValue(settings.value("preview/gazeRy", 0.0).toDouble());
     gaze_rz_spin_->setValue(settings.value("preview/gazeRz", 0.0).toDouble());
-    has_automatic_calibration_ = settings.value("preview/gazeUseQuaternion", false).toBool();
-    automatic_gaze_transform_.translation = {
-        settings.value("preview/gazeQTx", 0.0).toDouble(),
-        settings.value("preview/gazeQTy", 0.0).toDouble(),
-        settings.value("preview/gazeQTz", 0.0).toDouble(),
+    resetCalibrationSession();
+    const QStringList obsolete_automatic_keys = {
+        "preview/gazeUseQuaternion",
+        "preview/gazeQTx", "preview/gazeQTy", "preview/gazeQTz",
+        "preview/gazeQx", "preview/gazeQy", "preview/gazeQz", "preview/gazeQw",
     };
-    automatic_gaze_transform_.rotation = normalizeQuaternion({
-        settings.value("preview/gazeQx", 0.0).toDouble(),
-        settings.value("preview/gazeQy", 0.0).toDouble(),
-        settings.value("preview/gazeQz", 0.0).toDouble(),
-        settings.value("preview/gazeQw", 1.0).toDouble(),
-    });
+    for (const QString& key : obsolete_automatic_keys) {
+        settings.remove(key);
+    }
     stair_model_edit_->setText(settings.value("preview/stairModel", defaultStairModelPath()).toString());
 }
 
@@ -563,14 +558,6 @@ void PreviewPanel::saveSettings() const {
     settings.setValue("preview/gazeRx", gaze_rx_spin_->value());
     settings.setValue("preview/gazeRy", gaze_ry_spin_->value());
     settings.setValue("preview/gazeRz", gaze_rz_spin_->value());
-    settings.setValue("preview/gazeUseQuaternion", has_automatic_calibration_);
-    settings.setValue("preview/gazeQTx", automatic_gaze_transform_.translation.x);
-    settings.setValue("preview/gazeQTy", automatic_gaze_transform_.translation.y);
-    settings.setValue("preview/gazeQTz", automatic_gaze_transform_.translation.z);
-    settings.setValue("preview/gazeQx", automatic_gaze_transform_.rotation.x);
-    settings.setValue("preview/gazeQy", automatic_gaze_transform_.rotation.y);
-    settings.setValue("preview/gazeQz", automatic_gaze_transform_.rotation.z);
-    settings.setValue("preview/gazeQw", automatic_gaze_transform_.rotation.w);
     settings.setValue("preview/stairModel", stair_model_edit_->text());
 }
 

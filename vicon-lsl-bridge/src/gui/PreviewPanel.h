@@ -47,6 +47,7 @@ private:
     PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
+    void resetCalibrationSession();
     void loadSettings();
     void saveSettings() const;
     QString defaultStairModelPath() const;
@@ -80,8 +81,7 @@ private:
     double csv_frame_cursor_ = 0.0;
     PreviewStreamWorker* worker_ = nullptr;
     WorkerState worker_state_ = WorkerState::Idle;
-    bool calibration_collecting_ = false;
-    bool has_automatic_calibration_ = false;
+    CalibrationState calibration_state_ = CalibrationState::Manual;
     PreviewRigidTransform automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;
 };
