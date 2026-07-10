@@ -149,7 +149,7 @@ namespace GazeLSL
                 pending.Remove(attempt.Generation);
                 if (destroying || attempt.Generation != latestGeneration)
                 {
-                    if (active == null || !ReferenceEquals(active.Resource.Tracker, attempt.Tracker))
+                    if (!IsTrackerReferencedLocked(attempt.Tracker))
                     {
                         rejectedTracker = attempt.Tracker;
                     }
@@ -192,7 +192,7 @@ namespace GazeLSL
                 }
 
                 pending.Remove(attempt.Generation);
-                if (active == null || !ReferenceEquals(active.Resource.Tracker, attempt.Tracker))
+                if (!IsTrackerReferencedLocked(attempt.Tracker))
                 {
                     trackerToClose = attempt.Tracker;
                 }
@@ -383,6 +383,24 @@ namespace GazeLSL
             for (int i = 0; i < trackers.Count; i++)
             {
                 if (ReferenceEquals(trackers[i], candidate))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsTrackerReferencedLocked(TTracker tracker)
+        {
+            if (active != null && ReferenceEquals(active.Resource.Tracker, tracker))
+            {
+                return true;
+            }
+
+            foreach (TTracker pendingTracker in pending.Values)
+            {
+                if (ReferenceEquals(pendingTracker, tracker))
                 {
                     return true;
                 }

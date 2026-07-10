@@ -16,6 +16,7 @@ internal static class Program
             GazePublisherOutletException,
             GazePublisherTimeoutRetainsOwnership,
             TrackerGenerationRejectsLateOpen,
+            TrackerSameIdentityPendingOpenStaysOwned,
             TrackerSameIdentityGenerationSharesLifetime,
             TrackerCloseWaitsForReadLease,
             TrackerDestroyInvalidatesPendingOpen
@@ -233,6 +234,27 @@ internal static class Program
         firstLease.Dispose();
         False(closed.Contains(tracker), "Reused tracker closed before the successor read completed.");
         secondLease.Dispose();
+        Equal(1, closed.Count);
+        Same(tracker, closed[0]);
+    }
+
+    private static void TrackerSameIdentityPendingOpenStaysOwned()
+    {
+        var closed = new List<FakeTracker>();
+        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
+        var tracker = new FakeTracker("pending-reused");
+        var olderAttempt = coordinator.BeginOpen(tracker);
+        var newerAttempt = coordinator.BeginOpen(tracker);
+
+        False(coordinator.TryActivate(olderAttempt, new FakeState()),
+            "Older same-identity open replaced the newer generation.");
+        False(closed.Contains(tracker),
+            "Rejecting an old open closed a tracker still owned by a pending generation.");
+        True(coordinator.TryActivate(newerAttempt, new FakeState()),
+            "Newer same-identity open did not activate.");
+        False(closed.Contains(tracker),
+            "Activating the surviving generation closed its tracker.");
+        True(coordinator.Retire(tracker), "Could not retire same-identity pending tracker.");
         Equal(1, closed.Count);
         Same(tracker, closed[0]);
     }
