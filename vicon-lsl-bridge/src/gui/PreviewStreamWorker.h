@@ -49,11 +49,12 @@ private:
     struct StreamState;
 
     bool connectStream(StreamState& state);
-    bool pollStream(StreamState& state);
-    void emitFrameFromMarker();
-    void emitFallbackFrame();
-    void updateStatus();
-    QString streamStatusText(const StreamState& state) const;
+    bool pollStream(StreamState& state, qint64 now_ms);
+    bool streamIsFresh(const StreamState& state, qint64 now_ms) const;
+    void emitFrameFromMarker(qint64 now_ms);
+    void emitFallbackFrame(qint64 now_ms);
+    void updateStatus(qint64 now_ms);
+    QString streamStatusText(const StreamState& state, qint64 now_ms) const;
 
     PreviewWorkerConfig config_;
     std::unique_ptr<StreamState> markers_;
@@ -62,7 +63,6 @@ private:
     std::unique_ptr<StreamState> calibration_target_;
     mutable std::mutex gaze_transform_mutex_;
     qint64 last_status_ms_ = 0;
-    qint64 last_fallback_emit_ms_ = 0;
 };
 
 } // namespace vicon_lsl

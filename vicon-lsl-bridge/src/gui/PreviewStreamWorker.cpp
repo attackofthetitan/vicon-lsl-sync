@@ -16,7 +16,7 @@ namespace {
 
 constexpr int kResolveRetryMs = 1000;
 constexpr int kStatusIntervalMs = 1000;
-constexpr int kFallbackEmitIntervalMs = 33;
+constexpr int kStaleSampleMs = 500;
 
 std::vector<std::string> channelLabels(lsl::stream_info info) {
     std::vector<std::string> labels;
@@ -45,6 +45,7 @@ struct PreviewStreamWorker::StreamState {
     std::vector<double> latest_sample;
     double latest_timestamp = 0.0;
     bool have_sample = false;
+    qint64 last_sample_ms = -1;
     qint64 next_resolve_ms = 0;
     QString last_error;
 
@@ -91,7 +92,6 @@ void PreviewStreamWorker::run() {
     QElapsedTimer timer;
     timer.start();
     last_status_ms_ = 0;
-    last_fallback_emit_ms_ = 0;
 
     while (!isInterruptionRequested()) {
         const qint64 now = timer.elapsed();
@@ -112,24 +112,23 @@ void PreviewStreamWorker::run() {
             calibration_target_->next_resolve_ms = now + kResolveRetryMs;
         }
 
-        pollStream(*segments_);
-        pollStream(*gaze_);
-        if (pollStream(*calibration_target_)) {
+        const bool segments_updated = pollStream(*segments_, now);
+        const bool gaze_updated = pollStream(*gaze_, now);
+        if (pollStream(*calibration_target_, now)) {
             const auto pose = parseCalibrationTargetPose(calibration_target_->labels,
                                                          calibration_target_->latest_sample);
             if (pose) {
                 emit targetPoseReady(*pose);
             }
         }
-        if (pollStream(*markers_)) {
-            emitFrameFromMarker();
-        } else if (now - last_fallback_emit_ms_ >= kFallbackEmitIntervalMs) {
-            emitFallbackFrame();
-            last_fallback_emit_ms_ = now;
+        if (pollStream(*markers_, now)) {
+            emitFrameFromMarker(now);
+        } else if (segments_updated || gaze_updated) {
+            emitFallbackFrame(now);
         }
 
         if (now - last_status_ms_ >= kStatusIntervalMs) {
-            updateStatus();
+            updateStatus(now);
             last_status_ms_ = now;
         }
 
@@ -153,6 +152,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         state.latest_sample.assign(static_cast<std::size_t>(streams.front().channel_count()), 0.0);
         state.inlet = std::make_unique<lsl::stream_inlet>(streams.front(), 360, 0, true);
         state.have_sample = false;
+        state.last_sample_ms = -1;
         state.last_error.clear();
         return true;
     } catch (const std::exception& ex) {
@@ -162,7 +162,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
     }
 }
 
-bool PreviewStreamWorker::pollStream(StreamState& state) {
+bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
     if (!state.inlet) {
         return false;
     }
@@ -178,17 +178,24 @@ bool PreviewStreamWorker::pollStream(StreamState& state) {
             state.latest_sample = std::move(sample);
             state.latest_timestamp = timestamp;
             state.have_sample = true;
+            state.last_sample_ms = now_ms;
             updated = true;
         }
     } catch (const std::exception& ex) {
         state.last_error = QString::fromStdString(ex.what());
         state.inlet.reset();
         state.have_sample = false;
+        state.last_sample_ms = -1;
     }
     return updated;
 }
 
-void PreviewStreamWorker::emitFrameFromMarker() {
+bool PreviewStreamWorker::streamIsFresh(const StreamState& state, qint64 now_ms) const {
+    return state.have_sample && state.last_sample_ms >= 0 &&
+           now_ms - state.last_sample_ms <= kStaleSampleMs;
+}
+
+void PreviewStreamWorker::emitFrameFromMarker(qint64 now_ms) {
     PreviewFrame frame;
     frame.timestamp = markers_->latest_timestamp;
     frame.marker_stream_present = markers_->connected();
@@ -197,7 +204,7 @@ void PreviewStreamWorker::emitFrameFromMarker() {
     frame.markers = parseMarkerSample(markers_->labels,
                                       markers_->latest_sample,
                                       markers_->transform);
-    if (segments_->have_sample &&
+    if (streamIsFresh(*segments_, now_ms) &&
         timestampWithinTolerance(frame.timestamp,
                                  segments_->latest_timestamp,
                                  config_.match_tolerance_seconds)) {
@@ -205,7 +212,7 @@ void PreviewStreamWorker::emitFrameFromMarker() {
                                             segments_->latest_sample,
                                             segments_->transform);
     }
-    if (gaze_->have_sample &&
+    if (streamIsFresh(*gaze_, now_ms) &&
         timestampWithinTolerance(frame.timestamp,
                                  gaze_->latest_timestamp,
                                  config_.match_tolerance_seconds)) {
@@ -219,22 +226,24 @@ void PreviewStreamWorker::emitFrameFromMarker() {
     emit frameReady(std::move(frame));
 }
 
-void PreviewStreamWorker::emitFallbackFrame() {
-    if (!segments_->have_sample && !gaze_->have_sample) {
+void PreviewStreamWorker::emitFallbackFrame(qint64 now_ms) {
+    const bool segments_fresh = streamIsFresh(*segments_, now_ms);
+    const bool gaze_fresh = streamIsFresh(*gaze_, now_ms);
+    if (!segments_fresh && !gaze_fresh) {
         return;
     }
 
     PreviewFrame frame;
-    frame.timestamp = segments_->have_sample ? segments_->latest_timestamp : gaze_->latest_timestamp;
+    frame.timestamp = segments_fresh ? segments_->latest_timestamp : gaze_->latest_timestamp;
     frame.marker_stream_present = markers_->connected();
     frame.segment_stream_present = segments_->connected();
     frame.gaze_stream_present = gaze_->connected();
-    if (segments_->have_sample) {
+    if (segments_fresh) {
         frame.segments = parseSegmentSample(segments_->labels,
                                             segments_->latest_sample,
                                             segments_->transform);
     }
-    if (gaze_->have_sample) {
+    if (gaze_fresh) {
         PreviewTransformProfile gaze_transform;
         {
             std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
@@ -245,11 +254,11 @@ void PreviewStreamWorker::emitFallbackFrame() {
     emit frameReady(std::move(frame));
 }
 
-void PreviewStreamWorker::updateStatus() {
-    QString status = streamStatusText(*markers_) + "; " +
-                     streamStatusText(*segments_) + "; " +
-                     streamStatusText(*gaze_) + "; " +
-                     streamStatusText(*calibration_target_);
+void PreviewStreamWorker::updateStatus(qint64 now_ms) {
+    QString status = streamStatusText(*markers_, now_ms) + "; " +
+                     streamStatusText(*segments_, now_ms) + "; " +
+                     streamStatusText(*gaze_, now_ms) + "; " +
+                     streamStatusText(*calibration_target_, now_ms);
     if (!markers_->last_error.isEmpty()) {
         status += "; markers error: " + markers_->last_error;
     }
@@ -259,15 +268,24 @@ void PreviewStreamWorker::updateStatus() {
     if (!gaze_->last_error.isEmpty()) {
         status += "; gaze error: " + gaze_->last_error;
     }
+    if (!calibration_target_->last_error.isEmpty()) {
+        status += "; calibration error: " + calibration_target_->last_error;
+    }
     emit statusChanged(status);
 }
 
-QString PreviewStreamWorker::streamStatusText(const StreamState& state) const {
+QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 now_ms) const {
     if (!state.connected()) {
         return state.requested_name + ": resolving";
     }
     if (!state.have_sample) {
         return state.requested_name + ": connected";
+    }
+    if (!streamIsFresh(state, now_ms)) {
+        return state.requested_name + ": stale (" +
+               QString::number(static_cast<double>(now_ms - state.last_sample_ms) / 1000.0,
+                               'f', 1) +
+               "s)";
     }
     return state.requested_name + ": " + QString::number(state.latest_sample.size()) + "ch";
 }
