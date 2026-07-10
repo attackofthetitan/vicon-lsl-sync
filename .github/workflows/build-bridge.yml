@@ -125,6 +125,8 @@ jobs:
           test -f vicon-lsl-bridge/build/vicon-lsl-bridge-gui
           test -f build-labrecorder/LabRecorder
           test -f build-labrecorder/LabRecorderCLI
+          find vicon-lsl-bridge/build/_deps/liblsl-build -name "liblsl.so*" -print -quit | grep -q .
+          find build-labrecorder -name "liblsl.so*" -print -quit | grep -q .
           cp vicon-lsl-bridge/build/vicon-lsl-bridge package/
           cp vicon-lsl-bridge/build/vicon-lsl-bridge-gui package/
           # Copy liblsl shared library
@@ -133,6 +135,7 @@ jobs:
           cp build-labrecorder/LabRecorder package/
           cp build-labrecorder/LabRecorderCLI package/
           find build-labrecorder -name "liblsl.so*" -exec cp -P {} package/ \;
+          find package -maxdepth 1 -name "liblsl.so*" -print -quit | grep -q .
           tar -czf ${{ matrix.artifact }}.tar.gz -C package .
 
       - name: Package (Windows)
@@ -148,15 +151,21 @@ jobs:
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Expected package input was not built: $path" }
           }
+          $bridgeLsl = @(Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build\Release -File -Filter "lsl*.dll" -ErrorAction Stop)
+          if ($bridgeLsl.Count -eq 0) { throw "Bridge liblsl runtime was not built" }
+          $recorderLsl = @(Get-ChildItem -Path build-labrecorder\_deps\liblsl-build\Release -File -Filter "lsl*.dll" -ErrorAction Stop)
+          if ($recorderLsl.Count -eq 0) { throw "LabRecorder liblsl runtime was not built" }
           copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe package\
           # Copy lsl.dll from bridge build
-          Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build\Release -Filter "lsl*.dll" | Copy-Item -Destination package\
+          $bridgeLsl | Copy-Item -Destination package\
           copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe package\
           & windeployqt package\vicon-lsl-bridge-gui.exe
           copy build-labrecorder\Release\LabRecorder.exe package\
           copy build-labrecorder\Release\LabRecorderCLI.exe package\
-          Get-ChildItem -Path build-labrecorder\_deps\liblsl-build\Release -Filter "lsl*.dll" -ErrorAction Stop | Copy-Item -Destination package\
+          $recorderLsl | Copy-Item -Destination package\
           & windeployqt package\LabRecorder.exe
+          $packagedLsl = @(Get-ChildItem -Path package -File -Filter "lsl*.dll")
+          if ($packagedLsl.Count -eq 0) { throw "Package does not contain a liblsl runtime" }
           Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip
         shell: pwsh
 
