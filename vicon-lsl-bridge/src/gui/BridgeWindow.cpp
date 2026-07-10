@@ -9,33 +9,41 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSplitter>
+#include <QCloseEvent>
+
+#include <exception>
 
 // --- BridgeWorker ---
 
 BridgeWorker::BridgeWorker(const Config& config, QObject* parent)
-    : QThread(parent), config_(config) {}
+    : QThread(parent), bridge_(std::make_unique<ViconLSLBridge>(config)) {}
 
 void BridgeWorker::run() {
-    bridge_ = std::make_unique<ViconLSLBridge>(config_);
-    bridge_->setStatusCallback([this](const BridgeStatus& status) {
-        emit statusUpdate(static_cast<int>(status.state),
-                          static_cast<unsigned long long>(status.marker_count),
-                          static_cast<unsigned long long>(status.segment_count),
-                          status.frame_count,
-                          QString::fromStdString(status.message));
-    });
-    bridge_->run();
+    try {
+        bridge_->setStatusCallback([this](const BridgeStatus& status) {
+            emit statusUpdate(static_cast<int>(status.state),
+                              static_cast<unsigned long long>(status.marker_count),
+                              static_cast<unsigned long long>(status.segment_count),
+                              status.frame_count,
+                              QString::fromStdString(status.message));
+        });
+        bridge_->run();
+        emit terminal(BridgeExitResult::Stopped, {});
+    } catch (const std::exception& ex) {
+        emit terminal(BridgeExitResult::Failed, QString::fromUtf8(ex.what()));
+    } catch (...) {
+        emit terminal(BridgeExitResult::Failed, "Unknown bridge worker failure");
+    }
 }
 
 void BridgeWorker::stopBridge() {
-    if (bridge_) {
-        bridge_->stop();
-    }
+    bridge_->stop();
 }
 
 // --- BridgeWindow ---
 
 BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
+    qRegisterMetaType<BridgeExitResult>("BridgeExitResult");
     setWindowTitle("Vicon LSL Bridge");
     setMinimumWidth(860);
 
@@ -273,6 +281,13 @@ void BridgeWindow::onStart() {
     worker_ = new BridgeWorker(config, this);
     connect(worker_, &BridgeWorker::statusUpdate,
             this, &BridgeWindow::onStatusUpdate);
+    connect(worker_, &BridgeWorker::terminal, this,
+            [this](BridgeExitResult result, const QString& message) {
+                if (result == BridgeExitResult::Failed) {
+                    last_error_label_->setText(message);
+                    status_label_->setText("Bridge worker failed - " + message);
+                }
+            });
     connect(worker_, &BridgeWorker::finished,
             this, &BridgeWindow::onWorkerFinished);
     worker_->start();
@@ -400,6 +415,18 @@ void BridgeWindow::onStatusStaleCheck() {
     updateReadiness();
 }
 
+void BridgeWindow::closeEvent(QCloseEvent* event) {
+    if (!worker_) {
+        event->accept();
+        return;
+    }
+
+    close_pending_ = true;
+    onStop();
+    status_label_->setText("Stopping bridge before closing...");
+    event->ignore();
+}
+
 void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
                                    unsigned int frames, const QString& message) {
     auto bridge_state = static_cast<BridgeState>(state);
@@ -451,6 +478,10 @@ void BridgeWindow::onWorkerFinished() {
 
     worker_->deleteLater();
     worker_ = nullptr;
+    if (close_pending_) {
+        close_pending_ = false;
+        QTimer::singleShot(0, this, &QWidget::close);
+    }
 }
 
 void BridgeWindow::loadSettings() {

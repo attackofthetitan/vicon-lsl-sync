@@ -5,6 +5,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
+#include <QMetaType>
 #include <QSpinBox>
 #include <QThread>
 #include <QElapsedTimer>
@@ -15,6 +16,13 @@
 #include "gui/PreviewPanel.h"
 #include "ViconLSLBridge.h"
 
+class QCloseEvent;
+
+enum class BridgeExitResult {
+    Stopped,
+    Failed,
+};
+
 class BridgeWorker : public QThread {
     Q_OBJECT
 public:
@@ -24,12 +32,12 @@ public:
 signals:
     void statusUpdate(int state, unsigned long long markers, unsigned long long segments,
                       unsigned int frames, const QString& message);
+    void terminal(BridgeExitResult result, const QString& message);
 
 protected:
     void run() override;
 
 private:
-    Config config_;
     std::unique_ptr<ViconLSLBridge> bridge_;
 };
 
@@ -38,6 +46,9 @@ class BridgeWindow : public QWidget {
 public:
     explicit BridgeWindow(QWidget* parent = nullptr);
     ~BridgeWindow() override;
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onStart();
@@ -115,4 +126,7 @@ private:
     bool recording_requested_ = false;
 
     BridgeWorker* worker_ = nullptr;
+    bool close_pending_ = false;
 };
+
+Q_DECLARE_METATYPE(BridgeExitResult)
