@@ -3,7 +3,11 @@
 
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <utility>
+
+MarkerStream::MarkerStream(StreamOutletFactory outlet_factory)
+    : outlet_factory_(std::move(outlet_factory)) {}
 
 void MarkerStream::initialize(const std::vector<std::pair<std::string, std::string>>& marker_names,
                                const std::string& stream_name,
@@ -30,7 +34,10 @@ void MarkerStream::initialize(const std::vector<std::pair<std::string, std::stri
     }
 
     sample_buffer_.resize(channel_count);
-    outlet_ = std::make_unique<lsl::stream_outlet>(*info_);
+    outlet_ = outlet_factory_(*info_);
+    if (!outlet_) {
+        throw std::runtime_error("Marker outlet factory returned no outlet");
+    }
 
     std::cout << "Marker stream ready, " << marker_names_.size()
               << " markers, " << channel_count << " channels" << std::endl;
@@ -73,7 +80,7 @@ StreamPushResult MarkerStream::pushSample(
     sample_buffer_ = std::move(flattened);
 
     try {
-        outlet_->push_sample(sample_buffer_, timestamp);
+        outlet_->pushSample(sample_buffer_, timestamp);
         return StreamPushResult::Pushed;
     } catch (const std::exception& ex) {
         std::cerr << "Failed to push marker LSL sample: " << ex.what() << std::endl;

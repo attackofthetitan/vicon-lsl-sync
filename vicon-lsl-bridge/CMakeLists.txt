@@ -101,6 +101,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         src/ViconClient.cpp
         src/MarkerStream.cpp
         src/SegmentStream.cpp
+        src/StreamOutlet.cpp
         src/ViconLSLBridge.cpp
     )
 
@@ -291,5 +292,18 @@ if(BUILD_TESTING)
                 ENVIRONMENT_MODIFICATION "${VICON_LSL_GUI_TEST_ENV}"
             )
         endif()
+    endif()
+
+    if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
+        add_executable(vicon-lsl-stream-recovery-tests
+            tests/test_stream_recovery.cpp
+        )
+        target_include_directories(vicon-lsl-stream-recovery-tests PRIVATE src)
+        target_link_libraries(vicon-lsl-stream-recovery-tests PRIVATE
+            vicon-lsl-bridge-runtime
+        )
+        add_test(NAME vicon-lsl-stream-recovery-tests
+            COMMAND vicon-lsl-stream-recovery-tests)
+        set_tests_properties(vicon-lsl-stream-recovery-tests PROPERTIES TIMEOUT 30)
     endif()
 endif()

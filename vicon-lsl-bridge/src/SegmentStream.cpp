@@ -3,7 +3,11 @@
 
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <utility>
+
+SegmentStream::SegmentStream(StreamOutletFactory outlet_factory)
+    : outlet_factory_(std::move(outlet_factory)) {}
 
 void SegmentStream::initialize(const std::vector<std::pair<std::string, std::string>>& segment_names,
                                 const std::string& stream_name,
@@ -30,7 +34,10 @@ void SegmentStream::initialize(const std::vector<std::pair<std::string, std::str
     }
 
     sample_buffer_.resize(channel_count);
-    outlet_ = std::make_unique<lsl::stream_outlet>(*info_);
+    outlet_ = outlet_factory_(*info_);
+    if (!outlet_) {
+        throw std::runtime_error("Segment outlet factory returned no outlet");
+    }
 
     std::cout << "Segment stream ready, " << segment_names_.size()
               << " segments, " << channel_count << " channels" << std::endl;
@@ -74,7 +81,7 @@ StreamPushResult SegmentStream::pushSample(
     sample_buffer_ = std::move(flattened);
 
     try {
-        outlet_->push_sample(sample_buffer_, timestamp);
+        outlet_->pushSample(sample_buffer_, timestamp);
         return StreamPushResult::Pushed;
     } catch (const std::exception& ex) {
         std::cerr << "Failed to push segment LSL sample: " << ex.what() << std::endl;
