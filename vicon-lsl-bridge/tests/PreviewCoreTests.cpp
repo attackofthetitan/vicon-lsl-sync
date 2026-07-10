@@ -15,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -454,27 +455,31 @@ TEST_CASE("Preview XDF loader interpolates changing clock offsets") {
 }
 
 TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp") {
-    const std::string path = "preview_core_absolute_timeline.xdf";
-    const std::uint32_t marker_stream_id = 1;
-    const std::uint32_t gaze_stream_id = 2;
-    const std::vector<std::string> marker_labels = {
+    vicon_lsl::XdfStreamData markers;
+    markers.stream_id = 1;
+    markers.name = "ViconMarkers";
+    markers.role = vicon_lsl::PreviewStreamRole::ViconMarkers;
+    markers.channel_labels = {
         "Subject:LASI:X", "Subject:LASI:Y", "Subject:LASI:Z", "Subject:LASI:Valid",
     };
-    std::vector<double> gaze_sample(vicon_lsl::HoloLensGazePacket::ChannelCount, 0.0);
-    gaze_sample[6] = 1.0;
-    {
-        std::ofstream output(path, std::ios::binary);
-        output << "XDF:";
-        writeStreamHeader(output, marker_stream_id, "ViconMarkers", "MoCap", marker_labels);
-        writeStreamHeader(output, gaze_stream_id, "HoloLensGaze", "Gaze", gazeLabels());
-        writeSampleChunk(output, marker_stream_id, {10.0}, {{1000.0, 0.0, 0.0, 1.0}});
-        writeSampleChunk(output, gaze_stream_id, {20.0}, {gaze_sample});
-    }
+    markers.timestamps = {10.0};
+    markers.samples = {{1000.0, 0.0, 0.0, 1.0}};
+
+    vicon_lsl::XdfStreamData gaze;
+    gaze.stream_id = 2;
+    gaze.name = "HoloLensGaze";
+    gaze.role = vicon_lsl::PreviewStreamRole::HoloLensGaze;
+    gaze.channel_labels = gazeLabels();
+    gaze.timestamps = {20.0};
+    gaze.samples = {std::vector<double>(vicon_lsl::HoloLensGazePacket::ChannelCount, 0.0)};
+
+    vicon_lsl::XdfLoadResult xdf;
+    xdf.streams = {std::move(markers), std::move(gaze)};
 
     vicon_lsl::PreviewTransformProfile vicon_transform;
     vicon_transform.scale = 0.001;
-    const auto recording = vicon_lsl::loadXdfPreviewRecording(
-        path, vicon_transform, {}, 0.05);
+    const auto recording = vicon_lsl::buildXdfPreviewRecording(
+        xdf, vicon_transform, {}, 0.05);
     REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
     REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
     REQUIRE(recording.frames.front().gaze_rays.empty());
