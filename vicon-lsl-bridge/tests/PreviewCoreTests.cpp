@@ -9,7 +9,9 @@
 #include "TestSupport.h"
 
 #include <cmath>
+#include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -19,6 +21,25 @@
 #include <vector>
 
 namespace {
+
+class TemporaryFilePath {
+public:
+    explicit TemporaryFilePath(const char* suffix) {
+        static std::atomic<unsigned long long> sequence{0};
+        path_ = std::filesystem::temp_directory_path() /
+                ("vicon_lsl_preview_test_" + std::to_string(++sequence) + suffix);
+    }
+
+    ~TemporaryFilePath() {
+        std::error_code error;
+        std::filesystem::remove(path_, error);
+    }
+
+    std::string string() const { return path_.string(); }
+
+private:
+    std::filesystem::path path_;
+};
 
 bool near(double left, double right, double tolerance = 1e-9) {
     return std::abs(left - right) <= tolerance;
@@ -345,7 +366,8 @@ TEST_CASE("Preview playback clock preserves pause position and speed changes") {
 }
 
 TEST_CASE("Preview merged CSV loader builds preview frames") {
-    const std::string path = "preview_core_test_merged.csv";
+    const TemporaryFilePath temporary_path(".csv");
+    const std::string path = temporary_path.string();
     {
         std::ofstream output(path);
         output << "relative_time,ViconMarkers_Subject:LASI:X,ViconMarkers_Subject:LASI:Y,"
@@ -371,7 +393,8 @@ TEST_CASE("Preview merged CSV loader builds preview frames") {
 }
 
 TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated clock offsets") {
-    const std::string path = "preview_core_test.xdf";
+    const TemporaryFilePath temporary_path(".xdf");
+    const std::string path = temporary_path.string();
     const std::uint32_t marker_stream_id = 1;
     const std::uint32_t gaze_stream_id = 2;
     const std::vector<std::string> marker_labels = {
@@ -430,7 +453,8 @@ TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated c
 }
 
 TEST_CASE("Preview XDF loader interpolates changing clock offsets") {
-    const std::string path = "preview_core_clock_offsets.xdf";
+    const TemporaryFilePath temporary_path(".xdf");
+    const std::string path = temporary_path.string();
     const std::uint32_t stream_id = 1;
     const std::vector<std::string> labels = {
         "Subject:LASI:X", "Subject:LASI:Y", "Subject:LASI:Z", "Subject:LASI:Valid",
@@ -520,7 +544,8 @@ TEST_CASE("Preview XDF loader rejects impossible implicit and non-monotonic time
 }
 
 TEST_CASE("Preview XDF loader rejects malformed clock-offset chunks") {
-    const std::string path = "preview_core_malformed_clock_offset.xdf";
+    const TemporaryFilePath temporary_path(".xdf");
+    const std::string path = temporary_path.string();
     const std::uint32_t stream_id = 1;
     std::ostringstream malformed_offset;
     writeLittle(malformed_offset, 10.0);
