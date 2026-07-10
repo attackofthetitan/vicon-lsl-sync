@@ -1,6 +1,5 @@
 #pragma once
 
-#include "HoloLensGazePacket.h"
 
 #include <array>
 #include <string>
@@ -30,11 +29,8 @@ StreamSchema buildMarkerStreamSchema(const std::vector<NamedViconItem>& marker_n
                                      const std::string& stream_name);
 StreamSchema buildSegmentStreamSchema(const std::vector<NamedViconItem>& segment_names,
                                       const std::string& stream_name);
-StreamSchema buildHoloLensGazeStreamSchema(const std::string& stream_name,
-                                           const std::string& stream_type);
 
 std::vector<double> flattenMarkerSamples(const std::vector<MarkerSample>& markers);
 std::vector<double> flattenSegmentSamples(const std::vector<SegmentSample>& segments);
-std::vector<double> flattenHoloLensGazeSample(const HoloLensGazePacket& packet);
 
 } // namespace vicon_lsl

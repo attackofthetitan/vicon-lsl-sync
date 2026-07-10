@@ -12,7 +12,7 @@ namespace GazeLSL
     */
     public sealed class VuforiaModelTargetPoseOutlet : MonoBehaviour
     {
-        private const int ChannelCount = 8;
+        private const int ChannelCount = ModelTargetPoseEncoder.ChannelCount;
 
         private static readonly string[] ChannelLabels =
         {
@@ -33,8 +33,6 @@ namespace GazeLSL
 
         private StreamInfo info;
         private StreamOutlet outlet;
-        private double nextPublishTime;
-        private double publishIntervalSeconds;
         private readonly double[] sampleBuffer = new double[ChannelCount];
 
         private void Start()
@@ -46,22 +44,27 @@ namespace GazeLSL
                 return;
             }
 
-            uint rate = Math.Max(1u, config.TargetFrameRate);
-            publishIntervalSeconds = 1.0 / rate;
-            info = new StreamInfo(
-                config.ModelTargetStreamName,
-                config.ModelTargetStreamType,
-                ChannelCount,
-                rate,
-                channel_format_t.cf_double64,
-                config.ModelTargetSourceId
-            );
-            AppendMetadata(info, rate);
-            outlet = new StreamOutlet(info);
-            Debug.Log($"Model target LSL outlet created: {config.ModelTargetStreamName}, {ChannelCount} channels, nominal {rate} Hz");
+            try
+            {
+                info = new StreamInfo(
+                    config.ModelTargetStreamName,
+                    config.ModelTargetStreamType,
+                    ChannelCount,
+                    LSL.LSL.IRREGULAR_RATE,
+                    channel_format_t.cf_double64,
+                    config.ModelTargetSourceId
+                );
+                AppendMetadata(info);
+                outlet = new StreamOutlet(info);
+                Debug.Log($"Model target LSL outlet created: {config.ModelTargetStreamName}, {ChannelCount} channels, irregular rate");
+            }
+            catch (Exception e)
+            {
+                DisableWithError($"Could not create model target LSL outlet - {e.Message}");
+            }
         }
 
-        private static void AppendMetadata(StreamInfo streamInfo, uint rate)
+        private static void AppendMetadata(StreamInfo streamInfo)
         {
             XMLElement channels = streamInfo.desc().append_child("channels");
             for (int i = 0; i < ChannelCount; i++)
@@ -77,33 +80,42 @@ namespace GazeLSL
             acquisition.append_child_value("reference_target", "stair_model_target");
             acquisition.append_child_value("coordinate_frame", "hololens_stationary_shared_with_gaze");
             acquisition.append_child_value("coordinate_units", "meters");
-            acquisition.append_child_value("nominal_srate", rate.ToString());
+            acquisition.append_child_value("nominal_srate", "0");
+            acquisition.append_child_value("acquisition_mode", "unity_rendered_pose");
             acquisition.append_child_value("timestamp", "lsl_local_clock_at_push");
         }
 
-        private void Update()
+        private void LateUpdate()
         {
-            double now = Time.unscaledTime;
-            if (outlet == null || now < nextPublishTime)
+            if (outlet == null)
             {
                 return;
             }
-            nextPublishTime = now + publishIntervalSeconds;
 
             bool tracked = IsTracked(modelTarget.TargetStatus.Status);
-            if (tracked)
+            Transform targetTransform = modelTarget.transform;
+            Vector3 position = targetTransform.position;
+            Quaternion rotation = targetTransform.rotation;
+            ModelTargetPoseEncoder.WriteSample(
+                tracked,
+                position.x,
+                position.y,
+                position.z,
+                rotation.x,
+                rotation.y,
+                rotation.z,
+                rotation.w,
+                sampleBuffer
+            );
+
+            try
             {
-                WriteTrackedPose(modelTarget.transform, sampleBuffer);
+                outlet.push_sample(sampleBuffer);
             }
-            else
+            catch (Exception e)
             {
-                for (int i = 0; i < 7; i++)
-                {
-                    sampleBuffer[i] = double.NaN;
-                }
-                sampleBuffer[7] = 0.0;
+                DisableWithError($"Could not publish model target pose - {e.Message}");
             }
-            outlet.push_sample(sampleBuffer);
         }
 
         private static bool IsTracked(Status status)
@@ -111,22 +123,10 @@ namespace GazeLSL
             return status == Status.TRACKED || status == Status.EXTENDED_TRACKED;
         }
 
-        private static void WriteTrackedPose(Transform targetTransform, double[] sample)
+        private void DisableWithError(string message)
         {
-            Vector3 position = targetTransform.position;
-            Quaternion rotation = targetTransform.rotation;
-
-            sample[0] = position.x;
-            sample[1] = position.y;
-            sample[2] = -position.z;
-
-            // Change basis with F = diag(1, 1, -1), matching GazeDataProvider.
-            // Quaternion vector components are axial under this reflection.
-            sample[3] = -rotation.x;
-            sample[4] = -rotation.y;
-            sample[5] = rotation.z;
-            sample[6] = rotation.w;
-            sample[7] = 1.0;
+            Debug.LogError(message);
+            enabled = false;
         }
 
         private void OnDestroy()

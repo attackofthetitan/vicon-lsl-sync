@@ -1,9 +1,9 @@
-#include "HoloLensGazePacket.h"
+#include "HoloLensGazeSchema.h"
 
 namespace vicon_lsl {
 namespace {
 
-constexpr std::array<HoloLensGazeChannel, HoloLensGazePacket::ChannelCount> kChannels{{
+constexpr std::array<HoloLensGazeChannel, kHoloLensGazeChannelCount> kChannels{{
     {"CombinedOriginX", "meters"},
     {"CombinedOriginY", "meters"},
     {"CombinedOriginZ", "meters"},
@@ -29,7 +29,7 @@ constexpr std::array<HoloLensGazeChannel, HoloLensGazePacket::ChannelCount> kCha
 
 } // namespace
 
-const std::array<HoloLensGazeChannel, HoloLensGazePacket::ChannelCount>&
+const std::array<HoloLensGazeChannel, kHoloLensGazeChannelCount>&
 holoLensGazeChannels() {
     return kChannels;
 }

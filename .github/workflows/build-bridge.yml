@@ -7,6 +7,9 @@ on:
     paths:
       - "vicon-lsl-bridge/**"
       - "labrecorder/**"
+      - "hololens-gaze-lsl/**"
+      - "stream-contracts/**"
+      - "tools/generate_stream_contracts.py"
       - ".github/workflows/build-bridge.yml"
     tags:
       - "v*"
@@ -15,20 +18,28 @@ on:
     paths:
       - "vicon-lsl-bridge/**"
       - "labrecorder/**"
+      - "hololens-gaze-lsl/**"
+      - "stream-contracts/**"
+      - "tools/generate_stream_contracts.py"
       - ".github/workflows/build-bridge.yml"
 
 jobs:
   logic-tests:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        fetch_catch2: [ON, OFF]
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v7
 
+      - name: Verify generated stream contracts
+        run: python tools/generate_stream_contracts.py --check
+
       - name: Configure dependency-light tests
-        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DBUILD_TESTING=ON
+        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
 
       - name: Build dependency-light tests
         run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests
@@ -38,6 +49,7 @@ jobs:
 
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -109,35 +121,51 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p package
+          test -f vicon-lsl-bridge/build/vicon-lsl-bridge
+          test -f vicon-lsl-bridge/build/vicon-lsl-bridge-gui
+          test -f build-labrecorder/LabRecorder
+          test -f build-labrecorder/LabRecorderCLI
+          find vicon-lsl-bridge/build/_deps/liblsl-build -name "liblsl.so*" -print -quit | grep -q .
+          find build-labrecorder -name "liblsl.so*" -print -quit | grep -q .
           cp vicon-lsl-bridge/build/vicon-lsl-bridge package/
-          cp vicon-lsl-bridge/build/vicon-lsl-bridge-gui package/ || true
+          cp vicon-lsl-bridge/build/vicon-lsl-bridge-gui package/
           # Copy liblsl shared library
           find vicon-lsl-bridge/build/_deps/liblsl-build -name "liblsl.so*" -exec cp -P {} package/ \;
           # Copy LabRecorder binaries
-          cp build-labrecorder/LabRecorder package/ || true
-          cp build-labrecorder/LabRecorderCLI package/ || true
-          find build-labrecorder -name "liblsl.so*" -exec cp -P {} package/ \; 2>/dev/null || true
+          cp build-labrecorder/LabRecorder package/
+          cp build-labrecorder/LabRecorderCLI package/
+          find build-labrecorder -name "liblsl.so*" -exec cp -P {} package/ \;
+          find package -maxdepth 1 -name "liblsl.so*" -print -quit | grep -q .
           tar -czf ${{ matrix.artifact }}.tar.gz -C package .
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir package
+          $required = @(
+            "vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe",
+            "vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe",
+            "build-labrecorder\Release\LabRecorder.exe",
+            "build-labrecorder\Release\LabRecorderCLI.exe"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Expected package input was not built: $path" }
+          }
+          $bridgeLsl = @(Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build\Release -File -Filter "lsl*.dll" -ErrorAction Stop)
+          if ($bridgeLsl.Count -eq 0) { throw "Bridge liblsl runtime was not built" }
+          $recorderLsl = @(Get-ChildItem -Path build-labrecorder\_deps\liblsl-build\Release -File -Filter "lsl*.dll" -ErrorAction Stop)
+          if ($recorderLsl.Count -eq 0) { throw "LabRecorder liblsl runtime was not built" }
           copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe package\
           # Copy lsl.dll from bridge build
-          Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build\Release -Filter "lsl*.dll" | Copy-Item -Destination package\
-          # Copy GUI and deploy Qt if available
-          if (Test-Path vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe) {
-            copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe package\
-            & windeployqt package\vicon-lsl-bridge-gui.exe
-          }
-          # Copy LabRecorder if built
-          if (Test-Path build-labrecorder\Release\LabRecorder.exe) {
-            copy build-labrecorder\Release\LabRecorder.exe package\
-            copy build-labrecorder\Release\LabRecorderCLI.exe package\ 2>$null
-            Get-ChildItem -Path build-labrecorder\_deps\liblsl-build\Release -Filter "lsl*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination package\
-            & windeployqt package\LabRecorder.exe
-          }
+          $bridgeLsl | Copy-Item -Destination package\
+          copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe package\
+          & windeployqt package\vicon-lsl-bridge-gui.exe
+          copy build-labrecorder\Release\LabRecorder.exe package\
+          copy build-labrecorder\Release\LabRecorderCLI.exe package\
+          $recorderLsl | Copy-Item -Destination package\
+          & windeployqt package\LabRecorder.exe
+          $packagedLsl = @(Get-ChildItem -Path package -File -Filter "lsl*.dll")
+          if ($packagedLsl.Count -eq 0) { throw "Package does not contain a liblsl runtime" }
           Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip
         shell: pwsh
 
@@ -181,8 +209,20 @@ jobs:
             ${{ matrix.artifact }}.*
             ${{ matrix.artifact }}-gui-portable.exe
 
+  hololens-core-tests:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify generated stream contracts
+        run: python tools/generate_stream_contracts.py --check
+
+      - name: Run platform-neutral HoloLens tests
+        run: dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
+
   release:
-    needs: [logic-tests, build]
+    needs: [logic-tests, build, hololens-core-tests]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

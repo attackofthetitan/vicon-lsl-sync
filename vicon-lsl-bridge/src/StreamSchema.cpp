@@ -54,27 +54,12 @@ StreamSchema buildSegmentStreamSchema(const std::vector<NamedViconItem>& segment
     return schema;
 }
 
-StreamSchema buildHoloLensGazeStreamSchema(const std::string& stream_name,
-                                           const std::string& stream_type) {
-    StreamSchema schema{stream_name, stream_type, {}};
-    const auto& channels = holoLensGazeChannels();
-    schema.channels.reserve(channels.size());
-    for (const auto& channel : channels) {
-        appendChannel(schema, std::string(channel.label), std::string(channel.unit));
-    }
-    return schema;
-}
-
 std::vector<double> flattenMarkerSamples(const std::vector<MarkerSample>& markers) {
     return flattenSamples(markers);
 }
 
 std::vector<double> flattenSegmentSamples(const std::vector<SegmentSample>& segments) {
     return flattenSamples(segments);
-}
-
-std::vector<double> flattenHoloLensGazeSample(const HoloLensGazePacket& packet) {
-    return std::vector<double>(packet.sample.begin(), packet.sample.end());
 }
 
 } // namespace vicon_lsl

@@ -4,19 +4,6 @@
 #include <stdexcept>
 
 namespace vicon_lsl {
-namespace {
-
-std::string plural(std::size_t count, const std::string& singular) {
-    std::ostringstream out;
-    out << count << ' ' << singular;
-    if (count != 1) {
-        out << 's';
-    }
-    return out.str();
-}
-
-} // namespace
-
 DiagnosticAggregator::DiagnosticAggregator(unsigned int repeat_interval)
     : repeat_interval_(repeat_interval) {
     if (repeat_interval_ == 0) {
@@ -64,16 +51,6 @@ const char* toString(ViconReadStatus status) {
     return "Unknown";
 }
 
-const char* bridgeDiagnosticStateName(BridgeDiagnosticState state) {
-    switch (state) {
-        case BridgeDiagnosticState::Disconnected: return "Disconnected";
-        case BridgeDiagnosticState::Connecting: return "Connecting";
-        case BridgeDiagnosticState::Streaming: return "Streaming";
-        case BridgeDiagnosticState::Stopped: return "Stopped";
-    }
-    return "Unknown";
-}
-
 double quietNaN() {
     return std::numeric_limits<double>::quiet_NaN();
 }
@@ -110,10 +87,6 @@ bool layoutChanged(const ViconLayout& current, const ViconLayout& known) {
     return current != known;
 }
 
-bool hasLayoutChanged(const ViconLayout& known, const ViconLayout& current) {
-    return layoutChanged(current, known);
-}
-
 std::string buildStreamSourceId(const std::string& prefix,
                                 const std::string& kind,
                                 const std::string& hostname) {
@@ -148,25 +121,6 @@ std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics
         out << "s";
     }
     out << "; first: " << formatDiagnostic(diagnostics.front());
-    return out.str();
-}
-
-std::string formatLayoutSummary(const ViconLayout& layout) {
-    return plural(layout.markers.size(), "marker") + ", " +
-           plural(layout.segments.size(), "segment");
-}
-
-std::string formatBridgeDiagnostics(const BridgeDiagnosticStatus& status) {
-    std::ostringstream out;
-    out << bridgeDiagnosticStateName(status.state) << ": "
-        << plural(status.marker_count, "marker") << ", "
-        << plural(status.segment_count, "segment") << ", frame "
-        << status.frame_count;
-
-    if (!status.message.empty()) {
-        out << " - " << status.message;
-    }
-
     return out.str();
 }
 

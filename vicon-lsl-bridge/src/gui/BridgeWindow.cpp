@@ -9,33 +9,42 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSplitter>
+#include <QCloseEvent>
+
+#include <exception>
+#include "StreamDefaults.h"
 
 // --- BridgeWorker ---
 
 BridgeWorker::BridgeWorker(const Config& config, QObject* parent)
-    : QThread(parent), config_(config) {}
+    : QThread(parent), bridge_(std::make_unique<ViconLSLBridge>(config)) {}
 
 void BridgeWorker::run() {
-    bridge_ = std::make_unique<ViconLSLBridge>(config_);
-    bridge_->setStatusCallback([this](const BridgeStatus& status) {
-        emit statusUpdate(static_cast<int>(status.state),
-                          static_cast<unsigned long long>(status.marker_count),
-                          static_cast<unsigned long long>(status.segment_count),
-                          status.frame_count,
-                          QString::fromStdString(status.message));
-    });
-    bridge_->run();
+    try {
+        bridge_->setStatusCallback([this](const BridgeStatus& status) {
+            emit statusUpdate(static_cast<int>(status.state),
+                              static_cast<unsigned long long>(status.marker_count),
+                              static_cast<unsigned long long>(status.segment_count),
+                              status.frame_count,
+                              QString::fromStdString(status.message));
+        });
+        bridge_->run();
+        emit terminal(BridgeExitResult::Stopped, {});
+    } catch (const std::exception& ex) {
+        emit terminal(BridgeExitResult::Failed, QString::fromUtf8(ex.what()));
+    } catch (...) {
+        emit terminal(BridgeExitResult::Failed, "Unknown bridge worker failure");
+    }
 }
 
 void BridgeWorker::stopBridge() {
-    if (bridge_) {
-        bridge_->stop();
-    }
+    bridge_->stop();
 }
 
 // --- BridgeWindow ---
 
 BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
+    qRegisterMetaType<BridgeExitResult>("BridgeExitResult");
     setWindowTitle("Vicon LSL Bridge");
     setMinimumWidth(860);
 
@@ -59,8 +68,8 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     form->setVerticalSpacing(4);
 
     server_edit_ = new QLineEdit("localhost:801");
-    marker_stream_edit_ = new QLineEdit("ViconMarkers");
-    segment_stream_edit_ = new QLineEdit("ViconSegments");
+    marker_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconMarkers);
+    segment_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconSegments);
 
     form->addRow("Vicon server:", server_edit_);
     form->addRow("Marker stream:", marker_stream_edit_);
@@ -230,6 +239,29 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     connect(refresh_streams_button_, &QPushButton::clicked, this, &BridgeWindow::onRefreshLabRecorder);
     connect(start_recording_button_, &QPushButton::clicked, this, &BridgeWindow::onStartRecording);
     connect(stop_recording_button_, &QPushButton::clicked, this, &BridgeWindow::onStopRecording);
+    connect(&labrecorder_client_, &LabRecorderClient::connectionStateChanged, this,
+            [this](RecorderConnectionState state, const QString& message) {
+                if (!message.isEmpty()) {
+                    setLabRecorderStatus(message);
+                }
+                connect_labrecorder_button_->setEnabled(
+                    state != RecorderConnectionState::Connecting);
+                updateRecordingButtons();
+                updateReadiness();
+            });
+    connect(&labrecorder_client_, &LabRecorderClient::recordingStateChanged, this,
+            [this](RecorderRecordingState) {
+                updateRecordingButtons();
+                updateReadiness();
+            });
+    connect(&labrecorder_client_, &LabRecorderClient::commandFinished, this,
+            [this](const QString& operation, bool ok, const QString& message) {
+                setLabRecorderStatus(ok
+                    ? operation + " completed"
+                    : operation + " failed: " + message);
+                updateRecordingButtons();
+                updateReadiness();
+            });
 
     const auto preview_update = [this]() { updateFilenamePreview(); };
     connect(study_root_edit_, &QLineEdit::textChanged, this, preview_update);
@@ -273,6 +305,13 @@ void BridgeWindow::onStart() {
     worker_ = new BridgeWorker(config, this);
     connect(worker_, &BridgeWorker::statusUpdate,
             this, &BridgeWindow::onStatusUpdate);
+    connect(worker_, &BridgeWorker::terminal, this,
+            [this](BridgeExitResult result, const QString& message) {
+                if (result == BridgeExitResult::Failed) {
+                    last_error_label_->setText(message);
+                    status_label_->setText("Bridge worker failed - " + message);
+                }
+            });
     connect(worker_, &BridgeWorker::finished,
             this, &BridgeWindow::onWorkerFinished);
     worker_->start();
@@ -328,24 +367,15 @@ void BridgeWindow::onLaunchLabRecorder() {
 
 void BridgeWindow::onConnectLabRecorder() {
     saveSettings();
-    if (labrecorder_client_.connectToServer(labrecorder_host_edit_->text(),
-                                            static_cast<quint16>(labrecorder_port_spin_->value()))) {
-        labrecorder_connected_ = true;
-        recording_requested_ = false;
-        setLabRecorderStatus("Connected to LabRecorder RCS.");
-        updateRecordingButtons();
-        updateReadiness();
-        return;
-    }
-    labrecorder_connected_ = false;
-    recording_requested_ = false;
-    setLabRecorderStatus("LabRecorder connection failed: " + labrecorder_client_.lastError());
-    updateRecordingButtons();
-    updateReadiness();
+    labrecorder_client_.connectToServer(
+        labrecorder_host_edit_->text(),
+        static_cast<quint16>(labrecorder_port_spin_->value()));
 }
 
 void BridgeWindow::onRefreshLabRecorder() {
-    sendLabRecorderCommand(labrecorder_client_.refreshStreams(), "Refresh command sent.");
+    if (labrecorder_client_.refreshStreams()) {
+        setLabRecorderStatus("Refresh command queued.");
+    }
 }
 
 void BridgeWindow::onStartRecording() {
@@ -356,20 +386,15 @@ void BridgeWindow::onStartRecording() {
         return;
     }
 
-    if (sendLabRecorderCommand(
-            labrecorder_client_.startRecording(filenameFields(), select_all_before_start_check_->isChecked()),
-            "Recording start requested.")) {
-        recording_requested_ = true;
-        updateRecordingButtons();
-        updateReadiness();
+    if (labrecorder_client_.startRecording(
+            filenameFields(), select_all_before_start_check_->isChecked())) {
+        setLabRecorderStatus("Recording start commands queued.");
     }
 }
 
 void BridgeWindow::onStopRecording() {
-    if (sendLabRecorderCommand(labrecorder_client_.stopRecording(), "Recording stop requested.")) {
-        recording_requested_ = false;
-        updateRecordingButtons();
-        updateReadiness();
+    if (labrecorder_client_.stopRecording()) {
+        setLabRecorderStatus("Recording stop command queued.");
     }
 }
 
@@ -398,6 +423,18 @@ void BridgeWindow::onStatusStaleCheck() {
     frame_rate_label_->setText("0.0 Hz");
     status_label_->setText(status_label_->text() + " - stale status");
     updateReadiness();
+}
+
+void BridgeWindow::closeEvent(QCloseEvent* event) {
+    if (!worker_) {
+        event->accept();
+        return;
+    }
+
+    close_pending_ = true;
+    onStop();
+    status_label_->setText("Stopping bridge before closing...");
+    event->ignore();
 }
 
 void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
@@ -451,13 +488,19 @@ void BridgeWindow::onWorkerFinished() {
 
     worker_->deleteLater();
     worker_ = nullptr;
+    if (close_pending_) {
+        close_pending_ = false;
+        QTimer::singleShot(0, this, &QWidget::close);
+    }
 }
 
 void BridgeWindow::loadSettings() {
     QSettings settings("ViconLSL", "ViconLSLBridge");
     server_edit_->setText(settings.value("server", "localhost:801").toString());
-    marker_stream_edit_->setText(settings.value("markerStream", "ViconMarkers").toString());
-    segment_stream_edit_->setText(settings.value("segmentStream", "ViconSegments").toString());
+    marker_stream_edit_->setText(settings.value(
+        "markerStream", vicon_lsl::stream_defaults::ViconMarkers).toString());
+    segment_stream_edit_->setText(settings.value(
+        "segmentStream", vicon_lsl::stream_defaults::ViconSegments).toString());
     study_root_edit_->setText(settings.value("recordingRoot", QDir::homePath()).toString());
     filename_template_edit_->setText(settings.value("recordingTemplate",
         "sub-%p/ses-%s/%m/sub-%p_ses-%s_task-%b_acq-%a_run-%r_%m.xdf").toString());
@@ -572,30 +615,20 @@ void BridgeWindow::setLabRecorderStatus(const QString& status) {
     labrecorder_status_label_->setText(status);
 }
 
-bool BridgeWindow::sendLabRecorderCommand(bool ok, const QString& success_message) {
-    if (!ok) {
-        if (!labrecorder_client_.isConnected()) {
-            labrecorder_connected_ = false;
-            recording_requested_ = false;
-            updateRecordingButtons();
-            updateReadiness();
-        }
-        setLabRecorderStatus("LabRecorder command failed: " + labrecorder_client_.lastError());
-        return false;
-    }
-    setLabRecorderStatus(success_message);
-    return true;
-}
-
 void BridgeWindow::updateRecordingButtons() {
     if (!refresh_streams_button_ || !start_recording_button_ || !stop_recording_button_) {
         return;
     }
 
-    const bool connected = labrecorder_connected_ && labrecorder_client_.isConnected();
-    refresh_streams_button_->setEnabled(connected && !recording_requested_);
-    start_recording_button_->setEnabled(connected && !recording_requested_ && isFilenameValid());
-    stop_recording_button_->setEnabled(connected && recording_requested_);
+    const bool connected =
+        labrecorder_client_.connectionState() == RecorderConnectionState::Connected;
+    const RecorderRecordingState recording_state = labrecorder_client_.recordingState();
+    refresh_streams_button_->setEnabled(
+        connected && recording_state == RecorderRecordingState::Stopped);
+    start_recording_button_->setEnabled(
+        connected && recording_state == RecorderRecordingState::Stopped && isFilenameValid());
+    stop_recording_button_->setEnabled(
+        connected && recording_state != RecorderRecordingState::Stopped);
 }
 
 bool BridgeWindow::isFilenameValid() const {
@@ -610,7 +643,21 @@ void BridgeWindow::updateReadiness() {
     const QString bridge_text = bridge_streaming_
         ? QString("Bridge streaming at %1").arg(bridge_status_stale_ ? "0.0 Hz (stale)" : frame_rate_label_->text())
         : "Bridge not streaming";
-    const QString labrecorder_text = labrecorder_connected_ ? "LabRecorder connected" : "LabRecorder disconnected";
+    QString labrecorder_text;
+    switch (labrecorder_client_.connectionState()) {
+        case RecorderConnectionState::Disconnected:
+            labrecorder_text = "LabRecorder disconnected";
+            break;
+        case RecorderConnectionState::Connecting:
+            labrecorder_text = "LabRecorder connecting";
+            break;
+        case RecorderConnectionState::Connected:
+            labrecorder_text = "LabRecorder connected";
+            break;
+        case RecorderConnectionState::Error:
+            labrecorder_text = "LabRecorder connection error";
+            break;
+    }
     const QString filename_text = isFilenameValid() ? "filename valid" : "filename incomplete";
     readiness_label_->setText(QString("Readiness: %1; %2; %3.")
                                   .arg(bridge_text, labrecorder_text, filename_text));

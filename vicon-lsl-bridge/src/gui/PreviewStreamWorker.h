@@ -2,6 +2,7 @@
 
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewTypes.h"
+#include "StreamDefaults.h"
 
 #include <QThread>
 #include <QMetaType>
@@ -20,10 +21,10 @@ class stream_info;
 namespace vicon_lsl {
 
 struct PreviewWorkerConfig {
-    QString marker_stream_name = "ViconMarkers";
-    QString segment_stream_name = "ViconSegments";
-    QString gaze_stream_name = "HoloLensGaze";
-    QString calibration_stream_name = "HoloLensModelTargetPose";
+    QString marker_stream_name = vicon_lsl::stream_defaults::ViconMarkers;
+    QString segment_stream_name = vicon_lsl::stream_defaults::ViconSegments;
+    QString gaze_stream_name = vicon_lsl::stream_defaults::HoloLensGaze;
+    QString calibration_stream_name = vicon_lsl::stream_defaults::HoloLensModelTargetPose;
     double match_tolerance_seconds = 0.05;
     PreviewTransformProfile vicon_transform;
     PreviewTransformProfile gaze_transform;
@@ -49,11 +50,14 @@ private:
     struct StreamState;
 
     bool connectStream(StreamState& state);
-    bool pollStream(StreamState& state);
-    void emitFrameFromMarker();
-    void emitFallbackFrame();
-    void updateStatus();
-    QString streamStatusText(const StreamState& state) const;
+    bool pollStream(StreamState& state, qint64 now_ms);
+    bool streamIsFresh(const StreamState& state, qint64 now_ms) const;
+    void emitFrameFromMarker(qint64 now_ms);
+    void emitFallbackFrame(qint64 now_ms,
+                           bool segments_updated,
+                           bool gaze_updated);
+    void updateStatus(qint64 now_ms);
+    QString streamStatusText(const StreamState& state, qint64 now_ms) const;
 
     PreviewWorkerConfig config_;
     std::unique_ptr<StreamState> markers_;
@@ -62,7 +66,6 @@ private:
     std::unique_ptr<StreamState> calibration_target_;
     mutable std::mutex gaze_transform_mutex_;
     qint64 last_status_ms_ = 0;
-    qint64 last_fallback_emit_ms_ = 0;
 };
 
 } // namespace vicon_lsl

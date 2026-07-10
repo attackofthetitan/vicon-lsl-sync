@@ -11,13 +11,8 @@ struct HoloLensGazeChannel {
     std::string_view unit;
 };
 
-struct HoloLensGazePacket {
-    static constexpr std::size_t ChannelCount = 21;
-
-    std::array<double, ChannelCount> sample{};
-};
-
-const std::array<HoloLensGazeChannel, HoloLensGazePacket::ChannelCount>&
+inline constexpr std::size_t kHoloLensGazeChannelCount = 21;
+const std::array<HoloLensGazeChannel, kHoloLensGazeChannelCount>&
 holoLensGazeChannels();
 
 } // namespace vicon_lsl

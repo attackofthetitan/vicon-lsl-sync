@@ -156,7 +156,7 @@ TEST_CASE("Vicon layout collection preserves discovered order") {
         {"SubjectB", {"Head"}, {"Skull", "Thorax"}},
     };
 
-    const auto layout = vicon_lsl::collectLayout(client);
+    const auto layout = vicon_lsl::discoverLayout(client, 0).layout;
     REQUIRE_EQ(layout.markers.size(), static_cast<std::size_t>(3));
     REQUIRE_EQ(layout.segments.size(), static_cast<std::size_t>(3));
     REQUIRE_EQ(layout.markers[0], vicon_lsl::NamedViconItem("SubjectA", "LASI"));
@@ -204,7 +204,7 @@ TEST_CASE("Vicon discovery aborts partial layouts and reports SDK failures") {
 
 TEST_CASE("Vicon layout collection handles empty layouts") {
     FakeClient client;
-    const auto layout = vicon_lsl::collectLayout(client);
+    const auto layout = vicon_lsl::discoverLayout(client, 0).layout;
     REQUIRE(layout.markers.empty());
     REQUIRE(layout.segments.empty());
 
@@ -244,7 +244,7 @@ TEST_CASE("Vicon marker frame mapping preserves status and context before LSL co
         {vicon_lsl::ViconReadStatus::SdkError, {0.0, 0.0, 0.0}, false,
          "SDK result 1", "Failed to read marker global translation"};
 
-    const auto layout = vicon_lsl::collectLayout(client);
+    const auto layout = vicon_lsl::discoverLayout(client, 0).layout;
     const auto frame = vicon_lsl::buildMarkerFrame(client, layout.markers, 7);
     REQUIRE_EQ(frame.reads.size(), static_cast<std::size_t>(3));
     REQUIRE_EQ(frame.reads[0].value.translation[0], 1.0);
@@ -300,7 +300,7 @@ TEST_CASE("Vicon segment frame mapping preserves status and context before LSL c
         {vicon_lsl::ViconReadStatus::SdkError, {0.0, 0.0, 0.0, 1.0}, false,
          "SDK result 2", "Failed to read segment global rotation quaternion"};
 
-    const auto layout = vicon_lsl::collectLayout(client);
+    const auto layout = vicon_lsl::discoverLayout(client, 0).layout;
     const auto frame = vicon_lsl::buildSegmentFrame(client, layout.segments, 9);
     REQUIRE_EQ(frame.reads.size(), static_cast<std::size_t>(3));
     REQUIRE_EQ(frame.reads[0].rotation.quaternion[3], 1.0);
@@ -345,18 +345,6 @@ TEST_CASE("Vicon diagnostic formatting includes required context") {
     REQUIRE(text.find("SDK result 1") != std::string::npos);
     REQUIRE(text.find("message=Failed to read marker global translation") != std::string::npos);
 
-    const auto status_text = vicon_lsl::formatBridgeDiagnostics({
-        vicon_lsl::BridgeDiagnosticState::Streaming,
-        2,
-        1,
-        10,
-        text,
-    });
-    REQUIRE(status_text.find("Streaming") != std::string::npos);
-    REQUIRE(status_text.find("2 markers") != std::string::npos);
-    REQUIRE(status_text.find("1 segment") != std::string::npos);
-    REQUIRE(status_text.find("frame 10") != std::string::npos);
-    REQUIRE(status_text.find("GetMarkerGlobalTranslation") != std::string::npos);
 }
 
 TEST_CASE("Vicon diagnostic aggregation logs first and periodic repeats") {

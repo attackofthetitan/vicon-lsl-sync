@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.7.1 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,13 +38,15 @@ if(WIN32)
 endif()
 
 add_library(vicon-lsl-bridge-logic STATIC
-    src/HoloLensGazePacket.cpp
+    src/HoloLensGazeSchema.cpp
     src/preview/ObjMesh.cpp
     src/preview/PreviewCalibration.cpp
     src/preview/PreviewCsv.cpp
     src/preview/PreviewMath.cpp
+    src/preview/PreviewPlaybackClock.cpp
     src/preview/PreviewParsing.cpp
     src/preview/PreviewXdf.cpp
+    src/preview/PreviewXdfReader.cpp
     src/StreamSchema.cpp
     src/CommandLine.cpp
     src/ViconFrameMapper.cpp
@@ -99,6 +101,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         src/ViconClient.cpp
         src/MarkerStream.cpp
         src/SegmentStream.cpp
+        src/StreamOutlet.cpp
         src/ViconLSLBridge.cpp
     )
 
@@ -289,5 +292,18 @@ if(BUILD_TESTING)
                 ENVIRONMENT_MODIFICATION "${VICON_LSL_GUI_TEST_ENV}"
             )
         endif()
+    endif()
+
+    if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
+        add_executable(vicon-lsl-stream-recovery-tests
+            tests/test_stream_recovery.cpp
+        )
+        target_include_directories(vicon-lsl-stream-recovery-tests PRIVATE src)
+        target_link_libraries(vicon-lsl-stream-recovery-tests PRIVATE
+            vicon-lsl-bridge-runtime
+        )
+        add_test(NAME vicon-lsl-stream-recovery-tests
+            COMMAND vicon-lsl-stream-recovery-tests)
+        set_tests_properties(vicon-lsl-stream-recovery-tests PROPERTIES TIMEOUT 30)
     endif()
 endif()

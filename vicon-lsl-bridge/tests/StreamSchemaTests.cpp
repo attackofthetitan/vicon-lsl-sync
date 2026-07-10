@@ -71,22 +71,3 @@ TEST_CASE("Sample flattening preserves marker and segment order") {
     REQUIRE_EQ(segment_sample[7], 4.0);
     REQUIRE_EQ(segment_sample[13], 0.9);
 }
-
-TEST_CASE("HoloLens schema and flattening omit the device timestamp") {
-    const auto schema = vicon_lsl::buildHoloLensGazeStreamSchema("Gaze", "EyeTracking");
-    REQUIRE_EQ(schema.name, std::string("Gaze"));
-    REQUIRE_EQ(schema.type, std::string("EyeTracking"));
-    REQUIRE_EQ(schema.channelCount(), vicon_lsl::HoloLensGazePacket::ChannelCount);
-    REQUIRE_EQ(schema.channels.front().label, std::string("CombinedOriginX"));
-    REQUIRE_EQ(schema.channels.back().label, std::string("RightEyeValid"));
-
-    vicon_lsl::HoloLensGazePacket packet;
-    for (std::size_t i = 0; i < packet.sample.size(); ++i) {
-        packet.sample[i] = static_cast<double>(i + 1);
-    }
-
-    const auto flattened = vicon_lsl::flattenHoloLensGazeSample(packet);
-    REQUIRE_EQ(flattened.size(), packet.sample.size());
-    REQUIRE_EQ(flattened.front(), 1.0);
-    REQUIRE_EQ(flattened.back(), static_cast<double>(packet.sample.size()));
-}

@@ -127,21 +127,6 @@ struct ViconFrameResult {
     std::vector<ViconDiagnostic> diagnostics;
 };
 
-enum class BridgeDiagnosticState {
-    Disconnected,
-    Connecting,
-    Streaming,
-    Stopped
-};
-
-struct BridgeDiagnosticStatus {
-    BridgeDiagnosticState state = BridgeDiagnosticState::Disconnected;
-    std::size_t marker_count = 0;
-    std::size_t segment_count = 0;
-    unsigned int frame_count = 0;
-    std::string message;
-};
-
 struct DiagnosticEmission {
     std::vector<std::string> log_lines;
     std::string status_message;
@@ -163,7 +148,6 @@ private:
 
 const char* toString(DiagnosticSeverity severity);
 const char* toString(ViconReadStatus status);
-const char* bridgeDiagnosticStateName(BridgeDiagnosticState state);
 
 double quietNaN();
 MarkerSample invalidMarkerSample();
@@ -176,7 +160,6 @@ bool isValid(const CountRead& read);
 bool isValid(const NameRead& read);
 
 bool layoutChanged(const ViconLayout& current, const ViconLayout& known);
-bool hasLayoutChanged(const ViconLayout& known, const ViconLayout& current);
 
 std::string buildStreamSourceId(const std::string& prefix,
                                 const std::string& kind,
@@ -184,32 +167,10 @@ std::string buildStreamSourceId(const std::string& prefix,
 std::string formatDiagnostic(const ViconDiagnostic& diagnostic);
 std::string diagnosticKey(const ViconDiagnostic& diagnostic);
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics);
-std::string formatLayoutSummary(const ViconLayout& layout);
-std::string formatBridgeDiagnostics(const BridgeDiagnosticStatus& status);
 
 MarkerSample markerSampleForLsl(const MarkerTranslationRead& read);
 SegmentSample segmentSampleForLsl(const SegmentTranslationRead& translation,
                                   const SegmentRotationRead& rotation);
-
-template <class Client>
-ViconLayout collectLayout(Client& client) {
-    ViconLayout layout;
-    const unsigned int subject_count = client.getSubjectCount();
-    for (unsigned int s = 0; s < subject_count; ++s) {
-        const std::string subject = client.getSubjectName(s);
-
-        const unsigned int marker_count = client.getMarkerCount(subject);
-        for (unsigned int m = 0; m < marker_count; ++m) {
-            layout.markers.emplace_back(subject, client.getMarkerName(subject, m));
-        }
-
-        const unsigned int segment_count = client.getSegmentCount(subject);
-        for (unsigned int seg = 0; seg < segment_count; ++seg) {
-            layout.segments.emplace_back(subject, client.getSegmentName(subject, seg));
-        }
-    }
-    return layout;
-}
 
 template <class Client>
 ViconDiscoveryResult discoverLayout(Client& client, unsigned int frame_number) {
@@ -330,16 +291,6 @@ ViconDiscoveryResult discoverLayout(Client& client, unsigned int frame_number) {
 }
 
 template <class Client>
-ViconLayout readViconLayout(Client& client) {
-    return collectLayout(client);
-}
-
-template <class Client>
-ViconLayout readViconLayout(const Client& client) {
-    return collectLayout(client);
-}
-
-template <class Client>
 MarkerFrameResult buildMarkerFrame(Client& client,
                                    const std::vector<NamedViconItem>& markers,
                                    unsigned int frame_number) {
@@ -437,11 +388,6 @@ ViconFrameResult buildViconFrame(Client& client,
                               segment_frame.diagnostics.begin(),
                               segment_frame.diagnostics.end());
     return result;
-}
-
-template <class Client>
-ViconFrameResult mapViconFrame(Client& client, const ViconLayout& layout) {
-    return buildViconFrame(client, layout, 0);
 }
 
 } // namespace vicon_lsl

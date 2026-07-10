@@ -5,6 +5,7 @@
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewMath.h"
 #include "preview/PreviewXdf.h"
+#include "StreamDefaults.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -24,45 +25,10 @@
 #include <QVBoxLayout>
 
 #include <exception>
-#include <cmath>
 #include <optional>
 
 namespace vicon_lsl {
 namespace {
-
-// Fixed physical-stair placement from the Python preview auto-alignment.
-// Z is the height axis in the Vicon/stair data; Y centers the walking path
-// across the measured physical stair width.
-constexpr PreviewVec3 kPhysicalStairTranslationM{
-    -2.853343307500,
-    0.292672723112,
-    0.006432986454,
-};
-
-constexpr std::size_t kCalibrationSampleCount = 20;
-constexpr double kCalibrationTranslationToleranceM = 0.02;
-constexpr double kCalibrationRotationToleranceDegrees = 3.0;
-
-PreviewRigidTransform viconFromStairTarget() {
-    // TODO: Replace this fixed best estimate with an operator-editable or
-    // imported stair pose when stair relocation support is added.
-    return {kPhysicalStairTranslationM, {0.0, 0.0, 0.0, 1.0}};
-}
-
-bool poseIsStableRelativeTo(const CalibrationTargetPose& reference,
-                            const CalibrationTargetPose& candidate) {
-    const PreviewVec3 delta = candidate.holo_from_target.translation -
-                              reference.holo_from_target.translation;
-    if (length(delta) > kCalibrationTranslationToleranceM) {
-        return false;
-    }
-    const PreviewQuaternion left = normalizeQuaternion(reference.holo_from_target.rotation);
-    const PreviewQuaternion right = normalizeQuaternion(candidate.holo_from_target.rotation);
-    const double orientation_dot = std::abs(left.x * right.x + left.y * right.y +
-                                            left.z * right.z + left.w * right.w);
-    return orientation_dot >= std::cos(kCalibrationRotationToleranceDegrees *
-                                       3.14159265358979323846 / 360.0);
-}
 
 QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
     auto* spin = new QDoubleSpinBox();
@@ -103,10 +69,10 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     auto* stream_grid = new QGridLayout();
     stream_grid->setHorizontalSpacing(8);
     stream_grid->setVerticalSpacing(4);
-    marker_stream_edit_ = new QLineEdit("ViconMarkers");
-    segment_stream_edit_ = new QLineEdit("ViconSegments");
-    gaze_stream_edit_ = new QLineEdit("HoloLensGaze");
-    calibration_stream_edit_ = new QLineEdit("HoloLensModelTargetPose");
+    marker_stream_edit_ = new QLineEdit(stream_defaults::ViconMarkers);
+    segment_stream_edit_ = new QLineEdit(stream_defaults::ViconSegments);
+    gaze_stream_edit_ = new QLineEdit(stream_defaults::HoloLensGaze);
+    calibration_stream_edit_ = new QLineEdit(stream_defaults::HoloLensModelTargetPose);
     tolerance_spin_ = new QDoubleSpinBox();
     tolerance_spin_->setRange(0.001, 1.0);
     tolerance_spin_->setDecimals(3);
@@ -197,6 +163,7 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
 
     csv_timer_ = new QTimer(this);
     csv_timer_->setInterval(16);
+    playback_elapsed_.start();
 
     connect(start_button_, &QPushButton::clicked, this, &PreviewPanel::startPreview);
     connect(stop_button_, &QPushButton::clicked, this, &PreviewPanel::stopPreview);
@@ -204,6 +171,10 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     connect(open_xdf_button_, &QPushButton::clicked, this, &PreviewPanel::openXdf);
     connect(play_csv_button_, &QPushButton::clicked, this, &PreviewPanel::toggleCsvPlayback);
     connect(csv_timer_, &QTimer::timeout, this, &PreviewPanel::advanceCsvPlayback);
+    connect(playback_speed_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double speed) {
+                playback_clock_.setSpeed(speed, playback_elapsed_.elapsed() / 1000.0);
+            });
     connect(browse_stair_button, &QPushButton::clicked, this, &PreviewPanel::browseStairModel);
     connect(reload_stair_button, &QPushButton::clicked, this, &PreviewPanel::reloadStairModel);
     connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
@@ -216,12 +187,20 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
 }
 
 PreviewPanel::~PreviewPanel() {
-    stopPreview();
+    if (worker_) {
+        worker_->requestInterruption();
+        worker_->wait();
+    }
     saveSettings();
 }
 
 void PreviewPanel::startPreview() {
-    stopPreview();
+    if (worker_) {
+        stopPreview();
+        if (worker_) {
+            return;
+        }
+    }
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
     saveSettings();
@@ -238,14 +217,27 @@ void PreviewPanel::startPreview() {
     config.gaze_transform = gazeTransform();
 
     worker_ = new PreviewStreamWorker(config, this);
+    worker_state_ = WorkerState::Running;
+    PreviewStreamWorker* const started_worker = worker_;
     connect(worker_, &PreviewStreamWorker::frameReady, widget_, &PreviewWidget::setFrame);
     connect(worker_, &PreviewStreamWorker::targetPoseReady, this, &PreviewPanel::handleTargetPose);
     connect(worker_, &PreviewStreamWorker::statusChanged, this, &PreviewPanel::setStatus);
     connect(worker_, &QThread::finished, worker_, &QObject::deleteLater);
-    connect(worker_, &QThread::finished, this, [this]() {
+    connect(worker_, &QThread::finished, this, [this, started_worker]() {
+        if (worker_ != started_worker) {
+            return;
+        }
         worker_ = nullptr;
+        worker_state_ = WorkerState::Idle;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
+        open_csv_button_->setEnabled(true);
+        open_xdf_button_->setEnabled(true);
+        if (pending_recording_open_ != PendingRecordingOpen::None) {
+            processPendingRecordingOpen();
+        } else {
+            setStatus("Preview stopped");
+        }
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
@@ -254,17 +246,28 @@ void PreviewPanel::startPreview() {
 }
 
 void PreviewPanel::stopPreview() {
+    resetCalibrationSession();
     if (!worker_) {
+        worker_state_ = WorkerState::Idle;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
         return;
     }
-    worker_->requestInterruption();
-    worker_->wait(1000);
-    worker_ = nullptr;
-    start_button_->setEnabled(true);
+    if (worker_state_ == WorkerState::Stopping) {
+        return;
+    }
+
+    worker_state_ = WorkerState::Stopping;
+    PreviewStreamWorker* const stopping_worker = worker_;
+    stopping_worker->requestInterruption();
+    start_button_->setEnabled(false);
     stop_button_->setEnabled(false);
-    setStatus("Preview stopped");
+    open_csv_button_->setEnabled(false);
+    open_xdf_button_->setEnabled(false);
+    setStatus("Preview stopping...");
+    if (!stopping_worker->wait(1000)) {
+        setStatus("Preview is still stopping; restart is disabled until it finishes");
+    }
 }
 
 void PreviewPanel::beginCalibration() {
@@ -273,14 +276,15 @@ void PreviewPanel::beginCalibration() {
         return;
     }
     calibration_samples_.clear();
-    calibration_collecting_ = true;
-    setStatus("Waiting for 20 stable tracked stair-target poses...");
+    calibration_state_ = CalibrationState::Collecting;
+    const auto& profile = defaultStairCalibrationProfile();
+    setStatus("Waiting for " + QString::number(profile.required_samples) +
+              " stable tracked stair-target poses...");
 }
 
 void PreviewPanel::useManualTransform() {
-    calibration_collecting_ = false;
+    calibration_state_ = CalibrationState::Manual;
     calibration_samples_.clear();
-    has_automatic_calibration_ = false;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
@@ -289,7 +293,8 @@ void PreviewPanel::useManualTransform() {
 }
 
 void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
-    if (!calibration_collecting_) {
+    const auto& profile = defaultStairCalibrationProfile();
+    if (calibration_state_ != CalibrationState::Collecting) {
         return;
     }
     if (!pose.tracked) {
@@ -298,45 +303,42 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         return;
     }
 
-    if (!calibration_samples_.empty() && !poseIsStableRelativeTo(calibration_samples_.front(), pose)) {
+    if (!calibration_samples_.empty() &&
+        !targetPoseWithinTolerance(calibration_samples_.front(), pose, profile)) {
         calibration_samples_.clear();
         calibration_samples_.push_back(pose);
         setStatus("Stair target moved; restarting stable-pose collection (1/" +
-                  QString::number(static_cast<qulonglong>(kCalibrationSampleCount)) + ")");
+                  QString::number(static_cast<qulonglong>(profile.required_samples)) + ")");
         return;
     }
 
     calibration_samples_.push_back(pose);
-    if (calibration_samples_.size() < kCalibrationSampleCount) {
+    if (calibration_samples_.size() < profile.required_samples) {
         setStatus("Collecting stair-target poses: " +
                   QString::number(calibration_samples_.size()) + "/" +
-                  QString::number(kCalibrationSampleCount));
+                  QString::number(profile.required_samples));
         return;
     }
 
-    const auto holo_from_stair = averageTrackedTargetPoses(calibration_samples_);
-    calibration_collecting_ = false;
+    const auto solution = solveTrackedTargetCalibration(calibration_samples_, profile);
+    calibration_state_ = CalibrationState::Manual;
     calibration_samples_.clear();
-    if (!holo_from_stair) {
-        setStatus("Calibration failed: no valid tracked stair-target poses");
+    if (!solution) {
+        setStatus("Calibration failed: stair-target motion exceeded quality limits");
         return;
     }
 
     automatic_gaze_transform_ = composeRigidTransforms(
-        viconFromStairTarget(), inverseRigidTransform(*holo_from_stair));
-    has_automatic_calibration_ = true;
-    const PreviewVec3 display_euler = eulerDegreesFromQuaternion(automatic_gaze_transform_.rotation);
-    gaze_tx_spin_->setValue(automatic_gaze_transform_.translation.x);
-    gaze_ty_spin_->setValue(automatic_gaze_transform_.translation.y);
-    gaze_tz_spin_->setValue(automatic_gaze_transform_.translation.z);
-    gaze_rx_spin_->setValue(display_euler.x);
-    gaze_ry_spin_->setValue(display_euler.y);
-    gaze_rz_spin_->setValue(display_euler.z);
+        profile.vicon_from_target, inverseRigidTransform(solution->holo_from_target));
+    calibration_state_ = CalibrationState::AutomaticSession;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
-    saveSettings();
-    setStatus("Stair-target calibration applied and saved");
+    setStatus("Stair-target calibration " + QString::fromStdString(profile.id) +
+              " applied for this session (RMS " +
+              QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
+              " mm, " + QString::number(solution->quality.rotation_rms_degrees, 'f', 2) +
+              " deg)");
 }
 
 void PreviewPanel::openMergedCsv() {
@@ -349,7 +351,20 @@ void PreviewPanel::openMergedCsv() {
         return;
     }
 
-    stopPreview();
+    if (worker_) {
+        pending_recording_open_ = PendingRecordingOpen::Csv;
+        pending_recording_path_ = path;
+        stopPreview();
+        if (worker_) {
+            setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
+            return;
+        }
+    }
+
+    loadMergedCsv(path);
+}
+
+void PreviewPanel::loadMergedCsv(const QString& path) {
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
 
@@ -359,7 +374,12 @@ void PreviewPanel::openMergedCsv() {
         vicon_transform.scale = 0.001;
         const auto recording = loadMergedPreviewCsv(path.toStdString(), vicon_transform, gazeTransform());
         csv_frames_ = recording.frames;
-        csv_frame_cursor_ = 0.0;
+        std::vector<double> timestamps;
+        timestamps.reserve(csv_frames_.size());
+        for (const auto& frame : csv_frames_) timestamps.push_back(frame.timestamp);
+        playback_clock_.setTimeline(timestamps);
+        playback_clock_.setSpeed(playback_speed_spin_->value(),
+                                 playback_elapsed_.elapsed() / 1000.0);
         if (csv_frames_.empty()) {
             play_csv_button_->setEnabled(false);
             setStatus("CSV has no preview frames");
@@ -386,7 +406,20 @@ void PreviewPanel::openXdf() {
         return;
     }
 
-    stopPreview();
+    if (worker_) {
+        pending_recording_open_ = PendingRecordingOpen::Xdf;
+        pending_recording_path_ = path;
+        stopPreview();
+        if (worker_) {
+            setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
+            return;
+        }
+    }
+
+    loadXdf(path);
+}
+
+void PreviewPanel::loadXdf(const QString& path) {
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
 
@@ -399,7 +432,12 @@ void PreviewPanel::openXdf() {
                                                        gazeTransform(),
                                                        tolerance_spin_->value());
         csv_frames_ = recording.frames;
-        csv_frame_cursor_ = 0.0;
+        std::vector<double> timestamps;
+        timestamps.reserve(csv_frames_.size());
+        for (const auto& frame : csv_frames_) timestamps.push_back(frame.timestamp);
+        playback_clock_.setTimeline(timestamps);
+        playback_clock_.setSpeed(playback_speed_spin_->value(),
+                                 playback_elapsed_.elapsed() / 1000.0);
         if (csv_frames_.empty()) {
             play_csv_button_->setEnabled(false);
             setStatus("XDF has no preview frames");
@@ -416,14 +454,28 @@ void PreviewPanel::openXdf() {
     }
 }
 
+void PreviewPanel::processPendingRecordingOpen() {
+    const PendingRecordingOpen pending = pending_recording_open_;
+    const QString path = pending_recording_path_;
+    pending_recording_open_ = PendingRecordingOpen::None;
+    pending_recording_path_.clear();
+    if (pending == PendingRecordingOpen::Csv) {
+        loadMergedCsv(path);
+    } else if (pending == PendingRecordingOpen::Xdf) {
+        loadXdf(path);
+    }
+}
+
 void PreviewPanel::toggleCsvPlayback() {
     if (csv_frames_.empty()) {
         return;
     }
     if (csv_timer_->isActive()) {
+        playback_clock_.pause(playback_elapsed_.elapsed() / 1000.0);
         csv_timer_->stop();
         play_csv_button_->setText("Play Recording");
     } else {
+        playback_clock_.play(playback_elapsed_.elapsed() / 1000.0);
         csv_timer_->start();
         play_csv_button_->setText("Pause Recording");
     }
@@ -435,11 +487,8 @@ void PreviewPanel::advanceCsvPlayback() {
         play_csv_button_->setText("Play Recording");
         return;
     }
-    csv_frame_cursor_ += playback_speed_spin_->value();
-    if (csv_frame_cursor_ >= static_cast<double>(csv_frames_.size())) {
-        csv_frame_cursor_ = 0.0;
-    }
-    widget_->setFrame(csv_frames_[static_cast<std::size_t>(csv_frame_cursor_)]);
+    widget_->setFrame(csv_frames_[playback_clock_.frameIndex(
+        playback_elapsed_.elapsed() / 1000.0)]);
 }
 
 void PreviewPanel::browseStairModel() {
@@ -480,27 +529,37 @@ PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
 }
 
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
-    if (has_automatic_calibration_) {
+    if (calibration_state_ == CalibrationState::AutomaticSession) {
         return transformProfileFromRigid(automatic_gaze_transform_, "HoloLens");
     }
     return manualGazeTransform();
+}
+
+void PreviewPanel::resetCalibrationSession() {
+    calibration_samples_.clear();
+    calibration_state_ = CalibrationState::Manual;
+    automatic_gaze_transform_ = {};
 }
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
     PreviewTransformProfile transform;
     transform.name = "Stair";
     transform.scale = 0.001;
-    transform.translation = kPhysicalStairTranslationM;
+    transform.translation = defaultStairCalibrationProfile().vicon_from_target.translation;
     transform.rotation_degrees = {0.0, 0.0, 0.0};
     return transform;
 }
 
 void PreviewPanel::loadSettings() {
     QSettings settings("ViconLSL", "ViconLSLBridge");
-    marker_stream_edit_->setText(settings.value("preview/markerStream", "ViconMarkers").toString());
-    segment_stream_edit_->setText(settings.value("preview/segmentStream", "ViconSegments").toString());
-    gaze_stream_edit_->setText(settings.value("preview/gazeStream", "HoloLensGaze").toString());
-    calibration_stream_edit_->setText(settings.value("preview/calibrationStream", "HoloLensModelTargetPose").toString());
+    marker_stream_edit_->setText(settings.value(
+        "preview/markerStream", stream_defaults::ViconMarkers).toString());
+    segment_stream_edit_->setText(settings.value(
+        "preview/segmentStream", stream_defaults::ViconSegments).toString());
+    gaze_stream_edit_->setText(settings.value(
+        "preview/gazeStream", stream_defaults::HoloLensGaze).toString());
+    calibration_stream_edit_->setText(settings.value(
+        "preview/calibrationStream", stream_defaults::HoloLensModelTargetPose).toString());
     tolerance_spin_->setValue(settings.value("preview/matchTolerance", 0.05).toDouble());
     trail_points_spin_->setValue(settings.value("preview/trailPoints", 24).toInt());
     playback_speed_spin_->setValue(settings.value("preview/playbackSpeed", 1.0).toDouble());
@@ -510,18 +569,15 @@ void PreviewPanel::loadSettings() {
     gaze_rx_spin_->setValue(settings.value("preview/gazeRx", 0.0).toDouble());
     gaze_ry_spin_->setValue(settings.value("preview/gazeRy", 0.0).toDouble());
     gaze_rz_spin_->setValue(settings.value("preview/gazeRz", 0.0).toDouble());
-    has_automatic_calibration_ = settings.value("preview/gazeUseQuaternion", false).toBool();
-    automatic_gaze_transform_.translation = {
-        settings.value("preview/gazeQTx", 0.0).toDouble(),
-        settings.value("preview/gazeQTy", 0.0).toDouble(),
-        settings.value("preview/gazeQTz", 0.0).toDouble(),
+    resetCalibrationSession();
+    const QStringList obsolete_automatic_keys = {
+        "preview/gazeUseQuaternion",
+        "preview/gazeQTx", "preview/gazeQTy", "preview/gazeQTz",
+        "preview/gazeQx", "preview/gazeQy", "preview/gazeQz", "preview/gazeQw",
     };
-    automatic_gaze_transform_.rotation = normalizeQuaternion({
-        settings.value("preview/gazeQx", 0.0).toDouble(),
-        settings.value("preview/gazeQy", 0.0).toDouble(),
-        settings.value("preview/gazeQz", 0.0).toDouble(),
-        settings.value("preview/gazeQw", 1.0).toDouble(),
-    });
+    for (const QString& key : obsolete_automatic_keys) {
+        settings.remove(key);
+    }
     stair_model_edit_->setText(settings.value("preview/stairModel", defaultStairModelPath()).toString());
 }
 
@@ -540,14 +596,6 @@ void PreviewPanel::saveSettings() const {
     settings.setValue("preview/gazeRx", gaze_rx_spin_->value());
     settings.setValue("preview/gazeRy", gaze_ry_spin_->value());
     settings.setValue("preview/gazeRz", gaze_rz_spin_->value());
-    settings.setValue("preview/gazeUseQuaternion", has_automatic_calibration_);
-    settings.setValue("preview/gazeQTx", automatic_gaze_transform_.translation.x);
-    settings.setValue("preview/gazeQTy", automatic_gaze_transform_.translation.y);
-    settings.setValue("preview/gazeQTz", automatic_gaze_transform_.translation.z);
-    settings.setValue("preview/gazeQx", automatic_gaze_transform_.rotation.x);
-    settings.setValue("preview/gazeQy", automatic_gaze_transform_.rotation.y);
-    settings.setValue("preview/gazeQz", automatic_gaze_transform_.rotation.z);
-    settings.setValue("preview/gazeQw", automatic_gaze_transform_.rotation.w);
     settings.setValue("preview/stairModel", stair_model_edit_->text());
 }
 

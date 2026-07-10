@@ -39,7 +39,7 @@ The GUI also includes an embedded native OpenGL preview. The preview subscribes 
 
 Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` without modifying the raw gaze stream.
 
-In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and saves the resulting HoloLens-to-Vicon rigid transform. **Use Manual Transform** returns to the existing translation/Euler controls.
+In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and applies the resulting HoloLens-to-Vicon rigid transform for the current preview session only; automatic alignment is not saved. **Use Manual Transform** returns to the persistent translation/Euler controls.
 
 The Vicon-side stair pose is currently the best fixed estimate used by the preview. Repeat calibration after restarting the HoloLens world frame; if the physical stairs are relocated, update that fixed estimate until an editable stair-pose workflow is added.
 
@@ -119,3 +119,28 @@ cmake --build build --config Release
 ```
 
 If Qt6 is installed, both `vicon-lsl-bridge` (CLI) and `vicon-lsl-bridge-gui` (GUI) will be built. Without Qt6, only the CLI is built.
+
+## Testing
+
+Run the dependency-light C++ suite without downloading Catch2:
+
+```bash
+cmake -S vicon-lsl-bridge -B build-logic \
+  -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF \
+  -DVICON_LSL_BRIDGE_BUILD_GUI=OFF \
+  -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF \
+  -DBUILD_TESTING=ON
+cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests
+ctest --test-dir build-logic --build-config Release --output-on-failure
+```
+
+For the complete bridge suite, configure with the Vicon SDK submodule, liblsl, and Qt6 available, build all targets, then run CTest from that build directory. Both Catch2 and the bundled dependency-light harness are exercised in CI.
+
+The platform-neutral HoloLens publisher, tracker-lifetime, and pose-encoding checks run with:
+
+```bash
+dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
+python tools/generate_stream_contracts.py --check
+```
+
+Device-specific WinRT, Unity, Vuforia, and spatial-frame behavior must also be validated in the real Unity project and on HoloLens hardware. The pinned LabRecorder submodule currently builds its XDF writer test executable without registering it with CTest; that upstream limitation is intentionally not patched in this repository.
