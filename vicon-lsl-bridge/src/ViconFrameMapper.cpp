@@ -110,10 +110,6 @@ bool layoutChanged(const ViconLayout& current, const ViconLayout& known) {
     return current != known;
 }
 
-bool hasLayoutChanged(const ViconLayout& known, const ViconLayout& current) {
-    return layoutChanged(current, known);
-}
-
 std::string buildStreamSourceId(const std::string& prefix,
                                 const std::string& kind,
                                 const std::string& hostname) {
