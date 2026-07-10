@@ -65,6 +65,7 @@ private slots:
     void onSocketError(QAbstractSocket::SocketError error);
     void onBytesWritten(qint64 bytes);
     void onReadyRead();
+    void onConnectionTimeout();
     void onCommandTimeout();
 
 private:
@@ -80,15 +81,18 @@ private:
                          RecorderRecordingState success_state);
     void startNextBatch();
     void writeNextCommand();
-    void finishActiveBatch(bool ok, const QString& message);
+    void finishActiveBatch(bool ok, const QString& message, bool start_next = true);
+    void failActiveConnection(const QString& message);
     void setConnectionState(RecorderConnectionState state, const QString& message = {});
     void setRecordingState(RecorderRecordingState state);
 
     QTcpSocket socket_;
+    QTimer connection_timeout_;
     QTimer command_timeout_;
     QQueue<CommandBatch> batches_;
     CommandBatch active_batch_;
     bool have_active_batch_ = false;
+    QByteArray pending_payload_;
     QByteArray response_buffer_;
     QString last_error_;
     RecorderConnectionState connection_state_ = RecorderConnectionState::Disconnected;

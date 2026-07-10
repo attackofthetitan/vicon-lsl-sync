@@ -40,6 +40,13 @@ QString readCommand(QTcpSocket* socket) {
     return QString::fromUtf8(socket->readLine()).trimmed();
 }
 
+bool writeReply(QTcpSocket* socket, const QByteArray& reply) {
+    if (socket->write(reply) != reply.size()) {
+        return false;
+    }
+    return waitUntil([socket]() { return socket->bytesToWrite() == 0; });
+}
+
 void testFilenameCommand() {
     LabRecorderFilenameFields fields;
     fields.root = "C:/Data/{bad}";
@@ -132,6 +139,14 @@ void testTcpCommandSequence() {
         return;
     }
 
+    int completions = 0;
+    bool last_completion_ok = false;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&completions, &last_completion_ok](const QString&, bool ok, const QString&) {
+                         ++completions;
+                         last_completion_ok = ok;
+                     });
+
     LabRecorderFilenameFields fields;
     fields.root = "/tmp/data";
     fields.templ = "sub-%p_task-%b_run-%r.xdf";
@@ -148,15 +163,27 @@ void testTcpCommandSequence() {
 
     expect(client.refreshStreams(), "sends update");
     expect(readCommand(socket.get()) == expected[0], "server receives update");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges update");
+    expect(waitUntil([&completions]() { return completions == 1; }) && last_completion_ok,
+           "client completes update after acknowledgement");
 
     expect(client.sendCommand(LabRecorderClient::filenameCommand(fields)), "sends filename");
     expect(readCommand(socket.get()) == expected[1], "server receives filename");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges filename");
+    expect(waitUntil([&completions]() { return completions == 2; }) && last_completion_ok,
+           "client completes filename after acknowledgement");
 
     expect(client.sendCommand("start"), "sends start");
     expect(readCommand(socket.get()) == expected[2], "server receives start");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges start");
+    expect(waitUntil([&completions]() { return completions == 3; }) && last_completion_ok,
+           "client completes start after acknowledgement");
 
     expect(client.stopRecording(), "sends stop");
     expect(readCommand(socket.get()) == expected[3], "server receives stop");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges stop");
+    expect(waitUntil([&completions]() { return completions == 4; }) && last_completion_ok,
+           "client completes stop after acknowledgement");
 }
 
 void testTcpStartRecordingSequenceWithSelectAll() {
@@ -175,6 +202,14 @@ void testTcpStartRecordingSequenceWithSelectAll() {
         return;
     }
 
+    int completions = 0;
+    bool completion_ok = false;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&completions, &completion_ok](const QString&, bool ok, const QString&) {
+                         ++completions;
+                         completion_ok = ok;
+                     });
+
     LabRecorderFilenameFields fields;
     fields.root = "/tmp/data";
     fields.templ = "sub-%p_task-%b_run-%r.xdf";
@@ -185,12 +220,105 @@ void testTcpStartRecordingSequenceWithSelectAll() {
     expect(client.startRecording(fields, true), "sends combined start sequence with select-all");
     expect(readCommand(socket.get()) == "select all",
            "server receives select-all before filename in combined start sequence");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges select-all");
     expect(readCommand(socket.get()) ==
                "filename {root:/tmp/data} {template:sub-%p_task-%b_run-%r.xdf} "
                "{participant:P003} {task:Jump} {run:4}",
            "server receives filename before start in combined start sequence");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges start filename");
     expect(readCommand(socket.get()) == "start",
            "server receives start after filename in combined start sequence");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges recording start");
+    expect(waitUntil([&completions]() { return completions == 1; }) && completion_ok,
+           "start sequence completes after every acknowledgement");
+    expect(client.recordingState() == RecorderRecordingState::Recording,
+           "acknowledged start updates recording state");
+}
+
+void testFragmentedReplyControlsCommandProgress() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "fragmented reply server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort(), 500);
+    expect(waitUntil([&client]() { return client.isConnected(); }),
+           "fragmented reply client connects");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
+           "fragmented reply server accepts client");
+    std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
+    if (!socket) return;
+
+    int completions = 0;
+    bool completion_ok = false;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&completions, &completion_ok](const QString&, bool ok, const QString&) {
+                         ++completions;
+                         completion_ok = ok;
+                     });
+
+    expect(client.sendCommand("update"), "fragmented reply command queues");
+    expect(readCommand(socket.get()) == "update", "fragmented reply server receives command");
+    expect(writeReply(socket.get(), "O"), "server writes first reply fragment");
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    expect(completions == 0, "partial reply does not complete command");
+    expect(writeReply(socket.get(), "K"), "server writes final reply fragment");
+    expect(waitUntil([&completions]() { return completions == 1; }) && completion_ok,
+           "complete fragmented acknowledgement finishes command");
+}
+
+void testCommandTimeoutDisconnectsAndDropsQueuedWork() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "timeout server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort(), 50);
+    expect(waitUntil([&client]() { return client.isConnected(); }), "timeout client connects");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
+           "timeout server accepts client");
+    std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
+    if (!socket) return;
+
+    int failures = 0;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&failures](const QString&, bool ok, const QString&) {
+                         if (!ok) ++failures;
+                     });
+    expect(client.sendCommand("start"), "timeout start command queues");
+    expect(client.sendCommand("stop"), "timeout follow-up command queues");
+    expect(readCommand(socket.get()) == "start", "timeout server receives first command");
+    expect(waitUntil([&client]() {
+        return client.connectionState() == RecorderConnectionState::Error;
+    }, 1000), "missing acknowledgement transitions connection to error");
+    expect(failures == 1, "timed-out active command reports one failure");
+    expect(client.recordingState() == RecorderRecordingState::Unknown,
+           "timeout resets recording state");
+    expect(!waitUntil([socket = socket.get()]() { return socket->canReadLine(); }, 100),
+           "queued command is dropped after timeout");
+}
+
+void testMidCommandDisconnectReportsFailure() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "disconnect server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort(), 500);
+    expect(waitUntil([&client]() { return client.isConnected(); }), "disconnect client connects");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
+           "disconnect server accepts client");
+    std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
+    if (!socket) return;
+
+    int failures = 0;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&failures](const QString&, bool ok, const QString&) {
+                         if (!ok) ++failures;
+                     });
+    expect(client.sendCommand("update"), "disconnect command queues");
+    expect(readCommand(socket.get()) == "update", "disconnect server receives command");
+    socket->disconnectFromHost();
+    expect(waitUntil([&client]() {
+        return client.connectionState() == RecorderConnectionState::Disconnected;
+    }), "mid-command disconnect updates connection state");
+    expect(failures == 1, "mid-command disconnect reports command failure");
+    expect(client.recordingState() == RecorderRecordingState::Unknown,
+           "mid-command disconnect resets recording state");
 }
 
 void testConnectionStateTracksIdleDisconnectAndReconnect() {
@@ -231,6 +359,9 @@ int main(int argc, char** argv) {
     testStartRecordingCommands();
     testTcpCommandSequence();
     testTcpStartRecordingSequenceWithSelectAll();
+    testFragmentedReplyControlsCommandProgress();
+    testCommandTimeoutDisconnectsAndDropsQueuedWork();
+    testMidCommandDisconnectReportsFailure();
     testConnectionStateTracksIdleDisconnectAndReconnect();
 
     if (g_failures > 0) {
