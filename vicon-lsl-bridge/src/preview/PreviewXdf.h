@@ -8,6 +8,11 @@
 
 namespace vicon_lsl {
 
+struct XdfClockOffset {
+    double collection_time = 0.0;
+    double offset = 0.0;
+};
+
 struct XdfStreamData {
     std::uint32_t stream_id = 0;
     std::string name;
@@ -20,6 +25,7 @@ struct XdfStreamData {
     bool numeric = true;
     std::size_t sample_count = 0;
     std::vector<std::string> channel_labels;
+    std::vector<XdfClockOffset> clock_offsets;
     std::vector<double> timestamps;
     std::vector<std::vector<double>> samples;
 };

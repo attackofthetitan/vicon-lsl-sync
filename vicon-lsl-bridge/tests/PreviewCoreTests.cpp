@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -78,13 +79,14 @@ void writeXdfChunk(std::ostream& output,
 
 std::string streamHeaderXml(const std::string& name,
                             const std::string& type,
-                            const std::vector<std::string>& labels) {
+                            const std::vector<std::string>& labels,
+                            double nominal_srate = 0.0) {
     std::ostringstream xml;
     xml << "<?xml version=\"1.0\"?><info>"
         << "<name>" << name << "</name>"
         << "<type>" << type << "</type>"
         << "<channel_count>" << labels.size() << "</channel_count>"
-        << "<nominal_srate>0</nominal_srate>"
+        << "<nominal_srate>" << nominal_srate << "</nominal_srate>"
         << "<channel_format>double64</channel_format>"
         << "<source_id>" << name << "-test</source_id>"
         << "<desc><channels>";
@@ -99,23 +101,50 @@ void writeStreamHeader(std::ostream& output,
                        std::uint32_t stream_id,
                        const std::string& name,
                        const std::string& type,
-                       const std::vector<std::string>& labels) {
-    writeXdfChunk(output, 2, streamHeaderXml(name, type, labels), &stream_id);
+                       const std::vector<std::string>& labels,
+                       double nominal_srate = 0.0) {
+    writeXdfChunk(output, 2, streamHeaderXml(name, type, labels, nominal_srate), &stream_id);
+}
+
+void writeEncodedSampleChunk(std::ostream& output,
+                             std::uint32_t stream_id,
+                             const std::vector<std::optional<double>>& timestamps,
+                             const std::vector<std::vector<double>>& samples) {
+    std::ostringstream content;
+    writeVarlenInt(content, samples.size());
+    for (std::size_t sample_index = 0; sample_index < samples.size(); ++sample_index) {
+        if (timestamps[sample_index]) {
+            writeTimestamp(content, *timestamps[sample_index]);
+        } else {
+            content.put(0);
+        }
+        for (double value : samples[sample_index]) {
+            writeLittle(content, value);
+        }
+    }
+    writeXdfChunk(output, 3, content.str(), &stream_id);
 }
 
 void writeSampleChunk(std::ostream& output,
                       std::uint32_t stream_id,
                       const std::vector<double>& timestamps,
                       const std::vector<std::vector<double>>& samples) {
-    std::ostringstream content;
-    writeVarlenInt(content, samples.size());
-    for (std::size_t sample_index = 0; sample_index < samples.size(); ++sample_index) {
-        writeTimestamp(content, timestamps[sample_index]);
-        for (double value : samples[sample_index]) {
-            writeLittle(content, value);
-        }
+    std::vector<std::optional<double>> encoded_timestamps;
+    encoded_timestamps.reserve(timestamps.size());
+    for (double timestamp : timestamps) {
+        encoded_timestamps.emplace_back(timestamp);
     }
-    writeXdfChunk(output, 3, content.str(), &stream_id);
+    writeEncodedSampleChunk(output, stream_id, encoded_timestamps, samples);
+}
+
+void writeClockOffsetChunk(std::ostream& output,
+                           std::uint32_t stream_id,
+                           double collection_time,
+                           double offset) {
+    std::ostringstream content;
+    writeLittle(content, collection_time);
+    writeLittle(content, offset);
+    writeXdfChunk(output, 4, content.str(), &stream_id);
 }
 
 } // namespace
@@ -340,7 +369,7 @@ TEST_CASE("Preview merged CSV loader builds preview frames") {
     REQUIRE(near(recording.frames.front().markers.front().position.x, 1.0));
 }
 
-TEST_CASE("Preview XDF loader decodes numeric streams and merges relative clocks") {
+TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated clock offsets") {
     const std::string path = "preview_core_test.xdf";
     const std::uint32_t marker_stream_id = 1;
     const std::uint32_t gaze_stream_id = 2;
@@ -360,16 +389,20 @@ TEST_CASE("Preview XDF loader decodes numeric streams and merges relative clocks
         std::ofstream output(path, std::ios::binary);
         output << "XDF:";
         writeXdfChunk(output, 1, "<?xml version=\"1.0\"?><info><version>1.0</version></info>");
-        writeStreamHeader(output, marker_stream_id, "ViconMarkers", "MoCap", marker_labels);
+        writeStreamHeader(output, marker_stream_id, "ViconMarkers", "MoCap", marker_labels, 10.0);
         writeStreamHeader(output, gaze_stream_id, "HoloLensGaze", "Gaze", gazeLabels());
-        writeSampleChunk(output,
-                         marker_stream_id,
-                         {10.0, 10.1},
-                         {{1000.0, 0.0, 0.0, 1.0}, {2000.0, 0.0, 0.0, 1.0}});
+        writeEncodedSampleChunk(output,
+                                marker_stream_id,
+                                {10.0, std::nullopt, std::nullopt},
+                                {{1000.0, 0.0, 0.0, 1.0},
+                                 {2000.0, 0.0, 0.0, 1.0},
+                                 {3000.0, 0.0, 0.0, 1.0}});
         writeSampleChunk(output,
                          gaze_stream_id,
-                         {20.0, 20.1},
-                         {gaze_sample, gaze_sample});
+                         {20.0, 20.1, 20.2},
+                         {gaze_sample, gaze_sample, gaze_sample});
+        writeClockOffsetChunk(output, gaze_stream_id, 20.0, -10.0);
+        writeClockOffsetChunk(output, gaze_stream_id, 20.2, -10.0);
     }
 
     vicon_lsl::PreviewTransformProfile vicon_transform;
@@ -381,7 +414,7 @@ TEST_CASE("Preview XDF loader decodes numeric streams and merges relative clocks
         gaze_transform,
         0.05);
 
-    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(2));
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(3));
     REQUIRE(recording.summary.find("2 stream(s)") != std::string::npos);
     REQUIRE(near(recording.frames.front().timestamp, 0.0));
     REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
@@ -390,5 +423,114 @@ TEST_CASE("Preview XDF loader decodes numeric streams and merges relative clocks
     REQUIRE(recording.frames.front().gaze_rays.front().valid);
     REQUIRE(near(recording.frames.front().markers.front().position.x, 1.0));
     REQUIRE(near(recording.frames.front().gaze_rays.front().origin.x, 0.25));
+    REQUIRE(near(recording.frames[1].timestamp, 0.1));
     REQUIRE(near(recording.frames[1].markers.front().position.x, 2.0));
+    REQUIRE(near(recording.frames[2].markers.front().position.x, 3.0));
+}
+
+TEST_CASE("Preview XDF loader interpolates changing clock offsets") {
+    const std::string path = "preview_core_clock_offsets.xdf";
+    const std::uint32_t stream_id = 1;
+    const std::vector<std::string> labels = {
+        "Subject:LASI:X", "Subject:LASI:Y", "Subject:LASI:Z", "Subject:LASI:Valid",
+    };
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "ViconMarkers", "MoCap", labels);
+        writeSampleChunk(output, stream_id, {20.0, 20.1, 20.2},
+                         {{1.0, 0.0, 0.0, 1.0},
+                          {2.0, 0.0, 0.0, 1.0},
+                          {3.0, 0.0, 0.0, 1.0}});
+        writeClockOffsetChunk(output, stream_id, 20.0, -10.0);
+        writeClockOffsetChunk(output, stream_id, 20.2, -10.1);
+    }
+
+    const auto xdf = vicon_lsl::loadXdfNumericStreams(path);
+    REQUIRE_EQ(xdf.streams.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(xdf.streams.front().timestamps[0], 10.0));
+    REQUIRE(near(xdf.streams.front().timestamps[1], 10.05));
+    REQUIRE(near(xdf.streams.front().timestamps[2], 10.1));
+}
+
+TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp") {
+    const std::string path = "preview_core_absolute_timeline.xdf";
+    const std::uint32_t marker_stream_id = 1;
+    const std::uint32_t gaze_stream_id = 2;
+    const std::vector<std::string> marker_labels = {
+        "Subject:LASI:X", "Subject:LASI:Y", "Subject:LASI:Z", "Subject:LASI:Valid",
+    };
+    std::vector<double> gaze_sample(vicon_lsl::HoloLensGazePacket::ChannelCount, 0.0);
+    gaze_sample[6] = 1.0;
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, marker_stream_id, "ViconMarkers", "MoCap", marker_labels);
+        writeStreamHeader(output, gaze_stream_id, "HoloLensGaze", "Gaze", gazeLabels());
+        writeSampleChunk(output, marker_stream_id, {10.0}, {{1000.0, 0.0, 0.0, 1.0}});
+        writeSampleChunk(output, gaze_stream_id, {20.0}, {gaze_sample});
+    }
+
+    vicon_lsl::PreviewTransformProfile vicon_transform;
+    vicon_transform.scale = 0.001;
+    const auto recording = vicon_lsl::loadXdfPreviewRecording(
+        path, vicon_transform, {}, 0.05);
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
+    REQUIRE(recording.frames.front().gaze_rays.empty());
+}
+
+TEST_CASE("Preview XDF loader rejects impossible implicit and non-monotonic timestamps") {
+    const std::string implicit_path = "preview_core_invalid_implicit.xdf";
+    const std::string non_monotonic_path = "preview_core_non_monotonic.xdf";
+    const std::uint32_t stream_id = 1;
+    const std::vector<std::string> labels = {"value"};
+    {
+        std::ofstream output(implicit_path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", labels, 10.0);
+        writeEncodedSampleChunk(output, stream_id, {std::nullopt}, {{1.0}});
+    }
+    {
+        std::ofstream output(non_monotonic_path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", labels);
+        writeSampleChunk(output, stream_id, {2.0, 1.0}, {{1.0}, {2.0}});
+    }
+
+    bool rejected_implicit = false;
+    bool rejected_non_monotonic = false;
+    try {
+        (void)vicon_lsl::loadXdfNumericStreams(implicit_path);
+    } catch (const std::runtime_error&) {
+        rejected_implicit = true;
+    }
+    try {
+        (void)vicon_lsl::loadXdfNumericStreams(non_monotonic_path);
+    } catch (const std::runtime_error&) {
+        rejected_non_monotonic = true;
+    }
+    REQUIRE(rejected_implicit);
+    REQUIRE(rejected_non_monotonic);
+}
+
+TEST_CASE("Preview XDF loader rejects malformed clock-offset chunks") {
+    const std::string path = "preview_core_malformed_clock_offset.xdf";
+    const std::uint32_t stream_id = 1;
+    std::ostringstream malformed_offset;
+    writeLittle(malformed_offset, 10.0);
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", {"value"});
+        writeXdfChunk(output, 4, malformed_offset.str(), &stream_id);
+    }
+
+    bool rejected = false;
+    try {
+        (void)vicon_lsl::loadXdfNumericStreams(path);
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    REQUIRE(rejected);
 }
