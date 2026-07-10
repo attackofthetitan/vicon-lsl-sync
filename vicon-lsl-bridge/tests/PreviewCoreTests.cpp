@@ -1,6 +1,7 @@
 #include "HoloLensGazePacket.h"
 #include "preview/ObjMesh.h"
 #include "preview/PreviewCsv.h"
+#include "preview/PreviewCalibration.h"
 #include "preview/PreviewMath.h"
 #include "preview/PreviewParsing.h"
 #include "preview/PreviewXdf.h"
@@ -25,6 +26,13 @@ std::vector<std::string> gazeLabels() {
         labels.emplace_back(channel.label);
     }
     return labels;
+}
+
+std::vector<std::string> calibrationLabels() {
+    return {
+        "PositionX", "PositionY", "PositionZ",
+        "RotationX", "RotationY", "RotationZ", "RotationW", "Tracked",
+    };
 }
 
 template <typename T>
@@ -184,6 +192,66 @@ TEST_CASE("Preview segment axes preserve identity quaternion orientation") {
     REQUIRE(near(axes[0].x, 1.0));
     REQUIRE(near(axes[1].y, 1.0));
     REQUIRE(near(axes[2].z, 1.0));
+}
+
+TEST_CASE("Preview calibration composes and inverts rigid transforms") {
+    const vicon_lsl::PreviewRigidTransform vicon_from_stair{
+        {10.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}};
+    const vicon_lsl::PreviewRigidTransform holo_from_stair{
+        {1.0, 2.0, 3.0}, {0.0, 0.0, 0.0, 1.0}};
+    const auto vicon_from_holo = vicon_lsl::composeRigidTransforms(
+        vicon_from_stair, vicon_lsl::inverseRigidTransform(holo_from_stair));
+
+    const auto vicon_stair_origin = vicon_lsl::applyRigidTransformPoint(vicon_from_holo, {1.0, 2.0, 3.0});
+    REQUIRE(near(vicon_stair_origin.x, 10.0));
+    REQUIRE(near(vicon_stair_origin.y, 0.0));
+    REQUIRE(near(vicon_stair_origin.z, 0.0));
+
+    const auto profile = vicon_lsl::transformProfileFromRigid(vicon_from_holo);
+    REQUIRE(profile.use_quaternion_rotation);
+    const auto transformed_direction = vicon_lsl::applyTransformDirection(profile, {0.0, 1.0, 0.0});
+    REQUIRE(near(transformed_direction.y, 1.0));
+}
+
+TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses") {
+    const auto labels = calibrationLabels();
+    const auto invalid = vicon_lsl::parseCalibrationTargetPose(
+        labels, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0});
+    REQUIRE(!invalid.has_value());
+
+    const auto tracked = vicon_lsl::parseCalibrationTargetPose(
+        labels, {1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 2.0, 1.0});
+    const auto untracked = vicon_lsl::parseCalibrationTargetPose(
+        labels, {9.0, 9.0, 9.0, 0.0, 0.0, 0.0, 1.0, 0.0});
+    REQUIRE(tracked.has_value());
+    REQUIRE(untracked.has_value());
+    const auto average = vicon_lsl::averageTrackedTargetPoses({*tracked, *untracked});
+    REQUIRE(average.has_value());
+    REQUIRE(near(average->translation.x, 1.0));
+    REQUIRE(near(average->translation.y, 2.0));
+    REQUIRE(near(average->translation.z, 3.0));
+    REQUIRE(near(average->rotation.w, 1.0));
+}
+
+TEST_CASE("Preview calibration aligns a synthetic gaze ray with the stair frame") {
+    const vicon_lsl::PreviewRigidTransform vicon_from_stair{
+        {2.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}};
+    const vicon_lsl::PreviewRigidTransform holo_from_stair{
+        {1.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}};
+    const auto profile = vicon_lsl::transformProfileFromRigid(
+        vicon_lsl::composeRigidTransforms(
+            vicon_from_stair, vicon_lsl::inverseRigidTransform(holo_from_stair)));
+
+    const vicon_lsl::PreviewMesh mesh{
+        {{2.0, 0.0, 0.0}, {3.0, 0.0, 0.0}, {3.0, 1.0, 0.0}, {2.0, 1.0, 0.0}},
+        {{0, 1, 2, 3}},
+    };
+    const auto triangles = vicon_lsl::triangulateMesh(mesh, {});
+    const auto origin = vicon_lsl::applyTransformPoint(profile, {1.5, 0.5, 1.0});
+    const auto direction = vicon_lsl::applyTransformDirection(profile, {0.0, 0.0, -1.0});
+    const auto distance = vicon_lsl::rayTriangleDistance(origin, direction, triangles, 10.0);
+    REQUIRE(distance.has_value());
+    REQUIRE(near(*distance, 1.0));
 }
 
 TEST_CASE("Preview merged CSV loader builds preview frames") {

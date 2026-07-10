@@ -20,6 +20,12 @@ PreviewVec3 normalize(const PreviewVec3& value);
 bool isFinite(const PreviewVec3& value);
 
 PreviewVec3 rotateEulerDegrees(const PreviewVec3& value, const PreviewVec3& degrees);
+PreviewQuaternion normalizeQuaternion(const PreviewQuaternion& quaternion);
+PreviewQuaternion multiplyQuaternions(const PreviewQuaternion& left,
+                                      const PreviewQuaternion& right);
+PreviewQuaternion inverseQuaternion(const PreviewQuaternion& quaternion);
+PreviewVec3 rotateByQuaternion(const PreviewVec3& value, const PreviewQuaternion& quaternion);
+PreviewVec3 eulerDegreesFromQuaternion(const PreviewQuaternion& quaternion);
 PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const PreviewVec3& point);
 PreviewVec3 applyTransformDirection(const PreviewTransformProfile& transform, const PreviewVec3& direction);
 

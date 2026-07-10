@@ -1,5 +1,6 @@
 #pragma once
 
+#include "preview/PreviewCalibration.h"
 #include "preview/PreviewTypes.h"
 
 #include <QThread>
@@ -7,6 +8,7 @@
 #include <QString>
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,7 @@ struct PreviewWorkerConfig {
     QString marker_stream_name = "ViconMarkers";
     QString segment_stream_name = "ViconSegments";
     QString gaze_stream_name = "HoloLensGaze";
+    QString calibration_stream_name = "HoloLensModelTargetPose";
     double match_tolerance_seconds = 0.05;
     PreviewTransformProfile vicon_transform;
     PreviewTransformProfile gaze_transform;
@@ -32,9 +35,11 @@ class PreviewStreamWorker : public QThread {
 public:
     explicit PreviewStreamWorker(PreviewWorkerConfig config, QObject* parent = nullptr);
     ~PreviewStreamWorker() override;
+    void setGazeTransform(PreviewTransformProfile transform);
 
 signals:
     void frameReady(vicon_lsl::PreviewFrame frame);
+    void targetPoseReady(vicon_lsl::CalibrationTargetPose pose);
     void statusChanged(QString status);
 
 protected:
@@ -54,6 +59,8 @@ private:
     std::unique_ptr<StreamState> markers_;
     std::unique_ptr<StreamState> segments_;
     std::unique_ptr<StreamState> gaze_;
+    std::unique_ptr<StreamState> calibration_target_;
+    mutable std::mutex gaze_transform_mutex_;
     qint64 last_status_ms_ = 0;
     qint64 last_fallback_emit_ms_ = 0;
 };
@@ -61,3 +68,4 @@ private:
 } // namespace vicon_lsl
 
 Q_DECLARE_METATYPE(vicon_lsl::PreviewFrame)
+Q_DECLARE_METATYPE(vicon_lsl::CalibrationTargetPose)

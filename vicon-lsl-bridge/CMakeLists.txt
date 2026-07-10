@@ -40,6 +40,7 @@ endif()
 add_library(vicon-lsl-bridge-logic STATIC
     src/HoloLensGazePacket.cpp
     src/preview/ObjMesh.cpp
+    src/preview/PreviewCalibration.cpp
     src/preview/PreviewCsv.cpp
     src/preview/PreviewMath.cpp
     src/preview/PreviewParsing.cpp

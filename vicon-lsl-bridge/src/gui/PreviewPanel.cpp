@@ -2,6 +2,8 @@
 
 #include "preview/ObjMesh.h"
 #include "preview/PreviewCsv.h"
+#include "preview/PreviewCalibration.h"
+#include "preview/PreviewMath.h"
 #include "preview/PreviewXdf.h"
 
 #include <QCoreApplication>
@@ -22,6 +24,8 @@
 #include <QVBoxLayout>
 
 #include <exception>
+#include <cmath>
+#include <optional>
 
 namespace vicon_lsl {
 namespace {
@@ -34,6 +38,31 @@ constexpr PreviewVec3 kPhysicalStairTranslationM{
     0.292672723112,
     0.006432986454,
 };
+
+constexpr std::size_t kCalibrationSampleCount = 20;
+constexpr double kCalibrationTranslationToleranceM = 0.02;
+constexpr double kCalibrationRotationToleranceDegrees = 3.0;
+
+PreviewRigidTransform viconFromStairTarget() {
+    // TODO: Replace this fixed best estimate with an operator-editable or
+    // imported stair pose when stair relocation support is added.
+    return {kPhysicalStairTranslationM, {0.0, 0.0, 0.0, 1.0}};
+}
+
+bool poseIsStableRelativeTo(const CalibrationTargetPose& reference,
+                            const CalibrationTargetPose& candidate) {
+    const PreviewVec3 delta = candidate.holo_from_target.translation -
+                              reference.holo_from_target.translation;
+    if (length(delta) > kCalibrationTranslationToleranceM) {
+        return false;
+    }
+    const PreviewQuaternion left = normalizeQuaternion(reference.holo_from_target.rotation);
+    const PreviewQuaternion right = normalizeQuaternion(candidate.holo_from_target.rotation);
+    const double orientation_dot = std::abs(left.x * right.x + left.y * right.y +
+                                            left.z * right.z + left.w * right.w);
+    return orientation_dot >= std::cos(kCalibrationRotationToleranceDegrees *
+                                       3.14159265358979323846 / 360.0);
+}
 
 QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
     auto* spin = new QDoubleSpinBox();
@@ -57,6 +86,7 @@ QDoubleSpinBox* makeAngleSpin(double value = 0.0) {
 
 PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     qRegisterMetaType<vicon_lsl::PreviewFrame>("vicon_lsl::PreviewFrame");
+    qRegisterMetaType<vicon_lsl::CalibrationTargetPose>("vicon_lsl::CalibrationTargetPose");
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -76,6 +106,7 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     marker_stream_edit_ = new QLineEdit("ViconMarkers");
     segment_stream_edit_ = new QLineEdit("ViconSegments");
     gaze_stream_edit_ = new QLineEdit("HoloLensGaze");
+    calibration_stream_edit_ = new QLineEdit("HoloLensModelTargetPose");
     tolerance_spin_ = new QDoubleSpinBox();
     tolerance_spin_->setRange(0.001, 1.0);
     tolerance_spin_->setDecimals(3);
@@ -101,6 +132,8 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     stream_grid->addWidget(trail_points_spin_, 2, 1);
     stream_grid->addWidget(new QLabel("Playback speed:"), 2, 2);
     stream_grid->addWidget(playback_speed_spin_, 2, 3);
+    stream_grid->addWidget(new QLabel("Stair target:"), 3, 0);
+    stream_grid->addWidget(calibration_stream_edit_, 3, 1, 1, 3);
     stream_grid->setColumnStretch(1, 1);
     stream_grid->setColumnStretch(3, 1);
     controls_layout->addLayout(stream_grid);
@@ -123,6 +156,14 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     transforms->addWidget(gaze_ry_spin_, 1, 2);
     transforms->addWidget(gaze_rz_spin_, 1, 3);
     controls_layout->addLayout(transforms);
+
+    auto* calibration_row = new QHBoxLayout();
+    calibrate_button_ = new QPushButton("Calibrate from Stair Target");
+    use_manual_transform_button_ = new QPushButton("Use Manual Transform");
+    calibration_row->addWidget(calibrate_button_);
+    calibration_row->addWidget(use_manual_transform_button_);
+    calibration_row->addStretch(1);
+    controls_layout->addLayout(calibration_row);
 
     auto* stair_row = new QHBoxLayout();
     stair_model_edit_ = new QLineEdit();
@@ -165,6 +206,8 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     connect(csv_timer_, &QTimer::timeout, this, &PreviewPanel::advanceCsvPlayback);
     connect(browse_stair_button, &QPushButton::clicked, this, &PreviewPanel::browseStairModel);
     connect(reload_stair_button, &QPushButton::clicked, this, &PreviewPanel::reloadStairModel);
+    connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
+    connect(use_manual_transform_button_, &QPushButton::clicked, this, &PreviewPanel::useManualTransform);
     connect(trail_points_spin_, QOverload<int>::of(&QSpinBox::valueChanged),
             widget_, &PreviewWidget::setTrailPointLimit);
 
@@ -188,6 +231,7 @@ void PreviewPanel::startPreview() {
     config.marker_stream_name = marker_stream_edit_->text().trimmed();
     config.segment_stream_name = segment_stream_edit_->text().trimmed();
     config.gaze_stream_name = gaze_stream_edit_->text().trimmed();
+    config.calibration_stream_name = calibration_stream_edit_->text().trimmed();
     config.match_tolerance_seconds = tolerance_spin_->value();
     config.vicon_transform.name = "Vicon";
     config.vicon_transform.scale = 0.001;
@@ -195,6 +239,7 @@ void PreviewPanel::startPreview() {
 
     worker_ = new PreviewStreamWorker(config, this);
     connect(worker_, &PreviewStreamWorker::frameReady, widget_, &PreviewWidget::setFrame);
+    connect(worker_, &PreviewStreamWorker::targetPoseReady, this, &PreviewPanel::handleTargetPose);
     connect(worker_, &PreviewStreamWorker::statusChanged, this, &PreviewPanel::setStatus);
     connect(worker_, &QThread::finished, worker_, &QObject::deleteLater);
     connect(worker_, &QThread::finished, this, [this]() {
@@ -220,6 +265,78 @@ void PreviewPanel::stopPreview() {
     start_button_->setEnabled(true);
     stop_button_->setEnabled(false);
     setStatus("Preview stopped");
+}
+
+void PreviewPanel::beginCalibration() {
+    if (!worker_) {
+        setStatus("Start the preview before calibrating from the stair target");
+        return;
+    }
+    calibration_samples_.clear();
+    calibration_collecting_ = true;
+    setStatus("Waiting for 20 stable tracked stair-target poses...");
+}
+
+void PreviewPanel::useManualTransform() {
+    calibration_collecting_ = false;
+    calibration_samples_.clear();
+    has_automatic_calibration_ = false;
+    if (worker_) {
+        worker_->setGazeTransform(gazeTransform());
+    }
+    saveSettings();
+    setStatus("Using manual HoloLens transform");
+}
+
+void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
+    if (!calibration_collecting_) {
+        return;
+    }
+    if (!pose.tracked) {
+        calibration_samples_.clear();
+        setStatus("Stair target lost; waiting for a stable acquisition...");
+        return;
+    }
+
+    if (!calibration_samples_.empty() && !poseIsStableRelativeTo(calibration_samples_.front(), pose)) {
+        calibration_samples_.clear();
+        calibration_samples_.push_back(pose);
+        setStatus("Stair target moved; restarting stable-pose collection (1/" +
+                  QString::number(static_cast<qulonglong>(kCalibrationSampleCount)) + ")");
+        return;
+    }
+
+    calibration_samples_.push_back(pose);
+    if (calibration_samples_.size() < kCalibrationSampleCount) {
+        setStatus("Collecting stair-target poses: " +
+                  QString::number(calibration_samples_.size()) + "/" +
+                  QString::number(kCalibrationSampleCount));
+        return;
+    }
+
+    const auto holo_from_stair = averageTrackedTargetPoses(calibration_samples_);
+    calibration_collecting_ = false;
+    calibration_samples_.clear();
+    if (!holo_from_stair) {
+        setStatus("Calibration failed: no valid tracked stair-target poses");
+        return;
+    }
+
+    automatic_gaze_transform_ = composeRigidTransforms(
+        viconFromStairTarget(), inverseRigidTransform(*holo_from_stair));
+    has_automatic_calibration_ = true;
+    const PreviewVec3 display_euler = eulerDegreesFromQuaternion(automatic_gaze_transform_.rotation);
+    gaze_tx_spin_->setValue(automatic_gaze_transform_.translation.x);
+    gaze_ty_spin_->setValue(automatic_gaze_transform_.translation.y);
+    gaze_tz_spin_->setValue(automatic_gaze_transform_.translation.z);
+    gaze_rx_spin_->setValue(display_euler.x);
+    gaze_ry_spin_->setValue(display_euler.y);
+    gaze_rz_spin_->setValue(display_euler.z);
+    if (worker_) {
+        worker_->setGazeTransform(gazeTransform());
+    }
+    saveSettings();
+    setStatus("Stair-target calibration applied and saved");
 }
 
 void PreviewPanel::openMergedCsv() {
@@ -353,13 +470,20 @@ void PreviewPanel::reloadStairModel() {
     }
 }
 
-PreviewTransformProfile PreviewPanel::gazeTransform() const {
+PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
     PreviewTransformProfile transform;
     transform.name = "HoloLens";
     transform.scale = 1.0;
     transform.translation = {gaze_tx_spin_->value(), gaze_ty_spin_->value(), gaze_tz_spin_->value()};
     transform.rotation_degrees = {gaze_rx_spin_->value(), gaze_ry_spin_->value(), gaze_rz_spin_->value()};
     return transform;
+}
+
+PreviewTransformProfile PreviewPanel::gazeTransform() const {
+    if (has_automatic_calibration_) {
+        return transformProfileFromRigid(automatic_gaze_transform_, "HoloLens");
+    }
+    return manualGazeTransform();
 }
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
@@ -376,6 +500,7 @@ void PreviewPanel::loadSettings() {
     marker_stream_edit_->setText(settings.value("preview/markerStream", "ViconMarkers").toString());
     segment_stream_edit_->setText(settings.value("preview/segmentStream", "ViconSegments").toString());
     gaze_stream_edit_->setText(settings.value("preview/gazeStream", "HoloLensGaze").toString());
+    calibration_stream_edit_->setText(settings.value("preview/calibrationStream", "HoloLensModelTargetPose").toString());
     tolerance_spin_->setValue(settings.value("preview/matchTolerance", 0.05).toDouble());
     trail_points_spin_->setValue(settings.value("preview/trailPoints", 24).toInt());
     playback_speed_spin_->setValue(settings.value("preview/playbackSpeed", 1.0).toDouble());
@@ -385,6 +510,18 @@ void PreviewPanel::loadSettings() {
     gaze_rx_spin_->setValue(settings.value("preview/gazeRx", 0.0).toDouble());
     gaze_ry_spin_->setValue(settings.value("preview/gazeRy", 0.0).toDouble());
     gaze_rz_spin_->setValue(settings.value("preview/gazeRz", 0.0).toDouble());
+    has_automatic_calibration_ = settings.value("preview/gazeUseQuaternion", false).toBool();
+    automatic_gaze_transform_.translation = {
+        settings.value("preview/gazeQTx", 0.0).toDouble(),
+        settings.value("preview/gazeQTy", 0.0).toDouble(),
+        settings.value("preview/gazeQTz", 0.0).toDouble(),
+    };
+    automatic_gaze_transform_.rotation = normalizeQuaternion({
+        settings.value("preview/gazeQx", 0.0).toDouble(),
+        settings.value("preview/gazeQy", 0.0).toDouble(),
+        settings.value("preview/gazeQz", 0.0).toDouble(),
+        settings.value("preview/gazeQw", 1.0).toDouble(),
+    });
     stair_model_edit_->setText(settings.value("preview/stairModel", defaultStairModelPath()).toString());
 }
 
@@ -393,6 +530,7 @@ void PreviewPanel::saveSettings() const {
     settings.setValue("preview/markerStream", marker_stream_edit_->text());
     settings.setValue("preview/segmentStream", segment_stream_edit_->text());
     settings.setValue("preview/gazeStream", gaze_stream_edit_->text());
+    settings.setValue("preview/calibrationStream", calibration_stream_edit_->text());
     settings.setValue("preview/matchTolerance", tolerance_spin_->value());
     settings.setValue("preview/trailPoints", trail_points_spin_->value());
     settings.setValue("preview/playbackSpeed", playback_speed_spin_->value());
@@ -402,6 +540,14 @@ void PreviewPanel::saveSettings() const {
     settings.setValue("preview/gazeRx", gaze_rx_spin_->value());
     settings.setValue("preview/gazeRy", gaze_ry_spin_->value());
     settings.setValue("preview/gazeRz", gaze_rz_spin_->value());
+    settings.setValue("preview/gazeUseQuaternion", has_automatic_calibration_);
+    settings.setValue("preview/gazeQTx", automatic_gaze_transform_.translation.x);
+    settings.setValue("preview/gazeQTy", automatic_gaze_transform_.translation.y);
+    settings.setValue("preview/gazeQTz", automatic_gaze_transform_.translation.z);
+    settings.setValue("preview/gazeQx", automatic_gaze_transform_.rotation.x);
+    settings.setValue("preview/gazeQy", automatic_gaze_transform_.rotation.y);
+    settings.setValue("preview/gazeQz", automatic_gaze_transform_.rotation.z);
+    settings.setValue("preview/gazeQw", automatic_gaze_transform_.rotation.w);
     settings.setValue("preview/stairModel", stair_model_edit_->text());
 }
 

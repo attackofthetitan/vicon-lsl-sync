@@ -24,6 +24,10 @@ struct PreviewTransformProfile {
     bool enabled = true;
     double scale = 1.0;
     PreviewVec3 rotation_degrees{};
+    // Automatic calibration uses a quaternion so a solved rigid transform is not
+    // degraded by an Euler-angle round trip. Manual controls keep using Euler.
+    bool use_quaternion_rotation = false;
+    PreviewQuaternion rotation{};
     PreviewVec3 translation{};
 };
 

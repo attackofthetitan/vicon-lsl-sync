@@ -34,13 +34,6 @@ PreviewVec3 rotateZ(const PreviewVec3& value, double degrees) {
     return {value.x * c - value.y * s, value.x * s + value.y * c, value.z};
 }
 
-PreviewVec3 rotateByQuaternion(const PreviewVec3& value, const PreviewQuaternion& quaternion) {
-    const PreviewVec3 qv{quaternion.x, quaternion.y, quaternion.z};
-    const PreviewVec3 uv = cross(qv, value);
-    const PreviewVec3 uuv = cross(qv, uv);
-    return value + uv * (2.0 * quaternion.w) + uuv * 2.0;
-}
-
 } // namespace
 
 PreviewVec3 operator+(const PreviewVec3& left, const PreviewVec3& right) {
@@ -91,30 +84,72 @@ PreviewVec3 rotateEulerDegrees(const PreviewVec3& value, const PreviewVec3& degr
     return rotateZ(rotateY(rotateX(value, degrees.x), degrees.y), degrees.z);
 }
 
+PreviewQuaternion normalizeQuaternion(const PreviewQuaternion& quaternion) {
+    const double norm = std::sqrt(quaternion.x * quaternion.x + quaternion.y * quaternion.y +
+                                  quaternion.z * quaternion.z + quaternion.w * quaternion.w);
+    if (norm <= 1e-12 || !std::isfinite(norm)) {
+        return {};
+    }
+    return {quaternion.x / norm, quaternion.y / norm, quaternion.z / norm, quaternion.w / norm};
+}
+
+PreviewQuaternion multiplyQuaternions(const PreviewQuaternion& left,
+                                      const PreviewQuaternion& right) {
+    return normalizeQuaternion({
+        left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
+        left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
+        left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
+        left.w * right.w - left.x * right.x - left.y * right.y - left.z * right.z,
+    });
+}
+
+PreviewQuaternion inverseQuaternion(const PreviewQuaternion& quaternion) {
+    const PreviewQuaternion normalized = normalizeQuaternion(quaternion);
+    return {-normalized.x, -normalized.y, -normalized.z, normalized.w};
+}
+
+PreviewVec3 rotateByQuaternion(const PreviewVec3& value, const PreviewQuaternion& quaternion) {
+    const PreviewQuaternion q = normalizeQuaternion(quaternion);
+    const PreviewVec3 qv{q.x, q.y, q.z};
+    const PreviewVec3 uv = cross(qv, value);
+    const PreviewVec3 uuv = cross(qv, uv);
+    return value + uv * (2.0 * q.w) + uuv * 2.0;
+}
+
+PreviewVec3 eulerDegreesFromQuaternion(const PreviewQuaternion& quaternion) {
+    const PreviewQuaternion q = normalizeQuaternion(quaternion);
+    const double roll = std::atan2(2.0 * (q.w * q.x + q.y * q.z),
+                                   1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+    const double sine_pitch = std::clamp(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0);
+    const double pitch = std::asin(sine_pitch);
+    const double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+                                  1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    return {roll * 180.0 / kPi, pitch * 180.0 / kPi, yaw * 180.0 / kPi};
+}
+
 PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const PreviewVec3& point) {
     if (!transform.enabled) {
         return point;
     }
-    return rotateEulerDegrees(point * transform.scale, transform.rotation_degrees) + transform.translation;
+    const PreviewVec3 scaled = point * transform.scale;
+    const PreviewVec3 rotated = transform.use_quaternion_rotation
+        ? rotateByQuaternion(scaled, transform.rotation)
+        : rotateEulerDegrees(scaled, transform.rotation_degrees);
+    return rotated + transform.translation;
 }
 
 PreviewVec3 applyTransformDirection(const PreviewTransformProfile& transform, const PreviewVec3& direction) {
     if (!transform.enabled) {
         return normalize(direction);
     }
-    return normalize(rotateEulerDegrees(direction, transform.rotation_degrees));
+    const PreviewVec3 rotated = transform.use_quaternion_rotation
+        ? rotateByQuaternion(direction, transform.rotation)
+        : rotateEulerDegrees(direction, transform.rotation_degrees);
+    return normalize(rotated);
 }
 
 std::array<PreviewVec3, 3> segmentAxes(const PreviewQuaternion& quaternion) {
-    const double norm = std::sqrt(quaternion.x * quaternion.x + quaternion.y * quaternion.y +
-                                  quaternion.z * quaternion.z + quaternion.w * quaternion.w);
-    PreviewQuaternion q = quaternion;
-    if (norm > 1e-12 && std::isfinite(norm)) {
-        q.x /= norm;
-        q.y /= norm;
-        q.z /= norm;
-        q.w /= norm;
-    }
+    const PreviewQuaternion q = normalizeQuaternion(quaternion);
     return {
         normalize(rotateByQuaternion({1.0, 0.0, 0.0}, q)),
         normalize(rotateByQuaternion({0.0, 1.0, 0.0}, q)),

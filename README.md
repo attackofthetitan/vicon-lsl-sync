@@ -15,6 +15,7 @@ The bridge connects to a Vicon DataStream server and creates marker/segment LSL 
 - **ViconMarkers** — 4 channels per marker (X, Y, Z in mm, Valid flag). Occluded markers are sent as NaN with Valid=0.
 - **ViconSegments** — 7 channels per segment (X, Y, Z in mm, QX, QY, QZ, QW quaternion rotation).
 - **HoloLensGaze** — native LSL stream from the HoloLens Unity app. The stream has 21 channels: combined, left-eye, and right-eye origin/direction plus valid flags.
+- **HoloLensModelTargetPose** — optional native LSL stream from the Vuforia stair model target. It contains the target position, quaternion, and tracked flag in the same HoloLens world frame as gaze.
 
 If the marker/segment layout changes mid-session (e.g., subjects added or removed), streams are automatically destroyed and recreated.
 
@@ -33,6 +34,14 @@ There is also a seperate GUI app for windows.
 The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure and start streaming without using the command line. Enter the Vicon server address, optionally change stream names, and click Start.
 
 The GUI also includes an embedded native OpenGL preview. The preview subscribes to the same LSL streams that LabRecorder records (`ViconMarkers`, `ViconSegments`, and `HoloLensGaze` by default), combines them into one 3D scene, and applies saved per-stream transforms so Vicon, HoloLens gaze, and the stair model can share one coordinate frame.
+
+### Automatic stair-target alignment
+
+Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` without modifying the raw gaze stream.
+
+In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and saves the resulting HoloLens-to-Vicon rigid transform. **Use Manual Transform** returns to the existing translation/Euler controls.
+
+The Vicon-side stair pose is currently the best fixed estimate used by the preview. Repeat calibration after restarting the HoloLens world frame; if the physical stairs are relocated, update that fixed estimate until an editable stair-pose workflow is added.
 
 The GUI can also prepare and control a LabRecorder session over LabRecorder's remote-control socket:
 

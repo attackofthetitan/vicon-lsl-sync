@@ -2,6 +2,7 @@
 
 #include "gui/PreviewStreamWorker.h"
 #include "gui/PreviewWidget.h"
+#include "preview/PreviewCalibration.h"
 
 #include <QWidget>
 
@@ -32,8 +33,12 @@ private slots:
     void openXdf();
     void toggleCsvPlayback();
     void advanceCsvPlayback();
+    void beginCalibration();
+    void useManualTransform();
+    void handleTargetPose(vicon_lsl::CalibrationTargetPose pose);
 
 private:
+    PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
     void loadSettings();
@@ -45,6 +50,7 @@ private:
     QLineEdit* marker_stream_edit_ = nullptr;
     QLineEdit* segment_stream_edit_ = nullptr;
     QLineEdit* gaze_stream_edit_ = nullptr;
+    QLineEdit* calibration_stream_edit_ = nullptr;
     QLineEdit* stair_model_edit_ = nullptr;
     QDoubleSpinBox* tolerance_spin_ = nullptr;
     QDoubleSpinBox* playback_speed_spin_ = nullptr;
@@ -60,11 +66,17 @@ private:
     QPushButton* open_csv_button_ = nullptr;
     QPushButton* open_xdf_button_ = nullptr;
     QPushButton* play_csv_button_ = nullptr;
+    QPushButton* calibrate_button_ = nullptr;
+    QPushButton* use_manual_transform_button_ = nullptr;
     QLabel* status_label_ = nullptr;
     QTimer* csv_timer_ = nullptr;
     std::vector<PreviewFrame> csv_frames_;
     double csv_frame_cursor_ = 0.0;
     PreviewStreamWorker* worker_ = nullptr;
+    bool calibration_collecting_ = false;
+    bool has_automatic_calibration_ = false;
+    PreviewRigidTransform automatic_gaze_transform_;
+    std::vector<CalibrationTargetPose> calibration_samples_;
 };
 
 } // namespace vicon_lsl

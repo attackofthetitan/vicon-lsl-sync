@@ -1,6 +1,7 @@
 #include "gui/PreviewStreamWorker.h"
 
 #include "preview/PreviewMath.h"
+#include "preview/PreviewCalibration.h"
 #include "preview/PreviewParsing.h"
 
 #include <lsl_cpp.h>
@@ -55,7 +56,8 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
       config_(std::move(config)),
       markers_(std::make_unique<StreamState>()),
       segments_(std::make_unique<StreamState>()),
-      gaze_(std::make_unique<StreamState>()) {
+      gaze_(std::make_unique<StreamState>()),
+      calibration_target_(std::make_unique<StreamState>()) {
     config_.vicon_transform.name = "Vicon";
     config_.vicon_transform.scale = config_.vicon_transform.scale == 0.0
         ? 0.001
@@ -70,11 +72,19 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
     gaze_->requested_name = config_.gaze_stream_name;
     gaze_->role = PreviewStreamRole::HoloLensGaze;
     gaze_->transform = config_.gaze_transform;
+    calibration_target_->requested_name = config_.calibration_stream_name;
 }
 
 PreviewStreamWorker::~PreviewStreamWorker() {
     requestInterruption();
     wait(1000);
+}
+
+void PreviewStreamWorker::setGazeTransform(PreviewTransformProfile transform) {
+    std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
+    transform.name = "HoloLens";
+    transform.scale = 1.0;
+    gaze_->transform = std::move(transform);
 }
 
 void PreviewStreamWorker::run() {
@@ -97,9 +107,20 @@ void PreviewStreamWorker::run() {
             connectStream(*gaze_);
             gaze_->next_resolve_ms = now + kResolveRetryMs;
         }
+        if (!calibration_target_->connected() && now >= calibration_target_->next_resolve_ms) {
+            connectStream(*calibration_target_);
+            calibration_target_->next_resolve_ms = now + kResolveRetryMs;
+        }
 
         pollStream(*segments_);
         pollStream(*gaze_);
+        if (pollStream(*calibration_target_)) {
+            const auto pose = parseCalibrationTargetPose(calibration_target_->labels,
+                                                         calibration_target_->latest_sample);
+            if (pose) {
+                emit targetPoseReady(*pose);
+            }
+        }
         if (pollStream(*markers_)) {
             emitFrameFromMarker();
         } else if (now - last_fallback_emit_ms_ >= kFallbackEmitIntervalMs) {
@@ -188,9 +209,12 @@ void PreviewStreamWorker::emitFrameFromMarker() {
         timestampWithinTolerance(frame.timestamp,
                                  gaze_->latest_timestamp,
                                  config_.match_tolerance_seconds)) {
-        frame.gaze_rays = parseGazeSample(gaze_->labels,
-                                          gaze_->latest_sample,
-                                          gaze_->transform);
+        PreviewTransformProfile gaze_transform;
+        {
+            std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
+            gaze_transform = gaze_->transform;
+        }
+        frame.gaze_rays = parseGazeSample(gaze_->labels, gaze_->latest_sample, gaze_transform);
     }
     emit frameReady(std::move(frame));
 }
@@ -211,9 +235,12 @@ void PreviewStreamWorker::emitFallbackFrame() {
                                             segments_->transform);
     }
     if (gaze_->have_sample) {
-        frame.gaze_rays = parseGazeSample(gaze_->labels,
-                                          gaze_->latest_sample,
-                                          gaze_->transform);
+        PreviewTransformProfile gaze_transform;
+        {
+            std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
+            gaze_transform = gaze_->transform;
+        }
+        frame.gaze_rays = parseGazeSample(gaze_->labels, gaze_->latest_sample, gaze_transform);
     }
     emit frameReady(std::move(frame));
 }
@@ -221,7 +248,8 @@ void PreviewStreamWorker::emitFallbackFrame() {
 void PreviewStreamWorker::updateStatus() {
     QString status = streamStatusText(*markers_) + "; " +
                      streamStatusText(*segments_) + "; " +
-                     streamStatusText(*gaze_);
+                     streamStatusText(*gaze_) + "; " +
+                     streamStatusText(*calibration_target_);
     if (!markers_->last_error.isEmpty()) {
         status += "; markers error: " + markers_->last_error;
     }
