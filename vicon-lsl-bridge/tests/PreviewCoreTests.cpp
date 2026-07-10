@@ -452,7 +452,7 @@ TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated c
     REQUIRE(near(recording.frames[2].markers.front().position.x, 3.0));
 }
 
-TEST_CASE("Preview XDF loader interpolates changing clock offsets") {
+TEST_CASE("Preview XDF loader interpolates changing clock offsets in stream time") {
     const TemporaryFilePath temporary_path(".xdf");
     const std::string path = temporary_path.string();
     const std::uint32_t stream_id = 1;
@@ -467,8 +467,10 @@ TEST_CASE("Preview XDF loader interpolates changing clock offsets") {
                          {{1.0, 0.0, 0.0, 1.0},
                           {2.0, 0.0, 0.0, 1.0},
                           {3.0, 0.0, 0.0, 1.0}});
-        writeClockOffsetChunk(output, stream_id, 20.0, -10.0);
-        writeClockOffsetChunk(output, stream_id, 20.2, -10.1);
+        // Clock-offset collection times use the recorder clock. Convert them to
+        // source-stream time before interpolating against the raw sample timestamps.
+        writeClockOffsetChunk(output, stream_id, 10.0, -10.0);
+        writeClockOffsetChunk(output, stream_id, 10.1, -10.1);
     }
 
     const auto xdf = vicon_lsl::loadXdfNumericStreams(path);

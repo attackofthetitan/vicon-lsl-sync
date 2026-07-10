@@ -313,8 +313,11 @@ void parseClockOffsetChunk(BinaryReader& reader,
     if (reader.position() > chunk_end || chunk_end - reader.position() != 2 * sizeof(double)) {
         throw std::runtime_error("Invalid XDF clock-offset chunk size");
     }
-    const XdfClockOffset measurement{reader.readDouble(), reader.readDouble()};
-    if (!std::isfinite(measurement.collection_time) || !std::isfinite(measurement.offset)) {
+    const double collection_time = reader.readDouble();
+    const double offset = reader.readDouble();
+    const XdfClockOffset measurement{collection_time - offset, offset};
+    if (!std::isfinite(collection_time) || !std::isfinite(measurement.stream_time) ||
+        !std::isfinite(measurement.offset)) {
         throw std::runtime_error("XDF clock-offset measurement is not finite");
     }
     stream.clock_offsets.push_back(measurement);
@@ -322,30 +325,30 @@ void parseClockOffsetChunk(BinaryReader& reader,
 
 double interpolatedClockOffset(const std::vector<XdfClockOffset>& offsets, double timestamp) {
     if (offsets.empty()) return 0.0;
-    if (timestamp <= offsets.front().collection_time) return offsets.front().offset;
-    if (timestamp >= offsets.back().collection_time) return offsets.back().offset;
+    if (timestamp <= offsets.front().stream_time) return offsets.front().offset;
+    if (timestamp >= offsets.back().stream_time) return offsets.back().offset;
 
     const auto upper = std::upper_bound(
         offsets.begin(), offsets.end(), timestamp,
         [](double value, const XdfClockOffset& measurement) {
-            return value < measurement.collection_time;
+            return value < measurement.stream_time;
         });
     const XdfClockOffset& right = *upper;
     const XdfClockOffset& left = *(upper - 1);
-    const double fraction = (timestamp - left.collection_time) /
-                            (right.collection_time - left.collection_time);
+    const double fraction = (timestamp - left.stream_time) /
+                            (right.stream_time - left.stream_time);
     return left.offset + fraction * (right.offset - left.offset);
 }
 
 void correctAndValidateTimestamps(XdfStreamData& stream) {
     std::stable_sort(stream.clock_offsets.begin(), stream.clock_offsets.end(),
                      [](const XdfClockOffset& left, const XdfClockOffset& right) {
-                         return left.collection_time < right.collection_time;
+                         return left.stream_time < right.stream_time;
                      });
     if (std::adjacent_find(
             stream.clock_offsets.begin(), stream.clock_offsets.end(),
             [](const XdfClockOffset& left, const XdfClockOffset& right) {
-                return left.collection_time == right.collection_time;
+                return left.stream_time == right.stream_time;
             }) != stream.clock_offsets.end()) {
         throw std::runtime_error("XDF clock-offset measurement times are not unique");
     }

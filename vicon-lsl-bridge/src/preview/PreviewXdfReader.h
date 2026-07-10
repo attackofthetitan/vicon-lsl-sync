@@ -9,7 +9,7 @@
 namespace vicon_lsl {
 
 struct XdfClockOffset {
-    double collection_time = 0.0;
+    double stream_time = 0.0;
     double offset = 0.0;
 };
 
