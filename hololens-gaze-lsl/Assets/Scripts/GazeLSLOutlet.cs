@@ -1,9 +1,6 @@
 using System;
-using System.Threading;
 using LSL;
 using UnityEngine;
-using UnityEngine.InputSystem;
-using Stopwatch = System.Diagnostics.Stopwatch;
 
 namespace GazeLSL
 {
@@ -13,7 +10,7 @@ namespace GazeLSL
     */
     public sealed class GazeLSLOutlet : MonoBehaviour
     {
-        private const int ChannelCount = 21;
+        private const int ChannelCount = GazeSampleEncoder.ChannelCount;
         private const int StopTimeoutMilliseconds = 500;
 
         private static readonly string[] ChannelLabels =
@@ -47,11 +44,9 @@ namespace GazeLSL
 
         private StreamInfo info;
         private StreamOutlet outlet;
-        private Thread workerThread;
-        private ManualResetEventSlim stopSignal;
-        private volatile bool workerRunning;
-        private int pushedSampleCount;
+        private GazePublisherWorker worker;
         private uint nominalRate;
+        private bool failureReported;
 
         private void Start()
         {
@@ -63,8 +58,21 @@ namespace GazeLSL
 
             nominalRate = Math.Max(1u, config.TargetFrameRate);
 
-            CreateOutlet();
-            StartWorker();
+            try
+            {
+                CreateOutlet();
+                worker = new GazePublisherWorker(
+                    gazeProvider,
+                    new LslSampleOutlet(outlet),
+                    nominalRate
+                );
+                worker.Start();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Could not start gaze LSL publishing - {e.Message}");
+                enabled = false;
+            }
         }
 
         private bool ValidateReferences()
@@ -127,126 +135,42 @@ namespace GazeLSL
             acquisition.append_child_value("timestamp", "lsl_local_clock_at_push");
         }
 
-        private void StartWorker()
+        private void Update()
         {
-            stopSignal = new ManualResetEventSlim(false);
-            workerRunning = true;
-
-            workerThread = new Thread(WorkerLoop)
+            if (!failureReported && worker != null && worker.Failure != null)
             {
-                IsBackground = true,
-                Priority = System.Threading.ThreadPriority.AboveNormal,
-                Name = "HoloLens Gaze LSL"
-            };
-
-            workerThread.Start();
-        }
-
-        private void WorkerLoop()
-        {
-            double[] sampleBuffer = new double[ChannelCount];
-            double intervalMilliseconds = 1000.0 / nominalRate;
-
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            double nextSampleMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-
-            while (workerRunning && !stopSignal.IsSet)
-            {
-                double nowMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
-
-                if (nowMilliseconds < nextSampleMilliseconds)
-                {
-                    WaitForNextSample(nextSampleMilliseconds - nowMilliseconds);
-                    continue;
-                }
-
-                TryPushOneSample(sampleBuffer);
-
-                nextSampleMilliseconds += intervalMilliseconds;
-
-                if (nowMilliseconds - nextSampleMilliseconds > intervalMilliseconds)
-                {
-                    nextSampleMilliseconds = nowMilliseconds + intervalMilliseconds;
-                }
+                failureReported = true;
+                Debug.LogError($"Gaze LSL publisher stopped after an error - {worker.Failure.Message}");
+                enabled = false;
             }
         }
 
-        private void WaitForNextSample(double remainingMilliseconds)
+        private sealed class LslSampleOutlet : IGazeSampleOutlet
         {
-            if (remainingMilliseconds > 1.0)
+            private readonly StreamOutlet streamOutlet;
+
+            public LslSampleOutlet(StreamOutlet streamOutlet)
             {
-                stopSignal.Wait(TimeSpan.FromMilliseconds(remainingMilliseconds - 0.25));
-                return;
+                this.streamOutlet = streamOutlet;
             }
 
-            Thread.Yield();
-        }
-
-        private void TryPushOneSample(double[] sampleBuffer)
-        {
-            if (!gazeProvider.TryGetNextSample(out GazeDataProvider.GazeSample gazeSample))
+            public void PushSample(double[] sample)
             {
-                return;
+                streamOutlet.push_sample(sample);
             }
-
-            WriteSampleBuffer(gazeSample, sampleBuffer);
-
-            StreamOutlet currentOutlet = outlet;
-            if (currentOutlet == null)
-            {
-                return;
-            }
-
-            currentOutlet.push_sample(sampleBuffer);
-            Interlocked.Increment(ref pushedSampleCount);
-        }
-
-
-        private static void WriteSampleBuffer(GazeDataProvider.GazeSample frame, double[] sample)
-        {
-            sample[0] = frame.CombinedOriginX;
-            sample[1] = frame.CombinedOriginY;
-            sample[2] = frame.CombinedOriginZ;
-            sample[3] = frame.CombinedDirectionX;
-            sample[4] = frame.CombinedDirectionY;
-            sample[5] = frame.CombinedDirectionZ;
-            sample[6] = frame.CombinedValid ? 1.0 : 0.0;
-
-            sample[7] = frame.LeftEyeOriginX;
-            sample[8] = frame.LeftEyeOriginY;
-            sample[9] = frame.LeftEyeOriginZ;
-            sample[10] = frame.LeftEyeDirectionX;
-            sample[11] = frame.LeftEyeDirectionY;
-            sample[12] = frame.LeftEyeDirectionZ;
-            sample[13] = frame.LeftEyeValid ? 1.0 : 0.0;
-
-            sample[14] = frame.RightEyeOriginX;
-            sample[15] = frame.RightEyeOriginY;
-            sample[16] = frame.RightEyeOriginZ;
-            sample[17] = frame.RightEyeDirectionX;
-            sample[18] = frame.RightEyeDirectionY;
-            sample[19] = frame.RightEyeDirectionZ;
-            sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
         }
 
         private void OnDestroy()
         {
-            workerRunning = false;
-            stopSignal?.Set();
-
-            if (workerThread != null)
+            GazePublisherWorker currentWorker = worker;
+            if (currentWorker != null && !currentWorker.Stop(StopTimeoutMilliseconds))
             {
-                if (!workerThread.Join(StopTimeoutMilliseconds))
-                {
-                    Debug.LogWarning("Gaze LSL worker did not stop cleanly before timeout.");
-                }
-
-                workerThread = null;
+                Debug.LogWarning("Gaze LSL worker did not stop before timeout; its resources remain owned until it exits.");
+                return;
             }
 
-            stopSignal?.Dispose();
-            stopSignal = null;
-
+            int pushedSampleCount = currentWorker != null ? currentWorker.PushedSampleCount : 0;
+            worker = null;
             outlet = null;
             info = null;
 
