@@ -9,6 +9,7 @@ void MarkerStream::initialize(const std::vector<std::pair<std::string, std::stri
                                const std::string& stream_name,
                                const std::string& source_id) {
     destroy();
+    configured_ = true;
     marker_names_ = marker_names;
     if (marker_names_.empty()) {
         std::cout << "No markers discovered; marker stream not created" << std::endl;
@@ -41,14 +42,22 @@ void MarkerStream::destroy() {
     info_.reset();
     marker_names_.clear();
     sample_buffer_.clear();
+    configured_ = false;
     if (was_initialized) {
         std::cout << "Marker stream closed" << std::endl;
     }
 }
 
-void MarkerStream::pushSample(const std::vector<vicon_lsl::MarkerObjectRead>& markers,
-                              double timestamp) {
-    if (!outlet_) return;
+bool MarkerStream::isInitialized() const {
+    return configured_ && (marker_names_.empty() || outlet_ != nullptr);
+}
+
+StreamPushResult MarkerStream::pushSample(
+    const std::vector<vicon_lsl::MarkerObjectRead>& markers,
+    double timestamp) {
+    if (!configured_) return StreamPushResult::NotConfigured;
+    if (marker_names_.empty()) return StreamPushResult::Pushed;
+    if (!outlet_) return StreamPushResult::Failed;
 
     std::vector<vicon_lsl::MarkerSample> samples;
     samples.reserve(markers.size());
@@ -59,14 +68,16 @@ void MarkerStream::pushSample(const std::vector<vicon_lsl::MarkerObjectRead>& ma
     if (flattened.size() != sample_buffer_.size()) {
         std::cerr << "Marker sample channel mismatch: expected " << sample_buffer_.size()
                   << ", got " << flattened.size() << std::endl;
-        return;
+        return StreamPushResult::Failed;
     }
     sample_buffer_ = std::move(flattened);
 
     try {
         outlet_->push_sample(sample_buffer_, timestamp);
+        return StreamPushResult::Pushed;
     } catch (const std::exception& ex) {
         std::cerr << "Failed to push marker LSL sample: " << ex.what() << std::endl;
         destroy();
+        return StreamPushResult::Failed;
     }
 }

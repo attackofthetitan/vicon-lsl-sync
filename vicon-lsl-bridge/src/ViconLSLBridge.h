@@ -37,9 +37,10 @@ public:
 
 private:
     void connectWithRetry();
+    void waitForRetry();
     bool initializeStreams();
     bool checkLayoutChanged();
-    void streamFrame(double timestamp);
+    bool streamFrame(double timestamp);
     void reportStatus(BridgeState state, const std::string& message = "");
     void handleDiagnostics(const std::vector<vicon_lsl::ViconDiagnostic>& diagnostics,
                            BridgeState state = BridgeState::Streaming);
