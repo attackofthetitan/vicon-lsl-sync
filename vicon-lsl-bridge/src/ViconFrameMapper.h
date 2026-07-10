@@ -127,21 +127,6 @@ struct ViconFrameResult {
     std::vector<ViconDiagnostic> diagnostics;
 };
 
-enum class BridgeDiagnosticState {
-    Disconnected,
-    Connecting,
-    Streaming,
-    Stopped
-};
-
-struct BridgeDiagnosticStatus {
-    BridgeDiagnosticState state = BridgeDiagnosticState::Disconnected;
-    std::size_t marker_count = 0;
-    std::size_t segment_count = 0;
-    unsigned int frame_count = 0;
-    std::string message;
-};
-
 struct DiagnosticEmission {
     std::vector<std::string> log_lines;
     std::string status_message;
@@ -163,7 +148,6 @@ private:
 
 const char* toString(DiagnosticSeverity severity);
 const char* toString(ViconReadStatus status);
-const char* bridgeDiagnosticStateName(BridgeDiagnosticState state);
 
 double quietNaN();
 MarkerSample invalidMarkerSample();
@@ -183,8 +167,6 @@ std::string buildStreamSourceId(const std::string& prefix,
 std::string formatDiagnostic(const ViconDiagnostic& diagnostic);
 std::string diagnosticKey(const ViconDiagnostic& diagnostic);
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics);
-std::string formatLayoutSummary(const ViconLayout& layout);
-std::string formatBridgeDiagnostics(const BridgeDiagnosticStatus& status);
 
 MarkerSample markerSampleForLsl(const MarkerTranslationRead& read);
 SegmentSample segmentSampleForLsl(const SegmentTranslationRead& translation,

@@ -4,19 +4,6 @@
 #include <stdexcept>
 
 namespace vicon_lsl {
-namespace {
-
-std::string plural(std::size_t count, const std::string& singular) {
-    std::ostringstream out;
-    out << count << ' ' << singular;
-    if (count != 1) {
-        out << 's';
-    }
-    return out.str();
-}
-
-} // namespace
-
 DiagnosticAggregator::DiagnosticAggregator(unsigned int repeat_interval)
     : repeat_interval_(repeat_interval) {
     if (repeat_interval_ == 0) {
@@ -60,16 +47,6 @@ const char* toString(ViconReadStatus status) {
         case ViconReadStatus::Occluded: return "Occluded";
         case ViconReadStatus::SdkError: return "SdkError";
         case ViconReadStatus::NotConnected: return "NotConnected";
-    }
-    return "Unknown";
-}
-
-const char* bridgeDiagnosticStateName(BridgeDiagnosticState state) {
-    switch (state) {
-        case BridgeDiagnosticState::Disconnected: return "Disconnected";
-        case BridgeDiagnosticState::Connecting: return "Connecting";
-        case BridgeDiagnosticState::Streaming: return "Streaming";
-        case BridgeDiagnosticState::Stopped: return "Stopped";
     }
     return "Unknown";
 }
@@ -144,25 +121,6 @@ std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics
         out << "s";
     }
     out << "; first: " << formatDiagnostic(diagnostics.front());
-    return out.str();
-}
-
-std::string formatLayoutSummary(const ViconLayout& layout) {
-    return plural(layout.markers.size(), "marker") + ", " +
-           plural(layout.segments.size(), "segment");
-}
-
-std::string formatBridgeDiagnostics(const BridgeDiagnosticStatus& status) {
-    std::ostringstream out;
-    out << bridgeDiagnosticStateName(status.state) << ": "
-        << plural(status.marker_count, "marker") << ", "
-        << plural(status.segment_count, "segment") << ", frame "
-        << status.frame_count;
-
-    if (!status.message.empty()) {
-        out << " - " << status.message;
-    }
-
     return out.str();
 }
 

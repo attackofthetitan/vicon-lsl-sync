@@ -30,7 +30,6 @@ void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
 }
 
 void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message) {
-    current_state_ = state;
     if (status_callback_) {
         BridgeStatus status;
         status.state = state;

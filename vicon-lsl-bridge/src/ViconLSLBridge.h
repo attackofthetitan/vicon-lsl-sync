@@ -50,7 +50,6 @@ private:
     MarkerStream marker_stream_;
     SegmentStream segment_stream_;
     std::atomic<bool> running_{true};
-    std::atomic<BridgeState> current_state_{BridgeState::Disconnected};
     StatusCallback status_callback_;
 
     vicon_lsl::ViconLayout known_layout_;

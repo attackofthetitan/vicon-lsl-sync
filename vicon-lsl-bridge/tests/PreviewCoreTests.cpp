@@ -168,7 +168,7 @@ TEST_CASE("Preview parser converts Vicon marker samples from millimetres to metr
 }
 
 TEST_CASE("Preview parser extracts HoloLens gaze rays from native LSL labels") {
-    std::vector<double> sample(vicon_lsl::HoloLensGazePacket::ChannelCount, 0.0);
+    std::vector<double> sample(vicon_lsl::kHoloLensGazeChannelCount, 0.0);
     sample[0] = 1.0;
     sample[1] = 2.0;
     sample[2] = 3.0;
@@ -377,7 +377,7 @@ TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated c
     const std::vector<std::string> marker_labels = {
         "Subject:LASI:X", "Subject:LASI:Y", "Subject:LASI:Z", "Subject:LASI:Valid",
     };
-    std::vector<double> gaze_sample(vicon_lsl::HoloLensGazePacket::ChannelCount, 0.0);
+    std::vector<double> gaze_sample(vicon_lsl::kHoloLensGazeChannelCount, 0.0);
     gaze_sample[0] = 0.25;
     gaze_sample[1] = 0.5;
     gaze_sample[2] = 0.75;
@@ -471,7 +471,7 @@ TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp"
     gaze.role = vicon_lsl::PreviewStreamRole::HoloLensGaze;
     gaze.channel_labels = gazeLabels();
     gaze.timestamps = {20.0};
-    gaze.samples = {std::vector<double>(vicon_lsl::HoloLensGazePacket::ChannelCount, 0.0)};
+    gaze.samples = {std::vector<double>(vicon_lsl::kHoloLensGazeChannelCount, 0.0)};
 
     vicon_lsl::XdfLoadResult xdf;
     xdf.streams = {std::move(markers), std::move(gaze)};

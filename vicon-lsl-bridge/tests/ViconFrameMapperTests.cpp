@@ -345,18 +345,6 @@ TEST_CASE("Vicon diagnostic formatting includes required context") {
     REQUIRE(text.find("SDK result 1") != std::string::npos);
     REQUIRE(text.find("message=Failed to read marker global translation") != std::string::npos);
 
-    const auto status_text = vicon_lsl::formatBridgeDiagnostics({
-        vicon_lsl::BridgeDiagnosticState::Streaming,
-        2,
-        1,
-        10,
-        text,
-    });
-    REQUIRE(status_text.find("Streaming") != std::string::npos);
-    REQUIRE(status_text.find("2 markers") != std::string::npos);
-    REQUIRE(status_text.find("1 segment") != std::string::npos);
-    REQUIRE(status_text.find("frame 10") != std::string::npos);
-    REQUIRE(status_text.find("GetMarkerGlobalTranslation") != std::string::npos);
 }
 
 TEST_CASE("Vicon diagnostic aggregation logs first and periodic repeats") {

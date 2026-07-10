@@ -19,7 +19,6 @@ struct CommandLineResult {
     Config config{};
     std::string message;
 
-    bool shouldRun() const { return action == CommandLineAction::Run; }
 };
 
 CommandLineResult parseCommandLine(int argc, const char* const argv[]);
