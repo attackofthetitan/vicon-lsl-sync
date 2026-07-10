@@ -23,19 +23,44 @@ namespace GazeLSL
     {
         [SerializeField] private GazeLSLConfig config;
 
-        public bool IsTrackingAvailable { get; private set; }
-        public bool AreIndividualEyeGazesSupported { get; private set; }
+        public bool IsTrackingAvailable
+        {
+            get
+            {
+#if ENABLE_WINMD_SUPPORT
+                return trackerSessions.HasActiveSession;
+#else
+                return false;
+#endif
+            }
+        }
+
+        public bool AreIndividualEyeGazesSupported
+        {
+            get
+            {
+#if ENABLE_WINMD_SUPPORT
+                TrackerSessionState state;
+                return trackerSessions.TryGetActiveState(out state) && state.IncludeIndividualEyes;
+#else
+                return false;
+#endif
+            }
+        }
 
 #if ENABLE_WINMD_SUPPORT
-        private readonly object trackerLock = new object();
-        private EyeGazeTrackerWatcher watcher;
-        private EyeGazeTracker tracker;
-        private SpatialLocator trackerLocator;
-        private SpatialCoordinateSystem worldCoordinateSystem;
-        private DateTime lastConsumedReadingTimestamp;
-#endif
+        private sealed class TrackerSessionState
+        {
+            public SpatialLocator Locator;
+            public SpatialCoordinateSystem WorldCoordinateSystem;
+            public DateTime LastConsumedReadingTimestamp;
+            public bool IncludeIndividualEyes;
+        }
 
-        private bool isDestroying;
+        private readonly TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState> trackerSessions =
+            new TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState>(CloseTracker);
+        private EyeGazeTrackerWatcher watcher;
+#endif
 
         private async void Start()
         {
@@ -48,14 +73,13 @@ namespace GazeLSL
 
                 await watcher.StartAsync();
 
-                if (!isDestroying)
-                {
-                    Debug.Log("Eye tracker watcher started");
-                }
+                Debug.Log("Eye tracker watcher started");
             }
             catch (Exception e)
             {
-                SetTrackingUnavailable();
+#if ENABLE_WINMD_SUPPORT
+                trackerSessions.Destroy();
+#endif
                 Debug.LogError($"Extended eye tracking unavailable - {e.Message}");
             }
 #else
@@ -68,17 +92,18 @@ namespace GazeLSL
 #if ENABLE_WINMD_SUPPORT
         private async void OnTrackerAdded(object sender, EyeGazeTracker newTracker)
         {
+            TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState>.OpenAttempt attempt =
+                trackerSessions.BeginOpen(newTracker);
+            if (!attempt.IsValid)
+            {
+                return;
+            }
+
             try
             {
                 Debug.Log("Eye tracker found, opening with restricted access");
 
                 await newTracker.OpenAsync(true);
-
-                if (isDestroying)
-                {
-                    CloseTracker(newTracker);
-                    return;
-                }
 
                 SpatialLocator newTrackerLocator = SpatialGraphInteropPreview.CreateLocatorForNode(
                     newTracker.TrackerSpaceLocatorNodeId
@@ -86,8 +111,7 @@ namespace GazeLSL
 
                 if (newTrackerLocator == null)
                 {
-                    CloseTracker(newTracker);
-                    SetTrackingUnavailable();
+                    trackerSessions.Abandon(attempt);
                     Debug.LogError("Failed to create SpatialLocator for eye tracker.");
                     return;
                 }
@@ -95,65 +119,45 @@ namespace GazeLSL
                 SpatialCoordinateSystem newWorldCoordinateSystem = CreateWorldCoordinateSystem();
                 if (newWorldCoordinateSystem == null)
                 {
-                    CloseTracker(newTracker);
-                    SetTrackingUnavailable();
+                    trackerSessions.Abandon(attempt);
                     Debug.LogError("Failed to create world coordinate system.");
                     return;
                 }
 
                 ConfigureFrameRate(newTracker);
 
-                EyeGazeTracker oldTracker;
-                lock (trackerLock)
+                TrackerSessionState state = new TrackerSessionState
                 {
-                    oldTracker = tracker;
-
-                    tracker = newTracker;
-                    trackerLocator = newTrackerLocator;
-                    worldCoordinateSystem = newWorldCoordinateSystem;
-
+                    Locator = newTrackerLocator,
+                    WorldCoordinateSystem = newWorldCoordinateSystem,
                     // Start from now so old buffered readings are not published when tracking starts.
-                    lastConsumedReadingTimestamp = DateTime.Now;
+                    LastConsumedReadingTimestamp = DateTime.Now,
+                    IncludeIndividualEyes = newTracker.AreLeftAndRightGazesSupported
+                };
 
-                    AreIndividualEyeGazesSupported = newTracker.AreLeftAndRightGazesSupported;
-                    IsTrackingAvailable = true;
-                }
-
-                if (oldTracker != newTracker)
+                if (!trackerSessions.TryActivate(attempt, state))
                 {
-                    CloseTracker(oldTracker);
+                    return;
                 }
 
                 Debug.Log(
                     $"Extended eye tracking ready. " +
-                    $"Per-eye: {AreIndividualEyeGazesSupported}"
+                    $"Per-eye: {state.IncludeIndividualEyes}"
                 );
             }
             catch (Exception e)
             {
-                CloseTracker(newTracker);
-                SetTrackingUnavailable();
+                trackerSessions.Abandon(attempt);
                 Debug.LogError($"Failed to open eye tracker - {e.Message}");
             }
         }
 
         private void OnTrackerRemoved(object sender, EyeGazeTracker removedTracker)
         {
-            EyeGazeTracker trackerToClose = null;
-
-            lock (trackerLock)
+            if (trackerSessions.Retire(removedTracker))
             {
-                if (tracker != removedTracker)
-                {
-                    return;
-                }
-
-                trackerToClose = tracker;
-                ClearTrackerStateLocked();
+                Debug.LogWarning("Eye tracker removed");
             }
-
-            CloseTracker(trackerToClose);
-            Debug.LogWarning("Eye tracker removed");
         }
 #endif
 
@@ -162,57 +166,54 @@ namespace GazeLSL
             sample = default(GazeSample);
 
 #if ENABLE_WINMD_SUPPORT
-            EyeGazeTracker currentTracker;
-            SpatialLocator currentTrackerLocator;
-            SpatialCoordinateSystem currentWorldCoordinateSystem;
-            DateTime previousTimestamp;
-            bool includeIndividualEyes;
-
-            lock (trackerLock)
-            {
-                currentTracker = tracker;
-                currentTrackerLocator = trackerLocator;
-                currentWorldCoordinateSystem = worldCoordinateSystem;
-                previousTimestamp = lastConsumedReadingTimestamp;
-                includeIndividualEyes = AreIndividualEyeGazesSupported;
-            }
-
-            if (currentTracker == null || currentTrackerLocator == null || currentWorldCoordinateSystem == null)
+            TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState>.ReadLease lease;
+            if (!trackerSessions.TryAcquireRead(out lease))
             {
                 return false;
             }
 
-            EyeGazeTrackerReading reading = currentTracker.TryGetReadingAfterTimestamp(previousTimestamp);
-            if (reading == null)
+            using (lease)
             {
-                return false;
+                TrackerSessionState state = lease.State;
+                EyeGazeTrackerReading reading = lease.Tracker.TryGetReadingAfterTimestamp(
+                    state.LastConsumedReadingTimestamp
+                );
+                if (reading == null)
+                {
+                    return false;
+                }
+
+                if (reading.Timestamp > state.LastConsumedReadingTimestamp)
+                {
+                    state.LastConsumedReadingTimestamp = reading.Timestamp;
+                }
+
+                sample = CreateEmptySample();
+
+                PerceptionTimestamp perceptionTimestamp =
+                    PerceptionTimestampHelper.FromHistoricalTargetTime(new DateTimeOffset(reading.Timestamp));
+
+                SpatialLocation trackerLocation = state.Locator.TryLocateAtTimestamp(
+                    perceptionTimestamp,
+                    state.WorldCoordinateSystem
+                );
+
+                if (trackerLocation != null)
+                {
+                    PopulateGazeSample(reading, trackerLocation, state.IncludeIndividualEyes, ref sample);
+                }
+
+                // Return true for every acquired tracker reading. Invalid gaze is represented
+                // by NaNs and valid flags, not by dropping the whole sample.
+                return true;
             }
-
-            MarkReadingConsumed(currentTracker, reading.Timestamp);
-
-            sample = CreateEmptySample(reading);
-
-            PerceptionTimestamp perceptionTimestamp =
-                PerceptionTimestampHelper.FromHistoricalTargetTime(new DateTimeOffset(reading.Timestamp));
-
-            SpatialLocation trackerLocation =
-                currentTrackerLocator.TryLocateAtTimestamp(perceptionTimestamp, currentWorldCoordinateSystem);
-
-            if (trackerLocation != null)
-            {
-                PopulateGazeSample(reading, trackerLocation, includeIndividualEyes, ref sample);
-            }
-
-            // Return true for every acquired tracker reading. Invalid gaze is represented
-            // by NaNs and valid flags, not by dropping the whole sample.
-            return true;
 #else
             return false;
 #endif
         }
 
 #if ENABLE_WINMD_SUPPORT
-        private static GazeSample CreateEmptySample(EyeGazeTrackerReading reading)
+        private static GazeSample CreateEmptySample()
         {
             GazeSample sample = new GazeSample
             {
@@ -307,22 +308,6 @@ namespace GazeLSL
             catch (Exception e)
             {
                 Debug.LogWarning($"Could not set eye tracker frame rate - {e.Message}");
-            }
-        }
-
-        private void MarkReadingConsumed(EyeGazeTracker sourceTracker, DateTime readingTimestamp)
-        {
-            lock (trackerLock)
-            {
-                if (tracker != sourceTracker)
-                {
-                    return;
-                }
-
-                if (readingTimestamp > lastConsumedReadingTimestamp)
-                {
-                    lastConsumedReadingTimestamp = readingTimestamp;
-                }
             }
         }
 
@@ -421,31 +406,11 @@ namespace GazeLSL
         private void SetTrackingUnavailable()
         {
 #if ENABLE_WINMD_SUPPORT
-            EyeGazeTracker trackerToClose;
-            lock (trackerLock)
-            {
-                trackerToClose = tracker;
-                ClearTrackerStateLocked();
-            }
-
-            CloseTracker(trackerToClose);
+            trackerSessions.RetireActive();
 #endif
-
-            AreIndividualEyeGazesSupported = false;
-            IsTrackingAvailable = false;
         }
 
 #if ENABLE_WINMD_SUPPORT
-        private void ClearTrackerStateLocked()
-        {
-            tracker = null;
-            trackerLocator = null;
-            worldCoordinateSystem = null;
-            lastConsumedReadingTimestamp = DateTime.Now;
-            AreIndividualEyeGazesSupported = false;
-            IsTrackingAvailable = false;
-        }
-
         private static void CloseTracker(EyeGazeTracker trackerToClose)
         {
             if (trackerToClose == null)
@@ -466,8 +431,6 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
-            isDestroying = true;
-
 #if ENABLE_WINMD_SUPPORT
             if (watcher != null)
             {
@@ -477,14 +440,7 @@ namespace GazeLSL
                 watcher = null;
             }
 
-            EyeGazeTracker trackerToClose;
-            lock (trackerLock)
-            {
-                trackerToClose = tracker;
-                ClearTrackerStateLocked();
-            }
-
-            CloseTracker(trackerToClose);
+            trackerSessions.Destroy();
 #endif
         }
     }
