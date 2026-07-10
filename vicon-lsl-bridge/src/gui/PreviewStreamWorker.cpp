@@ -8,6 +8,7 @@
 
 #include <QElapsedTimer>
 
+#include <algorithm>
 #include <exception>
 #include <utility>
 
@@ -124,7 +125,7 @@ void PreviewStreamWorker::run() {
         if (pollStream(*markers_, now)) {
             emitFrameFromMarker(now);
         } else if (segments_updated || gaze_updated) {
-            emitFallbackFrame(now);
+            emitFallbackFrame(now, segments_updated, gaze_updated);
         }
 
         if (now - last_status_ms_ >= kStatusIntervalMs) {
@@ -226,24 +227,38 @@ void PreviewStreamWorker::emitFrameFromMarker(qint64 now_ms) {
     emit frameReady(std::move(frame));
 }
 
-void PreviewStreamWorker::emitFallbackFrame(qint64 now_ms) {
+void PreviewStreamWorker::emitFallbackFrame(qint64 now_ms,
+                                            bool segments_updated,
+                                            bool gaze_updated) {
     const bool segments_fresh = streamIsFresh(*segments_, now_ms);
     const bool gaze_fresh = streamIsFresh(*gaze_, now_ms);
-    if (!segments_fresh && !gaze_fresh) {
+    if ((!segments_updated || !segments_fresh) && (!gaze_updated || !gaze_fresh)) {
         return;
     }
 
     PreviewFrame frame;
-    frame.timestamp = segments_fresh ? segments_->latest_timestamp : gaze_->latest_timestamp;
+    if (segments_updated && segments_fresh && gaze_updated && gaze_fresh) {
+        frame.timestamp = (std::max)(segments_->latest_timestamp, gaze_->latest_timestamp);
+    } else if (segments_updated && segments_fresh) {
+        frame.timestamp = segments_->latest_timestamp;
+    } else {
+        frame.timestamp = gaze_->latest_timestamp;
+    }
     frame.marker_stream_present = markers_->connected();
     frame.segment_stream_present = segments_->connected();
     frame.gaze_stream_present = gaze_->connected();
-    if (segments_fresh) {
+    if (segments_fresh &&
+        timestampWithinTolerance(frame.timestamp,
+                                 segments_->latest_timestamp,
+                                 config_.match_tolerance_seconds)) {
         frame.segments = parseSegmentSample(segments_->labels,
                                             segments_->latest_sample,
                                             segments_->transform);
     }
-    if (gaze_fresh) {
+    if (gaze_fresh &&
+        timestampWithinTolerance(frame.timestamp,
+                                 gaze_->latest_timestamp,
+                                 config_.match_tolerance_seconds)) {
         PreviewTransformProfile gaze_transform;
         {
             std::lock_guard<std::mutex> lock(gaze_transform_mutex_);

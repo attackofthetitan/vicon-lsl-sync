@@ -46,10 +46,19 @@ private:
         Stopping,
     };
 
+    enum class PendingRecordingOpen {
+        None,
+        Csv,
+        Xdf,
+    };
+
     PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
     void resetCalibrationSession();
+    void loadMergedCsv(const QString& path);
+    void loadXdf(const QString& path);
+    void processPendingRecordingOpen();
     void loadSettings();
     void saveSettings() const;
     QString defaultStairModelPath() const;
@@ -84,6 +93,8 @@ private:
     PreviewPlaybackClock playback_clock_;
     PreviewStreamWorker* worker_ = nullptr;
     WorkerState worker_state_ = WorkerState::Idle;
+    PendingRecordingOpen pending_recording_open_ = PendingRecordingOpen::None;
+    QString pending_recording_path_;
     CalibrationState calibration_state_ = CalibrationState::Manual;
     PreviewRigidTransform automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;

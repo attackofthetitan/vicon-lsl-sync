@@ -231,7 +231,13 @@ void PreviewPanel::startPreview() {
         worker_state_ = WorkerState::Idle;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
-        setStatus("Preview stopped");
+        open_csv_button_->setEnabled(true);
+        open_xdf_button_->setEnabled(true);
+        if (pending_recording_open_ != PendingRecordingOpen::None) {
+            processPendingRecordingOpen();
+        } else {
+            setStatus("Preview stopped");
+        }
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
@@ -256,6 +262,8 @@ void PreviewPanel::stopPreview() {
     stopping_worker->requestInterruption();
     start_button_->setEnabled(false);
     stop_button_->setEnabled(false);
+    open_csv_button_->setEnabled(false);
+    open_xdf_button_->setEnabled(false);
     setStatus("Preview stopping...");
     if (!stopping_worker->wait(1000)) {
         setStatus("Preview is still stopping; restart is disabled until it finishes");
@@ -343,7 +351,20 @@ void PreviewPanel::openMergedCsv() {
         return;
     }
 
-    stopPreview();
+    if (worker_) {
+        pending_recording_open_ = PendingRecordingOpen::Csv;
+        pending_recording_path_ = path;
+        stopPreview();
+        if (worker_) {
+            setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
+            return;
+        }
+    }
+
+    loadMergedCsv(path);
+}
+
+void PreviewPanel::loadMergedCsv(const QString& path) {
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
 
@@ -385,7 +406,20 @@ void PreviewPanel::openXdf() {
         return;
     }
 
-    stopPreview();
+    if (worker_) {
+        pending_recording_open_ = PendingRecordingOpen::Xdf;
+        pending_recording_path_ = path;
+        stopPreview();
+        if (worker_) {
+            setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
+            return;
+        }
+    }
+
+    loadXdf(path);
+}
+
+void PreviewPanel::loadXdf(const QString& path) {
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
 
@@ -417,6 +451,18 @@ void PreviewPanel::openXdf() {
         csv_frames_.clear();
         play_csv_button_->setEnabled(false);
         setStatus("Failed to load XDF: " + QString::fromStdString(ex.what()));
+    }
+}
+
+void PreviewPanel::processPendingRecordingOpen() {
+    const PendingRecordingOpen pending = pending_recording_open_;
+    const QString path = pending_recording_path_;
+    pending_recording_open_ = PendingRecordingOpen::None;
+    pending_recording_path_.clear();
+    if (pending == PendingRecordingOpen::Csv) {
+        loadMergedCsv(path);
+    } else if (pending == PendingRecordingOpen::Xdf) {
+        loadXdf(path);
     }
 }
 

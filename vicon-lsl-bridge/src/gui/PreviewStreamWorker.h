@@ -53,7 +53,9 @@ private:
     bool pollStream(StreamState& state, qint64 now_ms);
     bool streamIsFresh(const StreamState& state, qint64 now_ms) const;
     void emitFrameFromMarker(qint64 now_ms);
-    void emitFallbackFrame(qint64 now_ms);
+    void emitFallbackFrame(qint64 now_ms,
+                           bool segments_updated,
+                           bool gaze_updated);
     void updateStatus(qint64 now_ms);
     QString streamStatusText(const StreamState& state, qint64 now_ms) const;
 
