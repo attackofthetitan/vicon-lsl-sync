@@ -1,4 +1,5 @@
 #include "CommandLine.h"
+#include "StreamDefaults.h"
 
 #include <charconv>
 #include <limits>
@@ -101,8 +102,10 @@ std::string formatUsage(std::string_view program) {
     out << "Usage: " << program << " [options]\n"
         << "Options:\n"
         << "  --server <ip:port>          Vicon server address (default: localhost:801)\n"
-        << "  --marker-stream <name>      LSL marker stream name (default: ViconMarkers)\n"
-        << "  --segment-stream <name>     LSL segment stream name (default: ViconSegments)\n"
+        << "  --marker-stream <name>      LSL marker stream name (default: "
+        << stream_defaults::ViconMarkers << ")\n"
+        << "  --segment-stream <name>     LSL segment stream name (default: "
+        << stream_defaults::ViconSegments << ")\n"
         << "  --reconnect-interval <ms>   Reconnection interval in ms (default: 3000)\n"
         << "  --help                      Show this help message\n";
     return out.str();

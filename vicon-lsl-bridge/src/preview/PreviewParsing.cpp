@@ -1,6 +1,7 @@
 #include "preview/PreviewParsing.h"
 
 #include "HoloLensGazePacket.h"
+#include "StreamDefaults.h"
 #include "preview/PreviewMath.h"
 
 #include <algorithm>
@@ -74,13 +75,13 @@ std::optional<PreviewVec3> parseVec3(const std::vector<double>& sample,
 } // namespace
 
 PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema) {
-    if (schema.name == "ViconMarkers") {
+    if (schema.name == stream_defaults::ViconMarkers) {
         return PreviewStreamRole::ViconMarkers;
     }
-    if (schema.name == "ViconSegments") {
+    if (schema.name == stream_defaults::ViconSegments) {
         return PreviewStreamRole::ViconSegments;
     }
-    if (schema.name == "HoloLensGaze") {
+    if (schema.name == stream_defaults::HoloLensGaze) {
         return PreviewStreamRole::HoloLensGaze;
     }
 

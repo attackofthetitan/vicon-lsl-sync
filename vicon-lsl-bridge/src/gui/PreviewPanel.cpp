@@ -5,6 +5,7 @@
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewMath.h"
 #include "preview/PreviewXdf.h"
+#include "StreamDefaults.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -68,10 +69,10 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     auto* stream_grid = new QGridLayout();
     stream_grid->setHorizontalSpacing(8);
     stream_grid->setVerticalSpacing(4);
-    marker_stream_edit_ = new QLineEdit("ViconMarkers");
-    segment_stream_edit_ = new QLineEdit("ViconSegments");
-    gaze_stream_edit_ = new QLineEdit("HoloLensGaze");
-    calibration_stream_edit_ = new QLineEdit("HoloLensModelTargetPose");
+    marker_stream_edit_ = new QLineEdit(stream_defaults::ViconMarkers);
+    segment_stream_edit_ = new QLineEdit(stream_defaults::ViconSegments);
+    gaze_stream_edit_ = new QLineEdit(stream_defaults::HoloLensGaze);
+    calibration_stream_edit_ = new QLineEdit(stream_defaults::HoloLensModelTargetPose);
     tolerance_spin_ = new QDoubleSpinBox();
     tolerance_spin_->setRange(0.001, 1.0);
     tolerance_spin_->setDecimals(3);
@@ -505,10 +506,14 @@ PreviewTransformProfile PreviewPanel::stairTransform() const {
 
 void PreviewPanel::loadSettings() {
     QSettings settings("ViconLSL", "ViconLSLBridge");
-    marker_stream_edit_->setText(settings.value("preview/markerStream", "ViconMarkers").toString());
-    segment_stream_edit_->setText(settings.value("preview/segmentStream", "ViconSegments").toString());
-    gaze_stream_edit_->setText(settings.value("preview/gazeStream", "HoloLensGaze").toString());
-    calibration_stream_edit_->setText(settings.value("preview/calibrationStream", "HoloLensModelTargetPose").toString());
+    marker_stream_edit_->setText(settings.value(
+        "preview/markerStream", stream_defaults::ViconMarkers).toString());
+    segment_stream_edit_->setText(settings.value(
+        "preview/segmentStream", stream_defaults::ViconSegments).toString());
+    gaze_stream_edit_->setText(settings.value(
+        "preview/gazeStream", stream_defaults::HoloLensGaze).toString());
+    calibration_stream_edit_->setText(settings.value(
+        "preview/calibrationStream", stream_defaults::HoloLensModelTargetPose).toString());
     tolerance_spin_->setValue(settings.value("preview/matchTolerance", 0.05).toDouble());
     trail_points_spin_->setValue(settings.value("preview/trailPoints", 24).toInt());
     playback_speed_spin_->setValue(settings.value("preview/playbackSpeed", 1.0).toDouble());

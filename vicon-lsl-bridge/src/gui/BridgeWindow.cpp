@@ -12,6 +12,7 @@
 #include <QCloseEvent>
 
 #include <exception>
+#include "StreamDefaults.h"
 
 // --- BridgeWorker ---
 
@@ -67,8 +68,8 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     form->setVerticalSpacing(4);
 
     server_edit_ = new QLineEdit("localhost:801");
-    marker_stream_edit_ = new QLineEdit("ViconMarkers");
-    segment_stream_edit_ = new QLineEdit("ViconSegments");
+    marker_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconMarkers);
+    segment_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconSegments);
 
     form->addRow("Vicon server:", server_edit_);
     form->addRow("Marker stream:", marker_stream_edit_);
@@ -496,8 +497,10 @@ void BridgeWindow::onWorkerFinished() {
 void BridgeWindow::loadSettings() {
     QSettings settings("ViconLSL", "ViconLSLBridge");
     server_edit_->setText(settings.value("server", "localhost:801").toString());
-    marker_stream_edit_->setText(settings.value("markerStream", "ViconMarkers").toString());
-    segment_stream_edit_->setText(settings.value("segmentStream", "ViconSegments").toString());
+    marker_stream_edit_->setText(settings.value(
+        "markerStream", vicon_lsl::stream_defaults::ViconMarkers).toString());
+    segment_stream_edit_->setText(settings.value(
+        "segmentStream", vicon_lsl::stream_defaults::ViconSegments).toString());
     study_root_edit_->setText(settings.value("recordingRoot", QDir::homePath()).toString());
     filename_template_edit_->setText(settings.value("recordingTemplate",
         "sub-%p/ses-%s/%m/sub-%p_ses-%s_task-%b_acq-%a_run-%r_%m.xdf").toString());

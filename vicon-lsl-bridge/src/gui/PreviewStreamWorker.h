@@ -2,6 +2,7 @@
 
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewTypes.h"
+#include "StreamDefaults.h"
 
 #include <QThread>
 #include <QMetaType>
@@ -20,10 +21,10 @@ class stream_info;
 namespace vicon_lsl {
 
 struct PreviewWorkerConfig {
-    QString marker_stream_name = "ViconMarkers";
-    QString segment_stream_name = "ViconSegments";
-    QString gaze_stream_name = "HoloLensGaze";
-    QString calibration_stream_name = "HoloLensModelTargetPose";
+    QString marker_stream_name = vicon_lsl::stream_defaults::ViconMarkers;
+    QString segment_stream_name = vicon_lsl::stream_defaults::ViconSegments;
+    QString gaze_stream_name = vicon_lsl::stream_defaults::HoloLensGaze;
+    QString calibration_stream_name = vicon_lsl::stream_defaults::HoloLensModelTargetPose;
     double match_tolerance_seconds = 0.05;
     PreviewTransformProfile vicon_transform;
     PreviewTransformProfile gaze_transform;
