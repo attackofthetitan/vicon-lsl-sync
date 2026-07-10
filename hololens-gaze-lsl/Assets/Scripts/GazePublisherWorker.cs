@@ -20,39 +20,7 @@ namespace GazeLSL
 
         public static void WriteSample(GazeSample frame, double[] sample)
         {
-            if (sample == null)
-            {
-                throw new ArgumentNullException(nameof(sample));
-            }
-
-            if (sample.Length < ChannelCount)
-            {
-                throw new ArgumentException("The gaze sample buffer must contain at least 21 elements.", nameof(sample));
-            }
-
-            sample[0] = frame.CombinedOriginX;
-            sample[1] = frame.CombinedOriginY;
-            sample[2] = frame.CombinedOriginZ;
-            sample[3] = frame.CombinedDirectionX;
-            sample[4] = frame.CombinedDirectionY;
-            sample[5] = frame.CombinedDirectionZ;
-            sample[6] = frame.CombinedValid ? 1.0 : 0.0;
-
-            sample[7] = frame.LeftEyeOriginX;
-            sample[8] = frame.LeftEyeOriginY;
-            sample[9] = frame.LeftEyeOriginZ;
-            sample[10] = frame.LeftEyeDirectionX;
-            sample[11] = frame.LeftEyeDirectionY;
-            sample[12] = frame.LeftEyeDirectionZ;
-            sample[13] = frame.LeftEyeValid ? 1.0 : 0.0;
-
-            sample[14] = frame.RightEyeOriginX;
-            sample[15] = frame.RightEyeOriginY;
-            sample[16] = frame.RightEyeOriginZ;
-            sample[17] = frame.RightEyeDirectionX;
-            sample[18] = frame.RightEyeDirectionY;
-            sample[19] = frame.RightEyeDirectionZ;
-            sample[20] = frame.RightEyeValid ? 1.0 : 0.0;
+            GazeStreamContract.WriteSample(frame, sample);
         }
     }
 

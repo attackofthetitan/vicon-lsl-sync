@@ -10,11 +10,13 @@ internal static class Program
         var tests = new Action[]
         {
             ModelTargetPoseEncoding,
+            GazeSampleEncodingMatchesContract,
             GazePublisherCancellation,
             GazePublisherProviderException,
             GazePublisherOutletException,
             GazePublisherTimeoutRetainsOwnership,
             TrackerGenerationRejectsLateOpen,
+            TrackerSameIdentityGenerationSharesLifetime,
             TrackerCloseWaitsForReadLease,
             TrackerDestroyInvalidatesPendingOpen
         };
@@ -57,6 +59,73 @@ internal static class Program
             True(double.IsNaN(sample[i]), "Untracked pose values must be NaN.");
         }
         Equal(0.0, sample[7]);
+    }
+
+    private static void GazeSampleEncodingMatchesContract()
+    {
+        var frame = new GazeSample
+        {
+            CombinedOriginX = 1,
+            CombinedOriginY = 2,
+            CombinedOriginZ = 3,
+            CombinedDirectionX = 4,
+            CombinedDirectionY = 5,
+            CombinedDirectionZ = 6,
+            CombinedValid = true,
+            LeftEyeOriginX = 8,
+            LeftEyeOriginY = 9,
+            LeftEyeOriginZ = 10,
+            LeftEyeDirectionX = 11,
+            LeftEyeDirectionY = 12,
+            LeftEyeDirectionZ = 13,
+            LeftEyeValid = false,
+            RightEyeOriginX = 15,
+            RightEyeOriginY = 16,
+            RightEyeOriginZ = 17,
+            RightEyeDirectionX = 18,
+            RightEyeDirectionY = 19,
+            RightEyeDirectionZ = 20,
+            RightEyeValid = true
+        };
+        var expectedByLabel = new Dictionary<string, double>
+        {
+            { "CombinedOriginX", 1 },
+            { "CombinedOriginY", 2 },
+            { "CombinedOriginZ", 3 },
+            { "CombinedDirectionX", 4 },
+            { "CombinedDirectionY", 5 },
+            { "CombinedDirectionZ", 6 },
+            { "CombinedValid", 1 },
+            { "LeftEyeOriginX", 8 },
+            { "LeftEyeOriginY", 9 },
+            { "LeftEyeOriginZ", 10 },
+            { "LeftEyeDirectionX", 11 },
+            { "LeftEyeDirectionY", 12 },
+            { "LeftEyeDirectionZ", 13 },
+            { "LeftEyeValid", 0 },
+            { "RightEyeOriginX", 15 },
+            { "RightEyeOriginY", 16 },
+            { "RightEyeOriginZ", 17 },
+            { "RightEyeDirectionX", 18 },
+            { "RightEyeDirectionY", 19 },
+            { "RightEyeDirectionZ", 20 },
+            { "RightEyeValid", 1 }
+        };
+
+        Equal(expectedByLabel.Count, GazeStreamContract.ChannelCount);
+        Equal(GazeStreamContract.ChannelCount, GazeStreamContract.Labels.Length);
+        Equal(GazeStreamContract.ChannelCount, GazeStreamContract.Units.Length);
+
+        double[] sample = new double[GazeSampleEncoder.ChannelCount];
+        GazeSampleEncoder.WriteSample(frame, sample);
+        for (int i = 0; i < GazeStreamContract.ChannelCount; i++)
+        {
+            double expected;
+            True(
+                expectedByLabel.TryGetValue(GazeStreamContract.Labels[i], out expected),
+                "The generated contract contains an unmapped gaze channel.");
+            Equal(expected, sample[i]);
+        }
     }
 
     private static void GazePublisherCancellation()
@@ -136,6 +205,36 @@ internal static class Program
         False(closed.Contains(tracker), "Tracker closed while a read was active.");
         lease.Dispose();
         True(closed.Contains(tracker), "Tracker did not close after its last read completed.");
+    }
+
+    private static void TrackerSameIdentityGenerationSharesLifetime()
+    {
+        var closed = new List<FakeTracker>();
+        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
+        var tracker = new FakeTracker("reused");
+        var firstState = new FakeState();
+        var secondState = new FakeState();
+
+        var firstAttempt = coordinator.BeginOpen(tracker);
+        True(coordinator.TryActivate(firstAttempt, firstState), "First tracker generation did not activate.");
+        TrackerSessionCoordinator<FakeTracker, FakeState>.ReadLease firstLease;
+        True(coordinator.TryAcquireRead(out firstLease), "Could not acquire a read from the first generation.");
+
+        var secondAttempt = coordinator.BeginOpen(tracker);
+        True(coordinator.TryActivate(secondAttempt, secondState), "Reused tracker generation did not activate.");
+        False(closed.Contains(tracker), "Replacing a generation closed the tracker reused by its successor.");
+
+        TrackerSessionCoordinator<FakeTracker, FakeState>.ReadLease secondLease;
+        True(coordinator.TryAcquireRead(out secondLease), "Could not acquire a read from the successor generation.");
+        Same(secondState, secondLease.State);
+
+        True(coordinator.Retire(tracker), "Could not retire the reused tracker.");
+        False(closed.Contains(tracker), "Reused tracker closed while generation reads were active.");
+        firstLease.Dispose();
+        False(closed.Contains(tracker), "Reused tracker closed before the successor read completed.");
+        secondLease.Dispose();
+        Equal(1, closed.Count);
+        Same(tracker, closed[0]);
     }
 
     private static void TrackerDestroyInvalidatesPendingOpen()

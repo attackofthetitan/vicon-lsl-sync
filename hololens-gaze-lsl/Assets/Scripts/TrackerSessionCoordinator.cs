@@ -33,7 +33,7 @@ namespace GazeLSL
                 this.session = session;
             }
 
-            public TTracker Tracker => session.Tracker;
+            public TTracker Tracker => session.Resource.Tracker;
             public TState State => session.State;
             public long Generation => session.Generation;
 
@@ -53,10 +53,16 @@ namespace GazeLSL
         internal sealed class Session
         {
             public long Generation;
-            public TTracker Tracker;
+            public TrackerResource Resource;
             public TState State;
-            public int Readers;
             public bool Retired;
+        }
+
+        internal sealed class TrackerResource
+        {
+            public TTracker Tracker;
+            public int Readers;
+            public bool CloseRequested;
             public bool Closed;
         }
 
@@ -143,7 +149,7 @@ namespace GazeLSL
                 pending.Remove(attempt.Generation);
                 if (destroying || attempt.Generation != latestGeneration)
                 {
-                    if (active == null || !ReferenceEquals(active.Tracker, attempt.Tracker))
+                    if (active == null || !ReferenceEquals(active.Resource.Tracker, attempt.Tracker))
                     {
                         rejectedTracker = attempt.Tracker;
                     }
@@ -151,13 +157,18 @@ namespace GazeLSL
                 else
                 {
                     Session previous = active;
+                    bool transfersTracker = previous != null &&
+                        ReferenceEquals(previous.Resource.Tracker, attempt.Tracker);
+                    TrackerResource resource = transfersTracker
+                        ? previous.Resource
+                        : new TrackerResource { Tracker = attempt.Tracker };
                     active = new Session
                     {
                         Generation = attempt.Generation,
-                        Tracker = attempt.Tracker,
+                        Resource = resource,
                         State = state
                     };
-                    retiredTracker = RetireLocked(previous);
+                    retiredTracker = RetireLocked(previous, !transfersTracker);
                     activated = true;
                 }
             }
@@ -181,7 +192,7 @@ namespace GazeLSL
                 }
 
                 pending.Remove(attempt.Generation);
-                if (active == null || !ReferenceEquals(active.Tracker, attempt.Tracker))
+                if (active == null || !ReferenceEquals(active.Resource.Tracker, attempt.Tracker))
                 {
                     trackerToClose = attempt.Tracker;
                 }
@@ -200,7 +211,7 @@ namespace GazeLSL
                     return false;
                 }
 
-                active.Readers++;
+                active.Resource.Readers++;
                 lease = new ReadLease(this, active);
                 return true;
             }
@@ -227,11 +238,11 @@ namespace GazeLSL
             bool retired = false;
             lock (gate)
             {
-                if (active != null && ReferenceEquals(active.Tracker, tracker))
+                if (active != null && ReferenceEquals(active.Resource.Tracker, tracker))
                 {
                     Session previous = active;
                     active = null;
-                    trackerToClose = RetireLocked(previous);
+                    trackerToClose = RetireLocked(previous, true);
                     retired = true;
                 }
 
@@ -275,7 +286,7 @@ namespace GazeLSL
             {
                 Session previous = active;
                 active = null;
-                trackerToClose = RetireLocked(previous);
+                trackerToClose = RetireLocked(previous, true);
             }
 
             CloseIfNeeded(trackerToClose);
@@ -294,12 +305,21 @@ namespace GazeLSL
 
                 destroying = true;
                 latestGeneration++;
-                pendingToClose = new List<TTracker>(pending.Values);
-                pending.Clear();
-
                 Session previous = active;
                 active = null;
-                activeToClose = RetireLocked(previous);
+                pendingToClose = new List<TTracker>();
+                foreach (TTracker pendingTracker in pending.Values)
+                {
+                    bool ownedByActive = previous != null &&
+                        ReferenceEquals(previous.Resource.Tracker, pendingTracker);
+                    if (!ownedByActive && !ContainsReference(pendingToClose, pendingTracker))
+                    {
+                        pendingToClose.Add(pendingTracker);
+                    }
+                }
+                pending.Clear();
+
+                activeToClose = RetireLocked(previous, true);
             }
 
             CloseIfNeeded(activeToClose);
@@ -309,7 +329,7 @@ namespace GazeLSL
             }
         }
 
-        private TTracker RetireLocked(Session session)
+        private TTracker RetireLocked(Session session, bool closeTrackerResource)
         {
             if (session == null || session.Retired)
             {
@@ -317,10 +337,17 @@ namespace GazeLSL
             }
 
             session.Retired = true;
-            if (session.Readers == 0)
+            if (!closeTrackerResource)
             {
-                session.Closed = true;
-                return session.Tracker;
+                return null;
+            }
+
+            TrackerResource resource = session.Resource;
+            resource.CloseRequested = true;
+            if (resource.Readers == 0 && !resource.Closed)
+            {
+                resource.Closed = true;
+                return resource.Tracker;
             }
 
             return null;
@@ -331,11 +358,12 @@ namespace GazeLSL
             TTracker trackerToClose = null;
             lock (gate)
             {
-                session.Readers--;
-                if (session.Retired && session.Readers == 0 && !session.Closed)
+                TrackerResource resource = session.Resource;
+                resource.Readers--;
+                if (resource.CloseRequested && resource.Readers == 0 && !resource.Closed)
                 {
-                    session.Closed = true;
-                    trackerToClose = session.Tracker;
+                    resource.Closed = true;
+                    trackerToClose = resource.Tracker;
                 }
             }
 
@@ -348,6 +376,19 @@ namespace GazeLSL
             {
                 closeTracker(tracker);
             }
+        }
+
+        private static bool ContainsReference(List<TTracker> trackers, TTracker candidate)
+        {
+            for (int i = 0; i < trackers.Count; i++)
+            {
+                if (ReferenceEquals(trackers[i], candidate))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }
