@@ -510,8 +510,10 @@ TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp"
 }
 
 TEST_CASE("Preview XDF loader rejects impossible implicit and non-monotonic timestamps") {
-    const std::string implicit_path = "preview_core_invalid_implicit.xdf";
-    const std::string non_monotonic_path = "preview_core_non_monotonic.xdf";
+    const TemporaryFilePath implicit_file("_invalid_implicit.xdf");
+    const TemporaryFilePath non_monotonic_file("_non_monotonic.xdf");
+    const std::string implicit_path = implicit_file.string();
+    const std::string non_monotonic_path = non_monotonic_file.string();
     const std::uint32_t stream_id = 1;
     const std::vector<std::string> labels = {"value"};
     {
