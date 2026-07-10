@@ -71,4 +71,3 @@ TEST_CASE("Sample flattening preserves marker and segment order") {
     REQUIRE_EQ(segment_sample[7], 4.0);
     REQUIRE_EQ(segment_sample[13], 0.9);
 }
-

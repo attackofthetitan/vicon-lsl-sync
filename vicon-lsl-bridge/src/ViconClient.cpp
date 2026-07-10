@@ -336,4 +336,3 @@ vicon_lsl::SegmentRotationRead ViconClient::readSegmentGlobalRotationQuaternion(
     read.message = output.Occluded ? "Segment rotation is occluded" : "";
     return read;
 }
-
