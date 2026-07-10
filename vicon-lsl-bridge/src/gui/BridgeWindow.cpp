@@ -624,11 +624,11 @@ void BridgeWindow::updateRecordingButtons() {
         labrecorder_client_.connectionState() == RecorderConnectionState::Connected;
     const RecorderRecordingState recording_state = labrecorder_client_.recordingState();
     refresh_streams_button_->setEnabled(
-        connected && recording_state != RecorderRecordingState::Recording);
+        connected && recording_state == RecorderRecordingState::Stopped);
     start_recording_button_->setEnabled(
         connected && recording_state == RecorderRecordingState::Stopped && isFilenameValid());
     stop_recording_button_->setEnabled(
-        connected && recording_state == RecorderRecordingState::Recording);
+        connected && recording_state != RecorderRecordingState::Stopped);
 }
 
 bool BridgeWindow::isFilenameValid() const {

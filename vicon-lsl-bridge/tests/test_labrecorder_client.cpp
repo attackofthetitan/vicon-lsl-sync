@@ -344,8 +344,8 @@ void testConnectionStateTracksIdleDisconnectAndReconnect() {
     client.connectToServer("127.0.0.1", server.serverPort());
     expect(waitUntil([&client]() { return client.isConnected(); }),
            "client reconnects after idle disconnect");
-    expect(client.recordingState() == RecorderRecordingState::Stopped,
-           "reconnect establishes stopped recording state");
+    expect(client.recordingState() == RecorderRecordingState::Unknown,
+           "reconnect preserves unknown recording state until a command is acknowledged");
 }
 
 } // namespace

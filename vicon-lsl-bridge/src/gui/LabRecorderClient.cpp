@@ -210,8 +210,10 @@ void LabRecorderClient::setRecordingState(RecorderRecordingState state) {
 
 void LabRecorderClient::onConnected() {
     connection_timeout_.stop();
-    setConnectionState(RecorderConnectionState::Connected, "Connected to LabRecorder RCS");
-    setRecordingState(RecorderRecordingState::Stopped);
+    setConnectionState(
+        RecorderConnectionState::Connected,
+        "Connected to LabRecorder RCS; recording state is unknown until Start or Stop is acknowledged");
+    setRecordingState(RecorderRecordingState::Unknown);
     startNextBatch();
 }
 
