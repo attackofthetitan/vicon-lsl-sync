@@ -24,6 +24,33 @@ struct CalibrationTargetPose {
     bool tracked = false;
 };
 
+struct CalibrationProfile {
+    std::string id;
+    std::size_t required_samples = 20;
+    double translation_tolerance_m = 0.02;
+    double rotation_tolerance_degrees = 3.0;
+    PreviewRigidTransform vicon_from_target;
+};
+
+struct CalibrationQuality {
+    std::size_t sample_count = 0;
+    double translation_rms_m = 0.0;
+    double rotation_rms_degrees = 0.0;
+};
+
+struct CalibrationSolution {
+    PreviewRigidTransform holo_from_target;
+    CalibrationQuality quality;
+};
+
+const CalibrationProfile& defaultStairCalibrationProfile();
+bool targetPoseWithinTolerance(const CalibrationTargetPose& reference,
+                               const CalibrationTargetPose& candidate,
+                               const CalibrationProfile& profile);
+std::optional<CalibrationSolution> solveTrackedTargetCalibration(
+    const std::vector<CalibrationTargetPose>& poses,
+    const CalibrationProfile& profile);
+
 PreviewRigidTransform composeRigidTransforms(const PreviewRigidTransform& left,
                                              const PreviewRigidTransform& right);
 PreviewRigidTransform inverseRigidTransform(const PreviewRigidTransform& transform);

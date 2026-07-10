@@ -24,45 +24,10 @@
 #include <QVBoxLayout>
 
 #include <exception>
-#include <cmath>
 #include <optional>
 
 namespace vicon_lsl {
 namespace {
-
-// Fixed physical-stair placement from the Python preview auto-alignment.
-// Z is the height axis in the Vicon/stair data; Y centers the walking path
-// across the measured physical stair width.
-constexpr PreviewVec3 kPhysicalStairTranslationM{
-    -2.853343307500,
-    0.292672723112,
-    0.006432986454,
-};
-
-constexpr std::size_t kCalibrationSampleCount = 20;
-constexpr double kCalibrationTranslationToleranceM = 0.02;
-constexpr double kCalibrationRotationToleranceDegrees = 3.0;
-
-PreviewRigidTransform viconFromStairTarget() {
-    // TODO: Replace this fixed best estimate with an operator-editable or
-    // imported stair pose when stair relocation support is added.
-    return {kPhysicalStairTranslationM, {0.0, 0.0, 0.0, 1.0}};
-}
-
-bool poseIsStableRelativeTo(const CalibrationTargetPose& reference,
-                            const CalibrationTargetPose& candidate) {
-    const PreviewVec3 delta = candidate.holo_from_target.translation -
-                              reference.holo_from_target.translation;
-    if (length(delta) > kCalibrationTranslationToleranceM) {
-        return false;
-    }
-    const PreviewQuaternion left = normalizeQuaternion(reference.holo_from_target.rotation);
-    const PreviewQuaternion right = normalizeQuaternion(candidate.holo_from_target.rotation);
-    const double orientation_dot = std::abs(left.x * right.x + left.y * right.y +
-                                            left.z * right.z + left.w * right.w);
-    return orientation_dot >= std::cos(kCalibrationRotationToleranceDegrees *
-                                       3.14159265358979323846 / 360.0);
-}
 
 QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
     auto* spin = new QDoubleSpinBox();
@@ -298,7 +263,9 @@ void PreviewPanel::beginCalibration() {
     }
     calibration_samples_.clear();
     calibration_state_ = CalibrationState::Collecting;
-    setStatus("Waiting for 20 stable tracked stair-target poses...");
+    const auto& profile = defaultStairCalibrationProfile();
+    setStatus("Waiting for " + QString::number(profile.required_samples) +
+              " stable tracked stair-target poses...");
 }
 
 void PreviewPanel::useManualTransform() {
@@ -312,6 +279,7 @@ void PreviewPanel::useManualTransform() {
 }
 
 void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
+    const auto& profile = defaultStairCalibrationProfile();
     if (calibration_state_ != CalibrationState::Collecting) {
         return;
     }
@@ -321,37 +289,42 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         return;
     }
 
-    if (!calibration_samples_.empty() && !poseIsStableRelativeTo(calibration_samples_.front(), pose)) {
+    if (!calibration_samples_.empty() &&
+        !targetPoseWithinTolerance(calibration_samples_.front(), pose, profile)) {
         calibration_samples_.clear();
         calibration_samples_.push_back(pose);
         setStatus("Stair target moved; restarting stable-pose collection (1/" +
-                  QString::number(static_cast<qulonglong>(kCalibrationSampleCount)) + ")");
+                  QString::number(static_cast<qulonglong>(profile.required_samples)) + ")");
         return;
     }
 
     calibration_samples_.push_back(pose);
-    if (calibration_samples_.size() < kCalibrationSampleCount) {
+    if (calibration_samples_.size() < profile.required_samples) {
         setStatus("Collecting stair-target poses: " +
                   QString::number(calibration_samples_.size()) + "/" +
-                  QString::number(kCalibrationSampleCount));
+                  QString::number(profile.required_samples));
         return;
     }
 
-    const auto holo_from_stair = averageTrackedTargetPoses(calibration_samples_);
+    const auto solution = solveTrackedTargetCalibration(calibration_samples_, profile);
     calibration_state_ = CalibrationState::Manual;
     calibration_samples_.clear();
-    if (!holo_from_stair) {
-        setStatus("Calibration failed: no valid tracked stair-target poses");
+    if (!solution) {
+        setStatus("Calibration failed: stair-target motion exceeded quality limits");
         return;
     }
 
     automatic_gaze_transform_ = composeRigidTransforms(
-        viconFromStairTarget(), inverseRigidTransform(*holo_from_stair));
+        profile.vicon_from_target, inverseRigidTransform(solution->holo_from_target));
     calibration_state_ = CalibrationState::AutomaticSession;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
-    setStatus("Stair-target calibration applied for this preview session");
+    setStatus("Stair-target calibration " + QString::fromStdString(profile.id) +
+              " applied for this session (RMS " +
+              QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
+              " mm, " + QString::number(solution->quality.rotation_rms_degrees, 'f', 2) +
+              " deg)");
 }
 
 void PreviewPanel::openMergedCsv() {
@@ -511,7 +484,7 @@ PreviewTransformProfile PreviewPanel::stairTransform() const {
     PreviewTransformProfile transform;
     transform.name = "Stair";
     transform.scale = 0.001;
-    transform.translation = kPhysicalStairTranslationM;
+    transform.translation = defaultStairCalibrationProfile().vicon_from_target.translation;
     transform.rotation_degrees = {0.0, 0.0, 0.0};
     return transform;
 }

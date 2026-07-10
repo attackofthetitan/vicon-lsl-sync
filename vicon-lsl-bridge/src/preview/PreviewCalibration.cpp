@@ -3,6 +3,7 @@
 #include "preview/PreviewMath.h"
 
 #include <cmath>
+#include <algorithm>
 #include <unordered_map>
 
 namespace vicon_lsl {
@@ -19,6 +20,88 @@ bool usableQuaternion(const PreviewQuaternion& value) {
 }
 
 } // namespace
+
+const CalibrationProfile& defaultStairCalibrationProfile() {
+    static const CalibrationProfile profile{
+        "stair-model-v1",
+        20,
+        0.02,
+        3.0,
+        {{-2.853343307500, 0.292672723112, 0.006432986454},
+         {0.0, 0.0, 0.0, 1.0}},
+    };
+    return profile;
+}
+
+bool targetPoseWithinTolerance(const CalibrationTargetPose& reference,
+                               const CalibrationTargetPose& candidate,
+                               const CalibrationProfile& profile) {
+    const PreviewVec3 delta = candidate.holo_from_target.translation -
+                              reference.holo_from_target.translation;
+    if (length(delta) > profile.translation_tolerance_m) {
+        return false;
+    }
+    const PreviewQuaternion left = normalizeQuaternion(reference.holo_from_target.rotation);
+    const PreviewQuaternion right = normalizeQuaternion(candidate.holo_from_target.rotation);
+    const double orientation_dot = std::clamp(
+        std::abs(left.x * right.x + left.y * right.y +
+                 left.z * right.z + left.w * right.w),
+        0.0,
+        1.0);
+    const double angle_degrees = 2.0 * std::acos(orientation_dot) * 180.0 /
+                                 3.14159265358979323846;
+    return angle_degrees <= profile.rotation_tolerance_degrees;
+}
+
+std::optional<CalibrationSolution> solveTrackedTargetCalibration(
+    const std::vector<CalibrationTargetPose>& poses,
+    const CalibrationProfile& profile) {
+    const auto average = averageTrackedTargetPoses(poses);
+    if (!average) {
+        return std::nullopt;
+    }
+
+    double translation_squared_sum = 0.0;
+    double rotation_squared_sum = 0.0;
+    std::size_t count = 0;
+    const PreviewQuaternion mean_rotation = normalizeQuaternion(average->rotation);
+    for (const auto& pose : poses) {
+        if (!pose.tracked || !isFinite(pose.holo_from_target.translation) ||
+            !usableQuaternion(pose.holo_from_target.rotation)) {
+            continue;
+        }
+        const PreviewVec3 delta = pose.holo_from_target.translation - average->translation;
+        const double translation_error = length(delta);
+        translation_squared_sum += translation_error * translation_error;
+
+        const PreviewQuaternion rotation = normalizeQuaternion(pose.holo_from_target.rotation);
+        const double orientation_dot = std::clamp(
+            std::abs(mean_rotation.x * rotation.x + mean_rotation.y * rotation.y +
+                     mean_rotation.z * rotation.z + mean_rotation.w * rotation.w),
+            0.0,
+            1.0);
+        const double angle_degrees = 2.0 * std::acos(orientation_dot) * 180.0 /
+                                     3.14159265358979323846;
+        rotation_squared_sum += angle_degrees * angle_degrees;
+        ++count;
+    }
+    if (count < profile.required_samples) {
+        return std::nullopt;
+    }
+
+    CalibrationSolution solution;
+    solution.holo_from_target = *average;
+    solution.quality.sample_count = count;
+    solution.quality.translation_rms_m =
+        std::sqrt(translation_squared_sum / static_cast<double>(count));
+    solution.quality.rotation_rms_degrees =
+        std::sqrt(rotation_squared_sum / static_cast<double>(count));
+    if (solution.quality.translation_rms_m > profile.translation_tolerance_m ||
+        solution.quality.rotation_rms_degrees > profile.rotation_tolerance_degrees) {
+        return std::nullopt;
+    }
+    return solution;
+}
 
 PreviewRigidTransform composeRigidTransforms(const PreviewRigidTransform& left,
                                              const PreviewRigidTransform& right) {

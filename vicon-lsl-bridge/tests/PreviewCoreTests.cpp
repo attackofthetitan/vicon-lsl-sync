@@ -233,6 +233,28 @@ TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses
     REQUIRE(near(average->rotation.w, 1.0));
 }
 
+TEST_CASE("Preview calibration reports quality and rejects unstable target motion") {
+    const auto profile = vicon_lsl::defaultStairCalibrationProfile();
+    std::vector<vicon_lsl::CalibrationTargetPose> stable(
+        profile.required_samples,
+        {{{1.0, 2.0, 3.0}, {0.0, 0.0, 0.0, 1.0}}, true});
+    for (std::size_t index = 0; index < stable.size(); ++index) {
+        stable[index].holo_from_target.translation.x +=
+            static_cast<double>(index % 3) * 0.001;
+    }
+
+    const auto solution = vicon_lsl::solveTrackedTargetCalibration(stable, profile);
+    REQUIRE(solution.has_value());
+    REQUIRE_EQ(solution->quality.sample_count, profile.required_samples);
+    REQUIRE(solution->quality.translation_rms_m < profile.translation_tolerance_m);
+    REQUIRE(solution->quality.rotation_rms_degrees < 1e-9);
+
+    auto unstable = stable;
+    unstable.back().holo_from_target.translation.x += 0.1;
+    REQUIRE(!vicon_lsl::targetPoseWithinTolerance(unstable.front(), unstable.back(), profile));
+    REQUIRE(!vicon_lsl::solveTrackedTargetCalibration(unstable, profile).has_value());
+}
+
 TEST_CASE("Preview calibration aligns a synthetic gaze ray with the stair frame") {
     const vicon_lsl::PreviewRigidTransform vicon_from_stair{
         {2.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}};
