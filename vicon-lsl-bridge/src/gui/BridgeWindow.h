@@ -52,6 +52,7 @@ public:
     bool labRecorderConnected() const;
     bool labRecorderOwnedProcessRunning() const;
     bool stairModelLoaded() const;
+    bool configurableTooltipsPresent() const;
 
 protected:
     void closeEvent(QCloseEvent* event) override;
