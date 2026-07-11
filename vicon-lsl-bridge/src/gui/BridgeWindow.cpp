@@ -10,9 +10,11 @@
 #include <QDir>
 #include <QSplitter>
 #include <QCloseEvent>
+#include <QCoreApplication>
 
 #include <exception>
 #include "StreamDefaults.h"
+#include "gui/LabRecorderRuntimePolicy.h"
 
 // --- BridgeWorker ---
 
@@ -241,6 +243,9 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     connect(stop_recording_button_, &QPushButton::clicked, this, &BridgeWindow::onStopRecording);
     connect(&labrecorder_client_, &LabRecorderClient::connectionStateChanged, this,
             [this](RecorderConnectionState state, const QString& message) {
+                if (state == RecorderConnectionState::Connected && labrecorder_retry_timer_) {
+                    labrecorder_retry_timer_->stop();
+                }
                 if (!message.isEmpty()) {
                     setLabRecorderStatus(message);
                 }
@@ -280,15 +285,51 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     status_stale_timer_->setInterval(500);
     connect(status_stale_timer_, &QTimer::timeout, this, &BridgeWindow::onStatusStaleCheck);
     status_stale_timer_->start();
+    labrecorder_retry_timer_ = new QTimer(this);
+    labrecorder_retry_timer_->setInterval(250);
+    connect(labrecorder_retry_timer_, &QTimer::timeout,
+            this, &BridgeWindow::onLabRecorderRetry);
+    close_poll_timer_ = new QTimer(this);
+    close_poll_timer_->setInterval(50);
+    connect(close_poll_timer_, &QTimer::timeout, this, &BridgeWindow::onClosePoll);
     updateRecordingButtons();
     updateReadiness();
+
+    // Resolve and launch the recorder after the window has been constructed so
+    // QProcess and the RCS retry loop are owned by the GUI thread.
+    QTimer::singleShot(0, this, &BridgeWindow::beginLabRecorderStartup);
 }
 
 BridgeWindow::~BridgeWindow() {
+    if (close_poll_timer_) {
+        close_poll_timer_->stop();
+    }
+    stopOwnedLabRecorder();
     if (worker_) {
         worker_->stopBridge();
         worker_->wait();
     }
+}
+
+bool BridgeWindow::labRecorderConnected() const {
+    return labrecorder_client_.connectionState() == RecorderConnectionState::Connected;
+}
+
+bool BridgeWindow::labRecorderOwnedProcessRunning() const {
+    return labrecorder_process_owned_ && labrecorder_process_ &&
+           labrecorder_process_->state() != QProcess::NotRunning;
+}
+
+QString BridgeWindow::labRecorderExecutablePath() const {
+    return labrecorder_executable_edit_ ? labrecorder_executable_edit_->text() : QString();
+}
+
+bool BridgeWindow::recorderReady() const {
+    return labRecorderConnected() && isFilenameValid();
+}
+
+bool BridgeWindow::stairModelLoaded() const {
+    return preview_panel_ && preview_panel_->stairModelLoaded();
 }
 
 void BridgeWindow::onStart() {
@@ -339,7 +380,7 @@ void BridgeWindow::onBrowseLabRecorder() {
 }
 
 void BridgeWindow::onLaunchLabRecorder() {
-    QString executable = labrecorder_executable_edit_->text().trimmed();
+    const QString executable = labrecorder_executable_edit_->text().trimmed();
     if (executable.isEmpty()) {
         setLabRecorderStatus("Set a LabRecorder executable path before launching.");
         return;
@@ -351,25 +392,87 @@ void BridgeWindow::onLaunchLabRecorder() {
 
     if (!labrecorder_process_) {
         labrecorder_process_ = std::make_unique<QProcess>();
+        connect(labrecorder_process_.get(), &QProcess::errorOccurred, this,
+                [this](QProcess::ProcessError) {
+                    setLabRecorderStatus("LabRecorder process error: " +
+                                         labrecorder_process_->errorString());
+                });
+        connect(labrecorder_process_.get(), &QProcess::finished, this,
+                [this](int, QProcess::ExitStatus) {
+                    if (labrecorder_process_owned_) {
+                        labrecorder_process_owned_ = false;
+                    }
+                    setLabRecorderStatus("LabRecorder process exited.");
+                    updateReadiness();
+                });
     }
-    if (labrecorder_process_->state() != QProcess::NotRunning) {
+    if (!LabRecorderRuntimePolicy::canLaunch(
+            labrecorder_process_->state() != QProcess::NotRunning)) {
         setLabRecorderStatus("LabRecorder process is already running.");
         return;
     }
 
+    labrecorder_process_owned_ = true;
     labrecorder_process_->start(executable);
     if (!labrecorder_process_->waitForStarted(2000)) {
+        labrecorder_process_owned_ = false;
         setLabRecorderStatus("Failed to launch LabRecorder: " + labrecorder_process_->errorString());
         return;
     }
     setLabRecorderStatus("LabRecorder launched. Connect after RCS is ready.");
+    labrecorder_retry_elapsed_.restart();
+    labrecorder_retry_timer_->start();
+    onLabRecorderRetry();
 }
 
 void BridgeWindow::onConnectLabRecorder() {
+    labrecorder_retry_timer_->stop();
     saveSettings();
     labrecorder_client_.connectToServer(
         labrecorder_host_edit_->text(),
         static_cast<quint16>(labrecorder_port_spin_->value()));
+}
+
+QString BridgeWindow::resolveLabRecorderExecutable() const {
+    return LabRecorderRuntimePolicy::resolveExecutable(
+        labrecorder_executable_edit_->text(),
+        QCoreApplication::applicationDirPath());
+}
+
+void BridgeWindow::beginLabRecorderStartup() {
+    const QString executable = resolveLabRecorderExecutable();
+    if (executable.isEmpty() || !QFileInfo::exists(executable)) {
+        setLabRecorderStatus("LabRecorder executable not found; use Browse or Launch.");
+        updateReadiness();
+        return;
+    }
+    // Keep a valid saved custom path; otherwise show the bundled fallback so
+    // the automatic launch path is visible and reproducible.
+    labrecorder_executable_edit_->setText(executable);
+    onLaunchLabRecorder();
+}
+
+void BridgeWindow::onLabRecorderRetry() {
+    const RecorderConnectionState state = labrecorder_client_.connectionState();
+    if (state == RecorderConnectionState::Connected) {
+        labrecorder_retry_timer_->stop();
+        return;
+    }
+    const qint64 elapsed = labrecorder_retry_elapsed_.isValid()
+        ? labrecorder_retry_elapsed_.elapsed()
+        : LabRecorderRuntimePolicy::RetryTimeoutMs;
+    if (LabRecorderRuntimePolicy::retryExpired(elapsed)) {
+        labrecorder_retry_timer_->stop();
+        setLabRecorderStatus("LabRecorder RCS was not ready within 15 seconds.");
+        return;
+    }
+    if (!LabRecorderRuntimePolicy::shouldAttemptConnection(state, elapsed)) {
+        return;
+    }
+    labrecorder_client_.connectToServer(
+        labrecorder_host_edit_->text(),
+        static_cast<quint16>(labrecorder_port_spin_->value()),
+        200);
 }
 
 void BridgeWindow::onRefreshLabRecorder() {
@@ -426,15 +529,72 @@ void BridgeWindow::onStatusStaleCheck() {
 }
 
 void BridgeWindow::closeEvent(QCloseEvent* event) {
-    if (!worker_) {
+    if (close_finalizing_) {
         event->accept();
         return;
     }
-
-    close_pending_ = true;
-    onStop();
-    status_label_->setText("Stopping bridge before closing...");
+    if (!close_pending_) {
+        close_pending_ = true;
+        close_elapsed_.restart();
+        close_stop_requested_ = false;
+        if (worker_) {
+            onStop();
+            status_label_->setText("Stopping bridge before closing...");
+        }
+        if (labrecorder_client_.recordingState() == RecorderRecordingState::Recording) {
+            close_stop_requested_ = labrecorder_client_.stopRecording();
+            if (close_stop_requested_) {
+                setLabRecorderStatus("Stopping recording before closing...");
+            }
+        }
+        if (close_poll_timer_) {
+            close_poll_timer_->start();
+        }
+    }
     event->ignore();
+    finishCloseIfReady();
+}
+
+void BridgeWindow::onClosePoll() {
+    finishCloseIfReady();
+}
+
+void BridgeWindow::finishCloseIfReady() {
+    if (!close_pending_) {
+        return;
+    }
+    const bool bridge_done = worker_ == nullptr;
+    const bool recording_done = !close_stop_requested_ ||
+        labrecorder_client_.recordingState() == RecorderRecordingState::Stopped ||
+        close_elapsed_.elapsed() >= 2000;
+    if (!bridge_done || !recording_done) {
+        if (close_elapsed_.elapsed() < 4000) {
+            return;
+        }
+    }
+    if (close_poll_timer_) {
+        close_poll_timer_->stop();
+    }
+    close_pending_ = false;
+    close_finalizing_ = true;
+    stopOwnedLabRecorder();
+    QTimer::singleShot(0, this, [this]() { QWidget::close(); });
+}
+
+void BridgeWindow::stopOwnedLabRecorder() {
+    if (!labrecorder_process_owned_ || !labrecorder_process_) {
+        return;
+    }
+    const bool process_running = labrecorder_process_->state() != QProcess::NotRunning;
+    if (LabRecorderRuntimePolicy::shouldStopOwnedProcess(
+            labrecorder_process_owned_, process_running)) {
+        labrecorder_process_->terminate();
+        if (!labrecorder_process_->waitForFinished(1000)) {
+            labrecorder_process_->kill();
+            labrecorder_process_->waitForFinished(500);
+        }
+    }
+    labrecorder_process_owned_ = false;
 }
 
 void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
@@ -489,8 +649,7 @@ void BridgeWindow::onWorkerFinished() {
     worker_->deleteLater();
     worker_ = nullptr;
     if (close_pending_) {
-        close_pending_ = false;
-        QTimer::singleShot(0, this, &QWidget::close);
+        finishCloseIfReady();
     }
 }
 

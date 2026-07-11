@@ -506,6 +506,7 @@ void PreviewPanel::browseStairModel() {
 void PreviewPanel::reloadStairModel() {
     const QString path = stair_model_edit_->text().trimmed();
     if (path.isEmpty() || !QFileInfo::exists(path)) {
+        stair_model_loaded_ = false;
         setStatus("Stair model not loaded");
         return;
     }
@@ -513,8 +514,10 @@ void PreviewPanel::reloadStairModel() {
     try {
         const PreviewMesh mesh = loadObjMesh(QDir::toNativeSeparators(path).toStdString());
         widget_->setStairMesh(mesh, stairTransform());
+        stair_model_loaded_ = true;
         setStatus("Stair model loaded: " + QFileInfo(path).fileName());
     } catch (const std::exception& ex) {
+        stair_model_loaded_ = false;
         setStatus("Failed to load stair model: " + QString::fromStdString(ex.what()));
     }
 }
@@ -578,7 +581,11 @@ void PreviewPanel::loadSettings() {
     for (const QString& key : obsolete_automatic_keys) {
         settings.remove(key);
     }
-    stair_model_edit_->setText(settings.value("preview/stairModel", defaultStairModelPath()).toString());
+    QString stair_model = settings.value("preview/stairModel", "").toString().trimmed();
+    if (stair_model.isEmpty() || !QFileInfo::exists(stair_model)) {
+        stair_model = defaultStairModelPath();
+    }
+    stair_model_edit_->setText(stair_model);
 }
 
 void PreviewPanel::saveSettings() const {

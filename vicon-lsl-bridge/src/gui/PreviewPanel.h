@@ -26,6 +26,8 @@ public:
     explicit PreviewPanel(QWidget* parent = nullptr);
     ~PreviewPanel() override;
 
+    bool stairModelLoaded() const { return stair_model_loaded_; }
+
 private slots:
     void startPreview();
     void stopPreview();
@@ -95,6 +97,7 @@ private:
     WorkerState worker_state_ = WorkerState::Idle;
     PendingRecordingOpen pending_recording_open_ = PendingRecordingOpen::None;
     QString pending_recording_path_;
+    bool stair_model_loaded_ = false;
     CalibrationState calibration_state_ = CalibrationState::Manual;
     PreviewRigidTransform automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;

@@ -97,7 +97,7 @@ jobs:
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DBUILD_TESTING=ON
+        run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy -DBUILD_TESTING=ON
         working-directory: vicon-lsl-bridge
         shell: cmd
 
@@ -115,6 +115,29 @@ jobs:
 
       - name: Build LabRecorder
         run: cmake --build build-labrecorder --config Release --parallel
+
+      - name: Install and deploy LabRecorder (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake --install build-labrecorder --config Release --prefix "$env:GITHUB_WORKSPACE\recorder-install"
+          $deploy = "$env:GITHUB_WORKSPACE\recorder-deploy"
+          New-Item -ItemType Directory -Force $deploy | Out-Null
+          foreach ($name in @('LabRecorder.exe', 'LabRecorderCLI.exe')) {
+            $source = Get-ChildItem "$env:GITHUB_WORKSPACE\recorder-install" -Recurse -File -Filter $name | Select-Object -First 1
+            if (-not $source) { throw "LabRecorder install missing $name" }
+            Copy-Item $source.FullName $deploy -Force
+          }
+          foreach ($name in @('LabRecorder.cfg', 'LICENSE')) {
+            $source = Get-ChildItem "$env:GITHUB_WORKSPACE\recorder-install" -Recurse -File -Filter $name | Select-Object -First 1
+            if (-not $source) { throw "LabRecorder install missing $name" }
+            Copy-Item $source.FullName $deploy -Force
+          }
+          $lsl = Get-ChildItem -Path build-labrecorder -Recurse -File -Filter 'lsl*.dll' | Select-Object -First 1
+          if (-not $lsl) { throw 'LabRecorder liblsl runtime was not built' }
+          Copy-Item $lsl.FullName (Join-Path $deploy 'lsl.dll') -Force
+          & windeployqt --no-translations (Join-Path $deploy 'LabRecorder.exe')
+          if (-not (Test-Path (Join-Path $deploy 'platforms\qwindows.dll'))) { throw 'LabRecorder Qt deployment is missing platforms/qwindows.dll' }
 
       # Package everything together
       - name: Package (Linux)
@@ -141,32 +164,31 @@ jobs:
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: |
-          mkdir package
-          $required = @(
-            "vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe",
-            "vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe",
-            "build-labrecorder\Release\LabRecorder.exe",
-            "build-labrecorder\Release\LabRecorderCLI.exe"
-          )
-          foreach ($path in $required) {
-            if (-not (Test-Path $path)) { throw "Expected package input was not built: $path" }
+          $ErrorActionPreference = 'Stop'
+          Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory package, package\stair_model, package\labrecorder | Out-Null
+          $bridge = 'vicon-lsl-bridge\build\Release'
+          foreach ($name in @('vicon-lsl-bridge.exe', 'vicon-lsl-bridge-gui.exe')) {
+            if (-not (Test-Path (Join-Path $bridge $name))) { throw "Bridge build missing $name" }
+            Copy-Item (Join-Path $bridge $name) package -Force
           }
-          $bridgeLsl = @(Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build\Release -File -Filter "lsl*.dll" -ErrorAction Stop)
-          if ($bridgeLsl.Count -eq 0) { throw "Bridge liblsl runtime was not built" }
-          $recorderLsl = @(Get-ChildItem -Path build-labrecorder\_deps\liblsl-build\Release -File -Filter "lsl*.dll" -ErrorAction Stop)
-          if ($recorderLsl.Count -eq 0) { throw "LabRecorder liblsl runtime was not built" }
-          copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe package\
-          # Copy lsl.dll from bridge build
-          $bridgeLsl | Copy-Item -Destination package\
-          copy vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe package\
-          & windeployqt package\vicon-lsl-bridge-gui.exe
-          copy build-labrecorder\Release\LabRecorder.exe package\
-          copy build-labrecorder\Release\LabRecorderCLI.exe package\
-          $recorderLsl | Copy-Item -Destination package\
-          & windeployqt package\LabRecorder.exe
-          $packagedLsl = @(Get-ChildItem -Path package -File -Filter "lsl*.dll")
-          if ($packagedLsl.Count -eq 0) { throw "Package does not contain a liblsl runtime" }
-          Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip
+          $bridgeLsl = Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build -Recurse -File -Filter 'lsl*.dll' | Select-Object -First 1
+          if (-not $bridgeLsl) { throw 'Bridge liblsl runtime was not built' }
+          Copy-Item $bridgeLsl.FullName package\lsl.dll -Force
+          & windeployqt --no-translations package\vicon-lsl-bridge-gui.exe
+          Copy-Item vicon-lsl-bridge\assets\stair_model\* package\stair_model -Force
+          Copy-Item recorder-deploy\* package\labrecorder -Recurse -Force
+          $required = @(
+            'package\vicon-lsl-bridge.exe', 'package\vicon-lsl-bridge-gui.exe', 'package\platforms\qwindows.dll',
+            'package\stair_model\stair_model1.obj', 'package\stair_model\stair_model1.mtl',
+            'package\labrecorder\LabRecorder.exe', 'package\labrecorder\LabRecorderCLI.exe',
+            'package\labrecorder\LabRecorder.cfg', 'package\labrecorder\LICENSE',
+            'package\labrecorder\platforms\qwindows.dll')
+          foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Package inventory missing $path" } }
+          $packageLsl = Get-ChildItem package -File -Filter 'lsl*.dll'
+          $recorderLsl = Get-ChildItem package\labrecorder -File -Filter 'lsl*.dll'
+          if (-not $packageLsl -or -not $recorderLsl) { throw 'Package inventory is missing bridge or recorder lsl.dll' }
+          Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip -Force
         shell: pwsh
 
       - name: Package portable GUI single exe (Windows)

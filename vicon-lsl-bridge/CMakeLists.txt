@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.8.0 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,8 @@ set(VICON_LSL_ENIGMA_PROJECT "" CACHE FILEPATH
     "Optional Enigma Virtual Box .evb project used by the portable GUI target")
 set(VICON_LSL_ENIGMA_CONSOLE "" CACHE FILEPATH
     "Optional path to enigmavbconsole.exe used by the portable GUI target")
+set(VICON_LSL_LABRECORDER_DEPLOY_DIR "" CACHE PATH
+    "Windows LabRecorder deployment directory to include under portable package/labrecorder")
 
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
@@ -129,6 +131,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/main_gui.cpp
                 src/gui/BridgeWindow.cpp
                 src/gui/LabRecorderClient.cpp
+                src/gui/LabRecorderRuntimePolicy.cpp
                 src/gui/PreviewPanel.cpp
                 src/gui/PreviewStreamWorker.cpp
                 src/gui/PreviewWidget.cpp
@@ -172,7 +175,12 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                         -DeployDir "${VICON_LSL_PORTABLE_STAGE}"
                         -OutputExe "${CMAKE_CURRENT_BINARY_DIR}/vicon-lsl-bridge-gui-portable.exe"
                         -LauncherExe "$<TARGET_FILE:vicon-lsl-bridge-portable-launcher>"
+                        -StairModelDir "${CMAKE_CURRENT_LIST_DIR}/assets/stair_model"
                     )
+                    if(VICON_LSL_LABRECORDER_DEPLOY_DIR)
+                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
+                            -LabRecorderDeployDir "${VICON_LSL_LABRECORDER_DEPLOY_DIR}")
+                    endif()
                     if(VICON_LSL_ENIGMA_PROJECT)
                         list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
                             -Mode Enigma
@@ -190,6 +198,9 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                             "$<TARGET_FILE:vicon-lsl-bridge-gui>"
                             "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge-gui.exe"
                         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                            "$<TARGET_FILE:vicon-lsl-bridge>"
+                            "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge.exe"
+                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                             "$<TARGET_FILE:${VICON_LSL_LIB_TARGET}>"
                             "${VICON_LSL_PORTABLE_STAGE}/$<TARGET_FILE_NAME:${VICON_LSL_LIB_TARGET}>"
                         COMMAND "${VICON_LSL_WINDEPLOYQT}"
@@ -199,7 +210,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                             -ExecutionPolicy Bypass
                             -File "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/package_gui_single_exe.ps1"
                             ${VICON_LSL_PORTABLE_PACKAGE_ARGS}
-                        DEPENDS vicon-lsl-bridge-gui vicon-lsl-bridge-portable-launcher
+                        DEPENDS vicon-lsl-bridge vicon-lsl-bridge-gui vicon-lsl-bridge-portable-launcher
                         COMMENT "Package vicon-lsl-bridge-gui as a single portable Windows executable"
                         VERBATIM
                     )
@@ -272,6 +283,7 @@ if(BUILD_TESTING)
         add_executable(vicon-lsl-labrecorder-tests
             tests/test_labrecorder_client.cpp
             src/gui/LabRecorderClient.cpp
+            src/gui/LabRecorderRuntimePolicy.cpp
         )
         target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
         target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE Qt6::Core Qt6::Network)

@@ -1,7 +1,12 @@
 #include "gui/LabRecorderClient.h"
+#include "gui/LabRecorderRuntimePolicy.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
 #include <QThread>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -123,6 +128,61 @@ void testStartRecordingCommands() {
     expect(with_select.value(1) == without_select.value(0),
            "start command sequence reuses filename command after select-all");
     expect(with_select.value(2) == "start", "start command sequence with select-all starts recording last");
+}
+
+void testRuntimePolicy() {
+    QTemporaryDir app_dir;
+    expect(app_dir.isValid(), "creates temporary application directory");
+    if (!app_dir.isValid()) return;
+
+    const QString recorder_dir = QDir(app_dir.path()).filePath("labrecorder");
+    expect(QDir().mkpath(recorder_dir), "creates bundled recorder directory");
+    const QString bundled = QDir(recorder_dir).filePath("LabRecorder.exe");
+    QFile bundled_file(bundled);
+    expect(bundled_file.open(QIODevice::WriteOnly), "creates bundled recorder fixture");
+    bundled_file.close();
+
+    const QString custom = QDir(app_dir.path()).filePath("CustomRecorder.exe");
+    QFile custom_file(custom);
+    expect(custom_file.open(QIODevice::WriteOnly), "creates custom recorder fixture");
+    custom_file.close();
+
+    expect(LabRecorderRuntimePolicy::resolveExecutable(custom, app_dir.path()) ==
+               QDir::toNativeSeparators(QFileInfo(custom).absoluteFilePath()),
+           "valid saved recorder path takes precedence");
+    expect(QFile::remove(custom), "removes custom recorder fixture");
+    expect(LabRecorderRuntimePolicy::resolveExecutable(custom, app_dir.path()) ==
+               QDir::toNativeSeparators(QFileInfo(bundled).absoluteFilePath()),
+           "missing saved recorder path falls back to bundled recorder");
+    expect(QFile::remove(bundled), "removes bundled recorder fixture");
+    expect(LabRecorderRuntimePolicy::resolveExecutable(custom, app_dir.path()).isEmpty(),
+           "missing saved and bundled recorder paths resolve empty");
+
+    expect(LabRecorderRuntimePolicy::shouldAttemptConnection(
+               RecorderConnectionState::Disconnected, 0),
+           "disconnected recorder retries immediately");
+    expect(!LabRecorderRuntimePolicy::shouldAttemptConnection(
+               RecorderConnectionState::Connecting, 250),
+           "connection in progress suppresses duplicate retry");
+    expect(!LabRecorderRuntimePolicy::shouldAttemptConnection(
+               RecorderConnectionState::Connected, 250),
+           "connected recorder suppresses retry");
+    expect(LabRecorderRuntimePolicy::retryExpired(15000),
+           "retry window expires at fifteen seconds");
+    expect(!LabRecorderRuntimePolicy::shouldAttemptConnection(
+               RecorderConnectionState::Disconnected, 15000),
+           "expired retry window suppresses connection attempts");
+
+    expect(LabRecorderRuntimePolicy::canLaunch(false),
+           "stopped process can be launched");
+    expect(!LabRecorderRuntimePolicy::canLaunch(true),
+           "running process prevents duplicate launch");
+    expect(LabRecorderRuntimePolicy::shouldStopOwnedProcess(true, true),
+           "running owned recorder is stopped on shutdown");
+    expect(!LabRecorderRuntimePolicy::shouldStopOwnedProcess(false, true),
+           "running external recorder is preserved on shutdown");
+    expect(!LabRecorderRuntimePolicy::shouldStopOwnedProcess(true, false),
+           "already stopped owned recorder needs no shutdown action");
 }
 
 void testTcpCommandSequence() {
@@ -357,6 +417,7 @@ int main(int argc, char** argv) {
     testRenderedFilenameUsesSharedSanitization();
     testUnresolvedFilenamePlaceholders();
     testStartRecordingCommands();
+    testRuntimePolicy();
     testTcpCommandSequence();
     testTcpStartRecordingSequenceWithSelectAll();
     testFragmentedReplyControlsCommandProgress();

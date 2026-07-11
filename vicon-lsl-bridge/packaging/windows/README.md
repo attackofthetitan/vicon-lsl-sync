@@ -1,53 +1,42 @@
-# Windows GUI Single-Exe Packaging
+# Windows GUI packaging
 
-The normal Windows release remains the deployed `package/` directory and zip produced with `windeployqt`.
+Every Windows artifact uses one directory layout:
 
-For an unattended single portable GUI executable, package that deployed directory:
+```text
+vicon-lsl-bridge-gui.exe
+vicon-lsl-bridge.exe
+lsl*.dll
+platforms/qwindows.dll
+stair_model/stair_model1.obj
+stair_model/stair_model1.mtl
+labrecorder/LabRecorder.exe
+labrecorder/LabRecorderCLI.exe
+labrecorder/LabRecorder.cfg
+labrecorder/LICENSE
+labrecorder/lsl*.dll
+labrecorder/platforms/qwindows.dll
+```
+
+The regular zip is assembled from this directory. The native single-file
+launcher embeds the same directory as its payload; Enigma Virtual Box remains
+available when an `.evb` project and console are supplied.
+
+To package a deployed GUI manually:
 
 ```powershell
 .\packaging\windows\package_gui_single_exe.ps1 `
   -DeployDir .\package `
   -OutputExe .\vicon-lsl-bridge-gui-portable.exe `
-  -LauncherExe .\build\Release\vicon-lsl-bridge-portable-launcher.exe
+  -LauncherExe .\build\Release\vicon-lsl-bridge-portable-launcher.exe `
+  -LabRecorderDeployDir C:\path\recorder-deploy `
+  -StairModelDir .\assets\stair_model
 ```
 
-`Auto` mode uses Enigma Virtual Box when both its console executable and an `.evb` project are supplied. Otherwise it uses the project’s native portable launcher:
+The script validates the bridge executable, Qt platform plugin, LSL runtime,
+stair model, and the complete isolated LabRecorder deployment.
+The CMake portable target accepts the same inputs through
+`VICON_LSL_LABRECORDER_DEPLOY_DIR`; the tracked stair model is included
+automatically.
 
-```powershell
-.\packaging\windows\package_gui_single_exe.ps1 `
-  -DeployDir .\package `
-  -OutputExe .\vicon-lsl-bridge-gui-portable.exe `
-  -LauncherExe .\build\Release\vicon-lsl-bridge-portable-launcher.exe
-```
-
-The native launcher embeds the deployed directory as a zip payload, extracts it to a unique temporary directory, waits for the GUI to exit, and then removes the extracted files.
-Passing `--test` through the portable executable starts the real Qt GUI, performs a
-local LSL outlet/resolver check, and exits with a status code for clean-machine CI validation.
-
-To force Enigma:
-
-```powershell
-.\packaging\windows\package_gui_single_exe.ps1 `
-  -DeployDir .\package `
-  -OutputExe .\vicon-lsl-bridge-gui-portable.exe `
-  -Mode Enigma `
-  -ProjectFile .\package\vicon-lsl-bridge-gui.evb
-```
-
-The CMake target accepts the same Enigma route:
-
-```powershell
-cmake -S . -B build `
-  -DVICON_LSL_ENIGMA_PROJECT=C:\path\vicon-lsl-bridge-gui.evb `
-  -DVICON_LSL_ENIGMA_CONSOLE="C:\Program Files\Enigma Virtual Box\enigmavbconsole.exe"
-cmake --build build --config Release --target vicon-lsl-bridge-gui-portable
-```
-
-The deployment directory must already contain `windeployqt` output, `liblsl.dll`, and any redistributable runtime DLLs.
-The packaging script validates `platforms/qwindows.dll` and a matching `lsl*.dll`/`liblsl*.dll`
-before creating the executable. The vendored Vicon SDK currently links statically; do not add
-Vicon runtime DLLs to release artifacts unless their redistribution terms permit it.
-
-The Windows CI test runs the packaged GUI on a clean runner, verifies Qt startup, checks
-that a failed Vicon connection returns cleanly, and resolves a temporary local LSL stream. A
-release candidate still needs one manual connection test on the target Vicon network.
+For Enigma packaging, add `-Mode Enigma -ProjectFile path\bridge.evb` (and
+optionally `-EnigmaConsole path\enigmavbconsole.exe`).

@@ -56,4 +56,9 @@ venv/
 /aqtinstall.log
 /outputs/
 /vicon-lsl-bridge-windows-x64/
+
+# Tracked preview geometry used by the Windows bridge package
+!vicon-lsl-bridge/assets/
+!vicon-lsl-bridge/assets/stair_model/
+!vicon-lsl-bridge/assets/stair_model/*.obj
 ~$*

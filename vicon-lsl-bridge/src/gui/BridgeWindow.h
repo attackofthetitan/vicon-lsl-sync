@@ -47,6 +47,14 @@ public:
     explicit BridgeWindow(QWidget* parent = nullptr);
     ~BridgeWindow() override;
 
+    // These accessors intentionally expose the small amount of state that an
+    // automated GUI check needs without coupling it to widget text.
+    bool labRecorderConnected() const;
+    bool labRecorderOwnedProcessRunning() const;
+    QString labRecorderExecutablePath() const;
+    bool recorderReady() const;
+    bool stairModelLoaded() const;
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 
@@ -65,6 +73,8 @@ private slots:
     void onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
                         unsigned int frames, const QString& message);
     void onWorkerFinished();
+    void onLabRecorderRetry();
+    void onClosePoll();
 
 private:
     void loadSettings();
@@ -77,6 +87,10 @@ private:
     bool isFilenameValid() const;
     void updateReadiness();
     void updateRecordingButtons();
+    QString resolveLabRecorderExecutable() const;
+    void beginLabRecorderStartup();
+    void stopOwnedLabRecorder();
+    void finishCloseIfReady();
 
     QLineEdit* server_edit_;
     QLineEdit* marker_stream_edit_;
@@ -114,6 +128,12 @@ private:
 
     LabRecorderClient labrecorder_client_;
     std::unique_ptr<QProcess> labrecorder_process_;
+    bool labrecorder_process_owned_ = false;
+    QTimer* labrecorder_retry_timer_ = nullptr;
+    QElapsedTimer labrecorder_retry_elapsed_;
+    QTimer* close_poll_timer_ = nullptr;
+    QElapsedTimer close_elapsed_;
+    bool close_stop_requested_ = false;
     QElapsedTimer status_timer_;
     QTimer* status_stale_timer_;
     bool have_previous_status_ = false;
@@ -123,6 +143,7 @@ private:
     bool bridge_status_stale_ = false;
     BridgeWorker* worker_ = nullptr;
     bool close_pending_ = false;
+    bool close_finalizing_ = false;
 };
 
 Q_DECLARE_METATYPE(BridgeExitResult)

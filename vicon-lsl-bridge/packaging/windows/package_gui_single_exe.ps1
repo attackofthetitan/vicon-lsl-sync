@@ -10,7 +10,9 @@ param(
 
     [string]$LauncherExe = "",
     [string]$EnigmaConsole = $env:ENIGMA_VB_CONSOLE,
-    [string]$ProjectFile = ""
+    [string]$ProjectFile = "",
+    [string]$LabRecorderDeployDir = "",
+    [string]$StairModelDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,10 +123,46 @@ function Invoke-NativePackage {
     }
 }
 
-$deployPath = (Resolve-Path -LiteralPath $DeployDir).Path
+function Copy-DeploymentTree {
+    param([string]$SourceDirectory, [string]$DestinationDirectory)
+
+    if (-not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
+        throw "Deployment directory was not found: $SourceDirectory"
+    }
+    New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
+    Get-ChildItem -LiteralPath $SourceDirectory -Force | Copy-Item -Destination $DestinationDirectory -Recurse -Force
+}
+
+function Find-DeploymentFile {
+    param([string]$Root, [string]$Name)
+    return Get-ChildItem -LiteralPath $Root -Recurse -File -Filter $Name -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+}
+
+$deployPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DeployDir)
+New-Item -ItemType Directory -Path $deployPath -Force | Out-Null
+
+# Keep deployment inputs in the same directory layout used by both the
+# regular zip and the single-file payload.  The recorder is deliberately
+# isolated so its Qt/LSL runtime cannot collide with the bridge runtime.
+if ($LabRecorderDeployDir) {
+    $labRecorderPath = Join-Path $deployPath "labrecorder"
+    Remove-Item -LiteralPath $labRecorderPath -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-DeploymentTree $LabRecorderDeployDir $labRecorderPath
+}
+if ($StairModelDir) {
+    $stairPath = Join-Path $deployPath "stair_model"
+    Remove-Item -LiteralPath $stairPath -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-DeploymentTree $StairModelDir $stairPath
+}
+
 $guiExe = Join-Path $deployPath "vicon-lsl-bridge-gui.exe"
 if (-not (Test-Path -LiteralPath $guiExe)) {
     throw "Expected GUI executable was not found: $guiExe"
+}
+$cliExe = Join-Path $deployPath "vicon-lsl-bridge.exe"
+if (-not (Test-Path -LiteralPath $cliExe)) {
+    throw "Expected bridge CLI executable was not found: $cliExe"
 }
 
 $qtPlatformPlugin = Join-Path $deployPath "platforms\qwindows.dll"
@@ -137,6 +175,39 @@ $lslRuntime = Get-ChildItem -LiteralPath $deployPath -File |
     Select-Object -First 1
 if (-not $lslRuntime) {
     throw "liblsl runtime DLL was not found in the deployment directory: $deployPath"
+}
+
+$stairModel = Join-Path $deployPath "stair_model\stair_model1.obj"
+$stairMaterial = Join-Path $deployPath "stair_model\stair_model1.mtl"
+if (-not (Test-Path -LiteralPath $stairModel) -or -not (Test-Path -LiteralPath $stairMaterial)) {
+    throw "The deployment must contain stair_model/stair_model1.obj and stair_model1.mtl."
+}
+
+$labRecorderPath = Join-Path $deployPath "labrecorder"
+if (-not (Test-Path -LiteralPath $labRecorderPath -PathType Container)) {
+    throw "The deployment must contain an isolated labrecorder directory."
+}
+if (Test-Path -LiteralPath $labRecorderPath -PathType Container) {
+    foreach ($required in @("LabRecorder.exe", "LabRecorderCLI.exe", "LabRecorder.cfg", "LICENSE")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $labRecorderPath $required))) {
+            $located = Find-DeploymentFile $labRecorderPath $required
+            if (-not $located) {
+                throw "LabRecorder deployment is missing ${required}: $labRecorderPath"
+            }
+            Copy-Item -LiteralPath $located.FullName -Destination (Join-Path $labRecorderPath $required) -Force
+        }
+    }
+    $recorderLsl = Get-ChildItem -LiteralPath $labRecorderPath -Recurse -File |
+        Where-Object { $_.Name -match '^(lib)?lsl.*\.dll$' } | Select-Object -First 1
+    if (-not $recorderLsl) {
+        throw "LabRecorder deployment does not contain an lsl runtime DLL: $labRecorderPath"
+    }
+    if ($recorderLsl.Name -ne $lslRuntime.Name) {
+        throw "LabRecorder lsl runtime ($($recorderLsl.Name)) does not match bridge runtime ($($lslRuntime.Name))."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $labRecorderPath "platforms\qwindows.dll"))) {
+        throw "LabRecorder deployment is missing Qt platforms/qwindows.dll: $labRecorderPath"
+    }
 }
 
 $outputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputExe)
