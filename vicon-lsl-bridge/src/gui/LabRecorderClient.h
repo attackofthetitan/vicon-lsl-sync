@@ -41,7 +41,6 @@ public:
     bool isConnected() const;
     RecorderConnectionState connectionState() const { return connection_state_; }
     RecorderRecordingState recordingState() const { return recording_state_; }
-    QString lastError() const;
 
     bool sendCommand(const QString& command);
     bool refreshStreams();
@@ -94,7 +93,6 @@ private:
     bool have_active_batch_ = false;
     QByteArray pending_payload_;
     QByteArray response_buffer_;
-    QString last_error_;
     RecorderConnectionState connection_state_ = RecorderConnectionState::Disconnected;
     RecorderRecordingState recording_state_ = RecorderRecordingState::Unknown;
 };

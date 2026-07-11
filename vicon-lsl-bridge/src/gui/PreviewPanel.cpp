@@ -611,8 +611,8 @@ QString PreviewPanel::defaultStairModelPath() const {
     const QStringList candidates = {
         QDir(app_dir).filePath("stair_model/stair_model1.obj"),
         QDir::current().filePath("stair_model/stair_model1.obj"),
-        QDir::current().filePath("vicon-lsl-bridge-windows-x64/stair_model/stair_model1.obj"),
-        QDir(QDir::currentPath()).filePath("../vicon-lsl-bridge-windows-x64/stair_model/stair_model1.obj"),
+        QDir::current().filePath("assets/stair_model/stair_model1.obj"),
+        QDir::current().filePath("vicon-lsl-bridge/assets/stair_model/stair_model1.obj"),
     };
     for (const QString& candidate : candidates) {
         if (QFileInfo::exists(candidate)) {

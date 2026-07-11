@@ -320,14 +320,6 @@ bool BridgeWindow::labRecorderOwnedProcessRunning() const {
            labrecorder_process_->state() != QProcess::NotRunning;
 }
 
-QString BridgeWindow::labRecorderExecutablePath() const {
-    return labrecorder_executable_edit_ ? labrecorder_executable_edit_->text() : QString();
-}
-
-bool BridgeWindow::recorderReady() const {
-    return labRecorderConnected() && isFilenameValid();
-}
-
 bool BridgeWindow::stairModelLoaded() const {
     return preview_panel_ && preview_panel_->stairModelLoaded();
 }
@@ -406,8 +398,7 @@ void BridgeWindow::onLaunchLabRecorder() {
                     updateReadiness();
                 });
     }
-    if (!LabRecorderRuntimePolicy::canLaunch(
-            labrecorder_process_->state() != QProcess::NotRunning)) {
+    if (labrecorder_process_->state() != QProcess::NotRunning) {
         setLabRecorderStatus("LabRecorder process is already running.");
         return;
     }
@@ -586,8 +577,7 @@ void BridgeWindow::stopOwnedLabRecorder() {
         return;
     }
     const bool process_running = labrecorder_process_->state() != QProcess::NotRunning;
-    if (LabRecorderRuntimePolicy::shouldStopOwnedProcess(
-            labrecorder_process_owned_, process_running)) {
+    if (process_running) {
         labrecorder_process_->terminate();
         if (!labrecorder_process_->waitForFinished(1000)) {
             labrecorder_process_->kill();

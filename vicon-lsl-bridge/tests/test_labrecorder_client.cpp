@@ -172,17 +172,6 @@ void testRuntimePolicy() {
     expect(!LabRecorderRuntimePolicy::shouldAttemptConnection(
                RecorderConnectionState::Disconnected, 15000),
            "expired retry window suppresses connection attempts");
-
-    expect(LabRecorderRuntimePolicy::canLaunch(false),
-           "stopped process can be launched");
-    expect(!LabRecorderRuntimePolicy::canLaunch(true),
-           "running process prevents duplicate launch");
-    expect(LabRecorderRuntimePolicy::shouldStopOwnedProcess(true, true),
-           "running owned recorder is stopped on shutdown");
-    expect(!LabRecorderRuntimePolicy::shouldStopOwnedProcess(false, true),
-           "running external recorder is preserved on shutdown");
-    expect(!LabRecorderRuntimePolicy::shouldStopOwnedProcess(true, false),
-           "already stopped owned recorder needs no shutdown action");
 }
 
 void testTcpCommandSequence() {

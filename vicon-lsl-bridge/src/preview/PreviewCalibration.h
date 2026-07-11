@@ -56,8 +56,6 @@ PreviewRigidTransform composeRigidTransforms(const PreviewRigidTransform& left,
 PreviewRigidTransform inverseRigidTransform(const PreviewRigidTransform& transform);
 PreviewVec3 applyRigidTransformPoint(const PreviewRigidTransform& transform,
                                      const PreviewVec3& point);
-PreviewVec3 applyRigidTransformDirection(const PreviewRigidTransform& transform,
-                                         const PreviewVec3& direction);
 
 std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
     const std::vector<std::string>& labels,

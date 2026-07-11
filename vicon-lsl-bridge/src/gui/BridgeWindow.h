@@ -51,8 +51,6 @@ public:
     // automated GUI check needs without coupling it to widget text.
     bool labRecorderConnected() const;
     bool labRecorderOwnedProcessRunning() const;
-    QString labRecorderExecutablePath() const;
-    bool recorderReady() const;
     bool stairModelLoaded() const;
 
 protected:

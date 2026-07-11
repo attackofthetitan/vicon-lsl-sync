@@ -13,7 +13,6 @@ public:
     void pause(double monotonic_seconds);
     void setSpeed(double speed, double monotonic_seconds);
 
-    bool playing() const { return playing_; }
     std::size_t frameIndex(double monotonic_seconds) const;
     double position(double monotonic_seconds) const;
 

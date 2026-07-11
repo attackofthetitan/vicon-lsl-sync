@@ -25,7 +25,6 @@ PreviewQuaternion multiplyQuaternions(const PreviewQuaternion& left,
                                       const PreviewQuaternion& right);
 PreviewQuaternion inverseQuaternion(const PreviewQuaternion& quaternion);
 PreviewVec3 rotateByQuaternion(const PreviewVec3& value, const PreviewQuaternion& quaternion);
-PreviewVec3 eulerDegreesFromQuaternion(const PreviewQuaternion& quaternion);
 PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const PreviewVec3& point);
 PreviewVec3 applyTransformDirection(const PreviewTransformProfile& transform, const PreviewVec3& direction);
 

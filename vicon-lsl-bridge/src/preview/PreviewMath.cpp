@@ -116,17 +116,6 @@ PreviewVec3 rotateByQuaternion(const PreviewVec3& value, const PreviewQuaternion
     return value + uv * (2.0 * q.w) + uuv * 2.0;
 }
 
-PreviewVec3 eulerDegreesFromQuaternion(const PreviewQuaternion& quaternion) {
-    const PreviewQuaternion q = normalizeQuaternion(quaternion);
-    const double roll = std::atan2(2.0 * (q.w * q.x + q.y * q.z),
-                                   1.0 - 2.0 * (q.x * q.x + q.y * q.y));
-    const double sine_pitch = std::clamp(2.0 * (q.w * q.y - q.z * q.x), -1.0, 1.0);
-    const double pitch = std::asin(sine_pitch);
-    const double yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
-                                  1.0 - 2.0 * (q.y * q.y + q.z * q.z));
-    return {roll * 180.0 / kPi, pitch * 180.0 / kPi, yaw * 180.0 / kPi};
-}
-
 PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const PreviewVec3& point) {
     if (!transform.enabled) {
         return point;

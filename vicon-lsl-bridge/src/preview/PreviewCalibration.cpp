@@ -119,11 +119,6 @@ PreviewVec3 applyRigidTransformPoint(const PreviewRigidTransform& transform,
     return rotateByQuaternion(point, transform.rotation) + transform.translation;
 }
 
-PreviewVec3 applyRigidTransformDirection(const PreviewRigidTransform& transform,
-                                         const PreviewVec3& direction) {
-    return normalize(rotateByQuaternion(direction, transform.rotation));
-}
-
 std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
     const std::vector<std::string>& labels,
     const std::vector<double>& sample) {

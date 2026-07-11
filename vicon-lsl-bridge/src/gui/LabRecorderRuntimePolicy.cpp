@@ -30,13 +30,3 @@ bool LabRecorderRuntimePolicy::shouldAttemptConnection(
            state != RecorderConnectionState::Connected &&
            state != RecorderConnectionState::Connecting;
 }
-
-bool LabRecorderRuntimePolicy::canLaunch(bool process_running) {
-    return !process_running;
-}
-
-bool LabRecorderRuntimePolicy::shouldStopOwnedProcess(
-    bool process_owned,
-    bool process_running) {
-    return process_owned && process_running;
-}

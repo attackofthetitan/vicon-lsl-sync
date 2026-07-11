@@ -55,7 +55,6 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int t
     pending_payload_.clear();
     response_buffer_.clear();
     socket_.abort();
-    last_error_.clear();
     const int timeout = (std::max)(1, timeout_ms);
     connection_timeout_.setInterval(timeout);
     command_timeout_.setInterval(timeout);
@@ -70,10 +69,6 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int t
 
 bool LabRecorderClient::isConnected() const {
     return socket_.state() == QAbstractSocket::ConnectedState;
-}
-
-QString LabRecorderClient::lastError() const {
-    return last_error_;
 }
 
 bool LabRecorderClient::sendCommand(const QString& command) {
@@ -98,13 +93,11 @@ bool LabRecorderClient::enqueueCommands(QString operation,
                                         QStringList commands,
                                         RecorderRecordingState success_state) {
     if (!isConnected()) {
-        last_error_ = "LabRecorder RCS is not connected";
-        emit commandFinished(operation, false, last_error_);
+        emit commandFinished(operation, false, "LabRecorder RCS is not connected");
         return false;
     }
     if (commands.isEmpty()) {
-        last_error_ = "LabRecorder command batch is empty";
-        emit commandFinished(operation, false, last_error_);
+        emit commandFinished(operation, false, "LabRecorder command batch is empty");
         return false;
     }
     batches_.enqueue({std::move(operation), std::move(commands), 0, success_state});
@@ -162,12 +155,10 @@ void LabRecorderClient::finishActiveBatch(bool ok,
     const RecorderRecordingState success_state = active_batch_.success_state;
     have_active_batch_ = false;
     if (ok) {
-        last_error_.clear();
         if (success_state != RecorderRecordingState::Unknown) {
             setRecordingState(success_state);
         }
     } else {
-        last_error_ = message;
         setRecordingState(RecorderRecordingState::Unknown);
     }
     emit commandFinished(operation, ok, message);
@@ -177,7 +168,6 @@ void LabRecorderClient::finishActiveBatch(bool ok,
 }
 
 void LabRecorderClient::failActiveConnection(const QString& message) {
-    last_error_ = message;
     connection_timeout_.stop();
     command_timeout_.stop();
     batches_.clear();
