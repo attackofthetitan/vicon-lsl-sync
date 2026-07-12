@@ -82,7 +82,14 @@ namespace GazeLSL
             acquisition.append_child_value("coordinate_units", "meters");
             acquisition.append_child_value("nominal_srate", "0");
             acquisition.append_child_value("acquisition_mode", "unity_rendered_pose");
-            acquisition.append_child_value("timestamp", "lsl_local_clock_at_push");
+            acquisition.append_child_value("timestamp", "lsl_local_clock_at_transform_read");
+            acquisition.append_child_value("clock_domain", "lsl_local_clock");
+
+            XMLElement synchronization = streamInfo.desc().append_child("synchronization");
+            synchronization.append_child_value("clock_domain", "lsl_local_clock");
+            synchronization.append_child_value("timestamp_origin", "local_clock_at_transform_read");
+            synchronization.append_child_value("offset_mean", "0");
+            synchronization.append_child_value("can_drop_samples", "true");
         }
 
         private void LateUpdate()
@@ -96,6 +103,7 @@ namespace GazeLSL
             Transform targetTransform = modelTarget.transform;
             Vector3 position = targetTransform.position;
             Quaternion rotation = targetTransform.rotation;
+            double sampleTimestamp = LSL.LSL.local_clock();
             ModelTargetPoseEncoder.WriteSample(
                 tracked,
                 position.x,
@@ -110,7 +118,7 @@ namespace GazeLSL
 
             try
             {
-                outlet.push_sample(sampleBuffer);
+                outlet.push_sample(sampleBuffer, sampleTimestamp);
             }
             catch (Exception e)
             {

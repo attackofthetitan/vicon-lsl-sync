@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="..\Assets\Scripts\GazePublisherWorker.cs" Link="GazePublisherWorker.cs" />
+    <Compile Include="..\Assets\Scripts\GazeClockMapping.cs" Link="GazeClockMapping.cs" />
     <Compile Include="..\Assets\Scripts\GazeStreamContract.cs" Link="GazeStreamContract.cs" />
     <Compile Include="..\Assets\Scripts\GazeSample.cs" Link="GazeSample.cs" />
     <Compile Include="..\Assets\Scripts\ModelTargetPoseEncoder.cs" Link="ModelTargetPoseEncoder.cs" />

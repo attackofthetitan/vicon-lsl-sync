@@ -16,6 +16,8 @@ public:
     bool isConnected() const;
     bool getFrame();
     unsigned int frameNumber() const;
+    double frameTimestamp() const;
+    double frameRate() const;
 
     vicon_lsl::CountRead readSubjectCount() const;
     vicon_lsl::NameRead readSubjectName(unsigned int index) const;
@@ -37,4 +39,6 @@ private:
     std::string server_address_;
     bool connected_ = false;
     unsigned int frame_number_ = 0;
+    double frame_timestamp_ = 0.0;
+    double frame_rate_ = 0.0;
 };

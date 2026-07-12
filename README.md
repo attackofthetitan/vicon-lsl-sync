@@ -35,6 +35,8 @@ The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure an
 
 The GUI also includes an embedded native OpenGL preview. The preview subscribes to the same LSL streams that LabRecorder records (`ViconMarkers`, `ViconSegments`, and `HoloLensGaze` by default), combines them into one 3D scene, and applies saved per-stream transforms so Vicon, HoloLens gaze, and the stair model can share one coordinate frame.
 
+The built-in XDF loader is intended for visual preview. It preserves absolute stream time and applies the recorded clock-offset history once; use the official [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) importer for scientific offline analysis.
+
 ### Automatic stair-target alignment
 
 Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` without modifying the raw gaze stream.
@@ -86,7 +88,7 @@ Options:
 
 ## Recording
 
-Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file with synchronized timestamps. The bridge records Vicon streams; the HoloLens Unity app publishes gaze directly as native LSL.
+Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file. LabRecorder stores the producers' timestamps together with clock-offset chunks for offline synchronization; it does not apply the live preview's inlet post-processing. The bridge records Vicon streams; the HoloLens Unity app publishes gaze directly as native LSL.
 
 ## Building from source
 

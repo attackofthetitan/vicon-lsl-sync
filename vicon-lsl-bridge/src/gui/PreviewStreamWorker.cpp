@@ -152,6 +152,10 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         state.labels = channelLabels(streams.front());
         state.latest_sample.assign(static_cast<std::size_t>(streams.front().channel_count()), 0.0);
         state.inlet = std::make_unique<lsl::stream_inlet>(streams.front(), 360, 0, true);
+        // Live preview consumes timestamps in the local recorder clock. Keep
+        // clock synchronization scoped to these inlets; XDF playback applies
+        // its recorded offsets independently when loading the file.
+        state.inlet->set_postprocessing(lsl::post_clocksync);
         state.have_sample = false;
         state.last_sample_ms = -1;
         state.last_error.clear();

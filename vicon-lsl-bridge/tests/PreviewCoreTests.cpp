@@ -392,7 +392,7 @@ TEST_CASE("Preview merged CSV loader builds preview frames") {
     REQUIRE(near(recording.frames.front().markers.front().position.x, 1.0));
 }
 
-TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated clock offsets") {
+TEST_CASE("Preview XDF loader reconstructs timestamps and applies fitted clock offsets") {
     const TemporaryFilePath temporary_path(".xdf");
     const std::string path = temporary_path.string();
     const std::uint32_t marker_stream_id = 1;
@@ -452,7 +452,7 @@ TEST_CASE("Preview XDF loader reconstructs timestamps and applies interpolated c
     REQUIRE(near(recording.frames[2].markers.front().position.x, 3.0));
 }
 
-TEST_CASE("Preview XDF loader interpolates changing clock offsets in stream time") {
+TEST_CASE("Preview XDF loader fits changing clock offsets in source stream time") {
     const TemporaryFilePath temporary_path(".xdf");
     const std::string path = temporary_path.string();
     const std::uint32_t stream_id = 1;
@@ -467,10 +467,10 @@ TEST_CASE("Preview XDF loader interpolates changing clock offsets in stream time
                          {{1.0, 0.0, 0.0, 1.0},
                           {2.0, 0.0, 0.0, 1.0},
                           {3.0, 0.0, 0.0, 1.0}});
-        // Clock-offset collection times use the recorder clock. Convert them to
-        // source-stream time before interpolating against the raw sample timestamps.
-        writeClockOffsetChunk(output, stream_id, 10.0, -10.0);
-        writeClockOffsetChunk(output, stream_id, 10.1, -10.1);
+        // XDF ClockOffset CollectionTime is already in the source stream's
+        // clock domain, matching the raw sample timestamps.
+        writeClockOffsetChunk(output, stream_id, 20.0, -10.0);
+        writeClockOffsetChunk(output, stream_id, 20.2, -10.1);
     }
 
     const auto xdf = vicon_lsl::loadXdfNumericStreams(path);
@@ -478,6 +478,53 @@ TEST_CASE("Preview XDF loader interpolates changing clock offsets in stream time
     REQUIRE(near(xdf.streams.front().timestamps[0], 10.0));
     REQUIRE(near(xdf.streams.front().timestamps[1], 10.05));
     REQUIRE(near(xdf.streams.front().timestamps[2], 10.1));
+}
+
+TEST_CASE("Preview XDF loader falls back to one constant clock offset") {
+    const TemporaryFilePath temporary_path(".xdf");
+    const std::string path = temporary_path.string();
+    const std::uint32_t stream_id = 1;
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", {"value"});
+        writeSampleChunk(output, stream_id, {50.0, 51.0}, {{1.0}, {2.0}});
+        writeClockOffsetChunk(output, stream_id, 50.0, -3.0);
+    }
+
+    const auto xdf = vicon_lsl::loadXdfNumericStreams(path);
+    REQUIRE_EQ(xdf.streams.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(xdf.streams.front().timestamps[0], 47.0));
+    REQUIRE(near(xdf.streams.front().timestamps[1], 48.0));
+}
+
+TEST_CASE("Preview XDF loader uses a centered offset fit without zeroing absolute time") {
+    const TemporaryFilePath temporary_path(".xdf");
+    const std::string path = temporary_path.string();
+    const std::uint32_t stream_id = 1;
+    const std::vector<std::string> labels = {"value"};
+    const double source_start = 1000000000.0;
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", labels);
+        writeSampleChunk(output,
+                         stream_id,
+                         {source_start + 5.0, source_start + 15.0},
+                         {{1.0}, {2.0}});
+        // Small measurement noise exercises the full-history least-squares fit.
+        writeClockOffsetChunk(output, stream_id, source_start,
+                              100.2);
+        writeClockOffsetChunk(output, stream_id, source_start + 10.0,
+                              100.8);
+        writeClockOffsetChunk(output, stream_id, source_start + 20.0,
+                              102.1);
+    }
+
+    const auto xdf = vicon_lsl::loadXdfNumericStreams(path);
+    REQUIRE_EQ(xdf.streams.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(xdf.streams.front().timestamps[0], source_start + 105.5583333333));
+    REQUIRE(near(xdf.streams.front().timestamps[1], source_start + 116.5083333333));
 }
 
 TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp") {

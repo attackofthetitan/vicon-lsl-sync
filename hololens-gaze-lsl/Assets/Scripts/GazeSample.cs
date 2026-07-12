@@ -2,6 +2,10 @@ namespace GazeLSL
 {
     public struct GazeSample
     {
+        // Capture timestamp in the LSL local_clock domain. This is metadata
+        // carried alongside the fixed channel payload and is not an LSL channel.
+        public double Timestamp;
+
         public double CombinedOriginX;
         public double CombinedOriginY;
         public double CombinedOriginZ;

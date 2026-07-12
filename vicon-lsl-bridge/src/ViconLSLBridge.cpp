@@ -3,6 +3,7 @@
 #include <lsl_cpp.h>
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <exception>
 #include <iostream>
@@ -69,6 +70,7 @@ void ViconLSLBridge::run() {
 
         std::cout << "Streaming started" << std::endl;
         reportStatus(BridgeState::Streaming, "Streaming started");
+        vicon_lsl::ViconTimestampState timestamp_state;
         while (running_ && client_.isConnected()) {
             if (!client_.getFrame()) {
                 std::cerr << "Lost connection, will reconnect" << std::endl;
@@ -77,7 +79,20 @@ void ViconLSLBridge::run() {
             }
             frame_count_ = client_.frameNumber();
 
-            const double timestamp = lsl::local_clock();
+            double timestamp = 0.0;
+            bool timestamp_adjusted = false;
+            if (!vicon_lsl::enforceViconTimestamp(
+                    client_.frameTimestamp(),
+                    lsl::local_clock(),
+                    timestamp_state,
+                    timestamp,
+                    &timestamp_adjusted)) {
+                std::cerr << "Unable to obtain a finite Vicon frame timestamp" << std::endl;
+                continue;
+            }
+            if (timestamp_adjusted) {
+                std::cerr << "Adjusted non-monotonic Vicon frame timestamp" << std::endl;
+            }
             if (!streamFrame(timestamp)) {
                 reportStatus(BridgeState::Connecting,
                              "LSL outlet failed; reconnecting and recreating streams");
@@ -151,6 +166,14 @@ bool ViconLSLBridge::initializeStreams() {
     std::cout << "Discovered " << known_layout_.markers.size() << " markers and "
               << known_layout_.segments.size() << " segments" << std::endl;
 
+    const double nominal_rate = client_.frameRate();
+    if (std::isfinite(nominal_rate) && nominal_rate > 0.0) {
+        std::cout << "Vicon frame rate: " << nominal_rate << " Hz" << std::endl;
+    } else {
+        std::cerr << "Vicon frame rate unavailable; publishing irregular-rate streams"
+                  << std::endl;
+    }
+
     std::string hostname = "default";
     char buffer[256];
     if (gethostname(buffer, sizeof(buffer)) == 0) {
@@ -164,11 +187,13 @@ bool ViconLSLBridge::initializeStreams() {
         marker_stream_.initialize(
             known_layout_.markers,
             config_.marker_stream_name,
-            vicon_lsl::buildStreamSourceId(kSourceIdPrefix, "markers", hostname));
+            vicon_lsl::buildStreamSourceId(kSourceIdPrefix, "markers", hostname),
+            nominal_rate);
         segment_stream_.initialize(
             known_layout_.segments,
             config_.segment_stream_name,
-            vicon_lsl::buildStreamSourceId(kSourceIdPrefix, "segments", hostname));
+            vicon_lsl::buildStreamSourceId(kSourceIdPrefix, "segments", hostname),
+            nominal_rate);
     } catch (const std::exception& ex) {
         marker_stream_.destroy();
         segment_stream_.destroy();

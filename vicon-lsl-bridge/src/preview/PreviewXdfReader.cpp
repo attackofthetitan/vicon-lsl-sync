@@ -315,7 +315,9 @@ void parseClockOffsetChunk(BinaryReader& reader,
     }
     const double collection_time = reader.readDouble();
     const double offset = reader.readDouble();
-    const XdfClockOffset measurement{collection_time - offset, offset};
+    // XDF stores ClockOffset collection times in the source stream's clock
+    // domain. The offset itself maps that clock into recorder time.
+    const XdfClockOffset measurement{collection_time, offset};
     if (!std::isfinite(collection_time) || !std::isfinite(measurement.stream_time) ||
         !std::isfinite(measurement.offset)) {
         throw std::runtime_error("XDF clock-offset measurement is not finite");
@@ -323,21 +325,56 @@ void parseClockOffsetChunk(BinaryReader& reader,
     stream.clock_offsets.push_back(measurement);
 }
 
-double interpolatedClockOffset(const std::vector<XdfClockOffset>& offsets, double timestamp) {
-    if (offsets.empty()) return 0.0;
-    if (timestamp <= offsets.front().stream_time) return offsets.front().offset;
-    if (timestamp >= offsets.back().stream_time) return offsets.back().offset;
+struct ClockOffsetFit {
+    long double stream_center = 0.0L;
+    long double offset_center = 0.0L;
+    long double slope = 0.0L;
+};
 
-    const auto upper = std::upper_bound(
-        offsets.begin(), offsets.end(), timestamp,
-        [](double value, const XdfClockOffset& measurement) {
-            return value < measurement.stream_time;
-        });
-    const XdfClockOffset& right = *upper;
-    const XdfClockOffset& left = *(upper - 1);
-    const double fraction = (timestamp - left.stream_time) /
-                            (right.stream_time - left.stream_time);
-    return left.offset + fraction * (right.offset - left.offset);
+std::optional<ClockOffsetFit> fitClockOffsets(
+    const std::vector<XdfClockOffset>& offsets) {
+    if (offsets.empty()) {
+        return std::nullopt;
+    }
+
+    // Center both coordinates before accumulating covariance/variance. XDF
+    // timestamps are often large absolute values, and an uncentered fit loses
+    // the small drift term to floating-point cancellation.
+    long double stream_center = 0.0L;
+    long double offset_center = 0.0L;
+    for (std::size_t index = 0; index < offsets.size(); ++index) {
+        const long double weight = 1.0L / static_cast<long double>(index + 1);
+        stream_center +=
+            (static_cast<long double>(offsets[index].stream_time) - stream_center) * weight;
+        offset_center +=
+            (static_cast<long double>(offsets[index].offset) - offset_center) * weight;
+    }
+
+    long double covariance = 0.0L;
+    long double variance = 0.0L;
+    for (const auto& measurement : offsets) {
+        const long double stream_delta =
+            static_cast<long double>(measurement.stream_time) - stream_center;
+        const long double offset_delta =
+            static_cast<long double>(measurement.offset) - offset_center;
+        covariance += stream_delta * offset_delta;
+        variance += stream_delta * stream_delta;
+    }
+
+    if (!std::isfinite(covariance) || !std::isfinite(variance) || variance < 0.0L) {
+        throw std::runtime_error("XDF clock-offset fit is not finite");
+    }
+
+    long double slope = 0.0L;
+    if (variance > 0.0L) {
+        slope = covariance / variance;
+    }
+    if (!std::isfinite(stream_center) ||
+        !std::isfinite(offset_center) ||
+        !std::isfinite(slope)) {
+        throw std::runtime_error("XDF clock-offset fit is not finite");
+    }
+    return ClockOffsetFit{stream_center, offset_center, slope};
 }
 
 void correctAndValidateTimestamps(XdfStreamData& stream) {
@@ -353,8 +390,21 @@ void correctAndValidateTimestamps(XdfStreamData& stream) {
         throw std::runtime_error("XDF clock-offset measurement times are not unique");
     }
 
-    for (double& timestamp : stream.timestamps) {
-        timestamp += interpolatedClockOffset(stream.clock_offsets, timestamp);
+    const auto fit = fitClockOffsets(stream.clock_offsets);
+    if (fit) {
+        for (double& timestamp : stream.timestamps) {
+            const long double centered_timestamp =
+                static_cast<long double>(timestamp) - fit->stream_center;
+            const long double correction =
+                fit->offset_center + fit->slope * centered_timestamp;
+            const long double corrected = static_cast<long double>(timestamp) + correction;
+            timestamp = static_cast<double>(corrected);
+            if (!std::isfinite(timestamp)) {
+                throw std::runtime_error("Corrected XDF timestamp is not finite");
+            }
+        }
+    }
+    for (double timestamp : stream.timestamps) {
         if (!std::isfinite(timestamp)) {
             throw std::runtime_error("Corrected XDF timestamp is not finite");
         }
