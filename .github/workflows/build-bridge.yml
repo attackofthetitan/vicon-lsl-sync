@@ -1,5 +1,8 @@
 name: Build Vicon LSL Bridge
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
   push:
@@ -33,7 +36,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - name: Verify generated stream contracts
         run: python tools/generate_stream_contracts.py --check
@@ -60,34 +65,119 @@ jobs:
             triplet: x64-windows-static-md
             artifact: vicon-lsl-bridge-windows-x64
     runs-on: ${{ matrix.os }}
-
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Qt6
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
         with:
-          version: '6.8.*'
+          version: '6.8.3'
           cache: true
+
+      - name: Prepare pinned Qt source licenses (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $licenseRoot = Join-Path $env:GITHUB_WORKSPACE 'qt-license-source\LICENSES'
+          if (Test-Path -LiteralPath (Split-Path -Parent $licenseRoot)) {
+            throw 'Qt license source destination unexpectedly already exists'
+          }
+          New-Item -ItemType Directory -Path $licenseRoot -ErrorAction Stop | Out-Null
+          $archives = @(
+            @{
+              Name = 'qtbase'
+              Url = 'https://download.qt.io/official_releases/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.zip'
+              Sha256 = '992bf7766e214a341ef793eb3665fb784787d2fd666955f5f507f4c6f1f770dd'
+            },
+            @{
+              Name = 'qtsvg'
+              Url = 'https://download.qt.io/official_releases/qt/6.8/6.8.3/submodules/qtsvg-everywhere-src-6.8.3.zip'
+              Sha256 = '90643c1ba05245abedc2bcd9d4f745568dc27a1b37dd3ba861fd19d8ac6a7c46'
+            })
+          foreach ($archive in $archives) {
+            $zip = Join-Path $env:RUNNER_TEMP ("$($archive.Name)-6.8.3.zip")
+            $extract = Join-Path $env:RUNNER_TEMP ("$($archive.Name)-6.8.3-source")
+            if ((Test-Path -LiteralPath $zip) -or (Test-Path -LiteralPath $extract)) {
+              throw "Qt license temporary path unexpectedly already exists for $($archive.Name)"
+            }
+            Invoke-WebRequest -Uri $archive.Url -OutFile $zip
+            $actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $archive.Sha256) {
+              throw "Qt $($archive.Name) source hash mismatch: expected $($archive.Sha256), got $actualHash"
+            }
+            Expand-Archive -LiteralPath $zip -DestinationPath $extract
+            $moduleRoot = @(Get-ChildItem -LiteralPath $extract -Directory -ErrorAction Stop)
+            if ($moduleRoot.Count -ne 1) {
+              throw "Qt $($archive.Name) archive did not contain exactly one source root"
+            }
+            $sourceLicenses = Join-Path $moduleRoot[0].FullName 'LICENSES'
+            if (-not (Test-Path -LiteralPath $sourceLicenses -PathType Container)) {
+              throw "Qt $($archive.Name) archive is missing its LICENSES directory"
+            }
+            $destination = Join-Path $licenseRoot $archive.Name
+            Copy-Item -LiteralPath $sourceLicenses -Destination $destination -Recurse -ErrorAction Stop
+          }
+          if (@(Get-ChildItem -LiteralPath $licenseRoot -Recurse -File).Count -eq 0) {
+            throw 'Pinned Qt source license bundle is empty'
+          }
 
       - name: Install Boost (Ubuntu)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libboost-all-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
 
+      - name: Bootstrap pinned vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vcpkgRoot = Join-Path $env:RUNNER_TEMP 'vcpkg-d87340acc46bdeda386037b38aca30136e667e47'
+          if (Test-Path -LiteralPath $vcpkgRoot) {
+            throw "Pinned vcpkg destination unexpectedly already exists: $vcpkgRoot"
+          }
+          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to clone the pinned vcpkg source' }
+          Push-Location $vcpkgRoot
+          try {
+            git checkout --detach d87340acc46bdeda386037b38aca30136e667e47
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to check out the pinned vcpkg commit' }
+            $head = (git rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $head -ne 'd87340acc46bdeda386037b38aca30136e667e47') {
+              throw "Pinned vcpkg revision mismatch: $head"
+            }
+            $remote = (git remote get-url origin).TrimEnd('/')
+            if ($LASTEXITCODE -ne 0 -or $remote -notin @(
+                'https://github.com/microsoft/vcpkg',
+                'https://github.com/microsoft/vcpkg.git')) {
+              throw "Unexpected vcpkg origin: $remote"
+            }
+            & .\bootstrap-vcpkg.bat -disableMetrics
+            if ($LASTEXITCODE -ne 0) { throw 'Pinned vcpkg bootstrap failed' }
+          } finally {
+            Pop-Location
+          }
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_INSTALLATION_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Cache vcpkg packages (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ matrix.triplet }}-boost-${{ hashFiles('vicon-lsl-bridge/external/vicon-datastream-sdk/CMakeLists.txt') }}
+          key: vcpkg-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-${{ hashFiles('vicon-lsl-bridge/CMakeLists.txt', 'vicon-lsl-bridge/external/vicon-datastream-sdk/CMakeLists.txt', 'labrecorder/CMakeLists.txt', '**/vcpkg.json', '**/vcpkg-configuration.json') }}
           restore-keys: |
-            vcpkg-${{ matrix.triplet }}-boost-
+            vcpkg-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-
 
       - name: Install Boost via vcpkg (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install boost-thread:${{ matrix.triplet }} boost-chrono:${{ matrix.triplet }} boost-asio:${{ matrix.triplet }} boost-filesystem:${{ matrix.triplet }} boost-format:${{ matrix.triplet }} boost-algorithm:${{ matrix.triplet }} boost-date-time:${{ matrix.triplet }} boost-math:${{ matrix.triplet }} boost-range:${{ matrix.triplet }} boost-lexical-cast:${{ matrix.triplet }}
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg.exe" install boost-thread:${{ matrix.triplet }} boost-chrono:${{ matrix.triplet }} boost-asio:${{ matrix.triplet }} boost-filesystem:${{ matrix.triplet }} boost-format:${{ matrix.triplet }} boost-algorithm:${{ matrix.triplet }} boost-date-time:${{ matrix.triplet }} boost-math:${{ matrix.triplet }} boost-range:${{ matrix.triplet }} boost-lexical-cast:${{ matrix.triplet }}
+          if ($LASTEXITCODE -ne 0) { throw "Pinned vcpkg dependency install failed with exit code $LASTEXITCODE" }
 
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
@@ -97,7 +187,7 @@ jobs:
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy -DBUILD_TESTING=ON
+        run: cmake -B build -A ${{ matrix.arch == 'x64' && 'x64' || 'Win32' }} "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON
         working-directory: vicon-lsl-bridge
         shell: cmd
 
@@ -111,7 +201,7 @@ jobs:
 
       # Build LabRecorder (skip x86)
       - name: Configure LabRecorder
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DLSL_FETCH_IF_MISSING=ON -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=6ca188c266c21f7228dc67077303fa6abaf2e8be -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
 
       - name: Build LabRecorder
         run: cmake --build build-labrecorder --config Release --parallel
@@ -122,7 +212,8 @@ jobs:
         run: |
           cmake --install build-labrecorder --config Release --prefix "$env:GITHUB_WORKSPACE\recorder-install"
           $deploy = "$env:GITHUB_WORKSPACE\recorder-deploy"
-          New-Item -ItemType Directory -Force $deploy | Out-Null
+          if (Test-Path -LiteralPath $deploy) { throw "LabRecorder deployment unexpectedly already exists: $deploy" }
+          New-Item -ItemType Directory -Path $deploy -ErrorAction Stop | Out-Null
           foreach ($name in @('LabRecorder.exe', 'LabRecorderCLI.exe')) {
             $source = Get-ChildItem "$env:GITHUB_WORKSPACE\recorder-install" -Recurse -File -Filter $name | Select-Object -First 1
             if (-not $source) { throw "LabRecorder install missing $name" }
@@ -136,8 +227,23 @@ jobs:
           $lsl = Get-ChildItem -Path build-labrecorder -Recurse -File -Filter 'lsl*.dll' | Select-Object -First 1
           if (-not $lsl) { throw 'LabRecorder liblsl runtime was not built' }
           Copy-Item $lsl.FullName (Join-Path $deploy 'lsl.dll') -Force
-          & windeployqt --no-translations (Join-Path $deploy 'LabRecorder.exe')
+          & windeployqt --no-translations --compiler-runtime (Join-Path $deploy 'LabRecorder.exe')
+          if ($LASTEXITCODE -ne 0) { throw "LabRecorder windeployqt failed with exit code $LASTEXITCODE" }
+          & "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\packaging\windows\ensure_msvc_runtime.ps1" -DeployDirectory $deploy
           if (-not (Test-Path (Join-Path $deploy 'platforms\qwindows.dll'))) { throw 'LabRecorder Qt deployment is missing platforms/qwindows.dll' }
+
+      - name: Verify packaged executable inventory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $expected = @(
+            'vicon-lsl-bridge\build\Release\vicon-lsl-bridge.exe',
+            'vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe',
+            'recorder-deploy\LabRecorder.exe',
+            'recorder-deploy\LabRecorderCLI.exe')
+          foreach ($path in $expected) {
+            if (-not (Test-Path $path)) { throw "Expected packaged executable is missing: $path" }
+          }
 
       # Package everything together
       - name: Package (Linux)
@@ -163,48 +269,100 @@ jobs:
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Remove-Item package -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory package, package\stair_model, package\labrecorder | Out-Null
-          $bridge = 'vicon-lsl-bridge\build\Release'
-          foreach ($name in @('vicon-lsl-bridge.exe', 'vicon-lsl-bridge-gui.exe')) {
-            if (-not (Test-Path (Join-Path $bridge $name))) { throw "Bridge build missing $name" }
-            Copy-Item (Join-Path $bridge $name) package -Force
+          cmake --build vicon-lsl-bridge\build --config Release --target vicon-lsl-bridge-gui-portable
+          if ($LASTEXITCODE -ne 0) { throw "Portable package target failed with exit code $LASTEXITCODE" }
+
+          $stage = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable-stage"
+          if (-not (Test-Path -LiteralPath $stage -PathType Container)) {
+            throw "Portable package stage was not created: $stage"
           }
-          $bridgeLsl = Get-ChildItem -Path vicon-lsl-bridge\build\_deps\liblsl-build -Recurse -File -Filter 'lsl*.dll' | Select-Object -First 1
-          if (-not $bridgeLsl) { throw 'Bridge liblsl runtime was not built' }
-          Copy-Item $bridgeLsl.FullName package\lsl.dll -Force
-          & windeployqt --no-translations package\vicon-lsl-bridge-gui.exe
-          Copy-Item vicon-lsl-bridge\assets\stair_model\* package\stair_model -Force
-          Copy-Item recorder-deploy\* package\labrecorder -Recurse -Force
+          $package = "$env:GITHUB_WORKSPACE\package"
+          if (Test-Path -LiteralPath $package) {
+            throw "Windows package destination unexpectedly already exists: $package"
+          }
+          New-Item -ItemType Directory -Path $package -ErrorAction Stop | Out-Null
+          Get-ChildItem -LiteralPath $stage -Force -ErrorAction Stop |
+            Copy-Item -Destination $package -Recurse -Force -ErrorAction Stop
+
+          $packageScript = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1"
+          $windowsZip = "$env:GITHUB_WORKSPACE\${{ matrix.artifact }}.zip"
+          & $packageScript -DeployDir $package -UseExistingLicenseBundle `
+            -AllowSignedExecutables -OutputZip $windowsZip
+
+          $portableSource = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable.exe"
+          $portableOutput = "$env:GITHUB_WORKSPACE\${{ matrix.artifact }}-gui-portable.exe"
+          $launcherSource = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\build\Release\vicon-lsl-bridge-portable-launcher.exe"
+          $launcherOutput = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge-portable-launcher.exe"
+          if (-not (Test-Path -LiteralPath $portableSource -PathType Leaf)) {
+            throw "Portable package target did not create: $portableSource"
+          }
+          if (-not (Test-Path -LiteralPath $launcherSource -PathType Leaf)) {
+            throw "Portable package target did not create: $launcherSource"
+          }
+          Copy-Item -LiteralPath $portableSource -Destination $portableOutput -Force -ErrorAction Stop
+          Copy-Item -LiteralPath $launcherSource -Destination $launcherOutput -Force -ErrorAction Stop
+
           $required = @(
             'package\vicon-lsl-bridge.exe', 'package\vicon-lsl-bridge-gui.exe', 'package\platforms\qwindows.dll',
+            'package\msvcp140.dll', 'package\vcruntime140.dll', 'package\vcruntime140_1.dll',
             'package\stair_model\stair_model1.obj', 'package\stair_model\stair_model1.mtl',
             'package\labrecorder\LabRecorder.exe', 'package\labrecorder\LabRecorderCLI.exe',
             'package\labrecorder\LabRecorder.cfg', 'package\labrecorder\LICENSE',
-            'package\labrecorder\platforms\qwindows.dll')
+            'package\labrecorder\platforms\qwindows.dll',
+            'package\labrecorder\msvcp140.dll', 'package\labrecorder\vcruntime140.dll', 'package\labrecorder\vcruntime140_1.dll',
+            'package\THIRD_PARTY_NOTICES.txt',
+            'package\VICON-DATASTREAM-SDK-LICENSE.txt', 'package\LICENSE-INVENTORY.txt',
+            'package\licenses\Vicon-DataStream-SDK\LICENSE', 'package\licenses\LabRecorder\LICENSE',
+            'package\licenses\liblsl\LICENSE', 'package\licenses\liblsl\pugixml\readme.txt',
+            'package\licenses\liblsl\loguru\LICENSE', 'package\licenses\liblsl\portable-archive\license.txt',
+            'package\licenses\Boost\LICENSE_1_0.txt',
+            'package\.vicon-lsl-bridge-package-stage', 'package\.vicon-lsl-bridge-package-manifest')
           foreach ($path in $required) { if (-not (Test-Path $path)) { throw "Package inventory missing $path" } }
           $packageLsl = Get-ChildItem package -File -Filter 'lsl*.dll'
           $recorderLsl = Get-ChildItem package\labrecorder -File -Filter 'lsl*.dll'
           if (-not $packageLsl -or -not $recorderLsl) { throw 'Package inventory is missing bridge or recorder lsl.dll' }
-          Compress-Archive -Path package\* -DestinationPath ${{ matrix.artifact }}.zip -Force
-        shell: pwsh
+          $qtLicenseCount = @(Get-ChildItem package\licenses\Qt -Recurse -File).Count
+          if ($qtLicenseCount -eq 0) { throw 'Package inventory is missing Qt LICENSES texts' }
+          foreach ($output in @($windowsZip, $portableOutput)) {
+            if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw "Windows package output is missing: $output" }
+          }
 
-      - name: Package portable GUI single exe (Windows)
+      - name: Test missing-license failure (Windows)
         if: runner.os == 'Windows'
-        run: |
-          $gui = "vicon-lsl-bridge\build\Release\vicon-lsl-bridge-gui.exe"
-          if (-not (Test-Path $gui)) {
-            throw "GUI executable was not built: $gui"
-          }
-          cmake --build vicon-lsl-bridge\build --config Release --target vicon-lsl-bridge-gui-portable
-          $portable = "vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable.exe"
-          if (-not (Test-Path $portable)) {
-            throw "Portable GUI target completed without producing: $portable"
-          }
-          Copy-Item $portable "${{ matrix.artifact }}-gui-portable.exe"
         shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $qtCommand = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+          if (-not $qtCommand) { $qtCommand = Get-Command windeployqt -ErrorAction SilentlyContinue }
+          if (-not $qtCommand) { throw 'windeployqt is unavailable for the license collector test' }
+          $qtCommandPath = if ($qtCommand.Source) { $qtCommand.Source } else { $qtCommand.Path }
+          $qtRoot = Split-Path -Parent (Split-Path -Parent $qtCommandPath)
+          $boostRoot = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed\${{ matrix.triplet }}"
+          $liblslSource = (Resolve-Path "vicon-lsl-bridge\build\_deps\liblsl-src").Path
+          $probe = Join-Path $env:RUNNER_TEMP ("missing-license-bundle-" + [guid]::NewGuid().ToString('N'))
+          $failed = $false
+          try {
+            & "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\packaging\windows\collect_license_bundle.ps1" `
+              -OutputDirectory $probe `
+              -ViconSdkDirectory (Join-Path $env:RUNNER_TEMP 'missing-vicon-sdk') `
+              -LabRecorderSourceDirectory "$env:GITHUB_WORKSPACE\labrecorder" `
+              -LiblslSourceDirectory $liblslSource `
+              -QtRootDirectory $qtRoot `
+              -BoostRootDirectory $boostRoot
+          } catch {
+            $failed = $true
+          }
+          if (-not $failed) { throw 'License collector unexpectedly succeeded with a missing Vicon license source' }
+
+      - name: Verify portable executable inventory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $portable = "${{ matrix.artifact }}-gui-portable.exe"
+          if (-not (Test-Path $portable)) { throw "Portable executable is missing: $portable" }
 
       - name: Test portable GUI (Windows)
         if: runner.os == 'Windows'
@@ -223,19 +381,87 @@ jobs:
           }
         shell: pwsh
 
+      - name: Test verified portable extraction (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $portable = "${{ matrix.artifact }}-gui-portable.exe"
+          $extractDir = Join-Path $env:RUNNER_TEMP ("vicon-lsl-portable-extracted-" + [guid]::NewGuid().ToString('N'))
+          $process = Start-Process -FilePath ".\$portable" `
+            -ArgumentList @('--extract', $extractDir) -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Portable extraction failed with exit code $($process.ExitCode)."
+          }
+          $required = @(
+            'vicon-lsl-bridge-gui.exe', 'vicon-lsl-bridge.exe',
+            'THIRD_PARTY_NOTICES.txt', 'VICON-DATASTREAM-SDK-LICENSE.txt',
+            'LICENSE-INVENTORY.txt', 'licenses\Qt',
+            'licenses\liblsl\pugixml\readme.txt')
+          foreach ($path in $required) {
+            if (-not (Test-Path (Join-Path $extractDir $path))) {
+              throw "Portable extraction inventory missing $path"
+            }
+          }
+
+      - name: Reject tampered portable payload (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $portable = "${{ matrix.artifact }}-gui-portable.exe"
+          $tampered = Join-Path $env:RUNNER_TEMP "tampered-portable.exe"
+          Copy-Item $portable $tampered -Force
+          $bytes = [System.IO.File]::ReadAllBytes($tampered)
+          $peOffset = [BitConverter]::ToUInt32($bytes, 0x3c)
+          $optionalMagic = [BitConverter]::ToUInt16($bytes, $peOffset + 24)
+          $directoryOffset = if ($optionalMagic -eq 0x20b) { $peOffset + 24 + 112 + (4 * 8) } else { $peOffset + 24 + 96 + (4 * 8) }
+          $certificateOffset = [BitConverter]::ToUInt32($bytes, $directoryOffset)
+          $logicalEnd = if ($certificateOffset -gt 0 -and $certificateOffset -lt $bytes.Length) { $certificateOffset } else { $bytes.Length }
+          $footerOffset = -1
+          $payloadSize = 0
+          $firstFooter = [Math]::Max(0, $logicalEnd - 65536)
+          for ($offset = $logicalEnd - 24; $offset -ge $firstFooter; $offset--) {
+            if ([Text.Encoding]::ASCII.GetString($bytes, $offset, 16) -eq 'VICONLSL_PAYLOAD') {
+              $candidateSize = [BitConverter]::ToUInt64($bytes, $offset + 16)
+              if ($candidateSize -gt 0 -and $candidateSize -le $offset) {
+                $footerOffset = $offset
+                $payloadSize = $candidateSize
+                break
+              }
+            }
+          }
+          $payloadStart = $footerOffset - [int64]$payloadSize
+          if ($footerOffset -lt 0 -or $payloadStart -lt 1 -or $payloadStart -ge $logicalEnd) { throw 'Portable payload footer could not be located.' }
+          $bytes[$payloadStart] = $bytes[$payloadStart] -bxor 1
+          [System.IO.File]::WriteAllBytes($tampered, $bytes)
+          $process = Start-Process -FilePath $tampered -ArgumentList '--test' -Wait -PassThru
+          if ($process.ExitCode -eq 0) { throw 'Tampered portable payload unexpectedly launched.' }
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}.*
             ${{ matrix.artifact }}-gui-portable.exe
 
+      - name: Upload Windows signing input (tag)
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-signing-input
+          path: |
+            package/**
+            vicon-lsl-bridge-portable-launcher.exe
+          include-hidden-files: true
+          if-no-files-found: error
+
   hololens-core-tests:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - name: Verify generated stream contracts
         run: python tools/generate_stream_contracts.py --check
@@ -243,21 +469,277 @@ jobs:
       - name: Run platform-neutral HoloLens tests
         run: dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
 
-  release:
+  sign-windows:
     needs: [logic-tests, build, hololens-core-tests]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    environment: windows-signing
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag commit is contained in main
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $header = "AUTHORIZATION: bearer $env:GITHUB_TOKEN"
+          git -c http.extraheader=$header fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to fetch origin/main for tag ancestry verification' }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tag commit $env:GITHUB_SHA is not an ancestor of origin/main"
+          }
+
+      - name: Verify signing tag matches CMake project version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
+            throw "Release tag must use the exact vN.N.N format: $env:GITHUB_REF_NAME"
+          }
+          $cmake = Get-Content -LiteralPath 'vicon-lsl-bridge\CMakeLists.txt' -Raw
+          if ($cmake -notmatch 'project\(vicon-lsl-bridge\s+VERSION\s+(?<version>[0-9]+\.[0-9]+\.[0-9]+)') {
+            throw 'Unable to read the vicon-lsl-bridge CMake project version'
+          }
+          if ($Matches.version -ne $env:GITHUB_REF_NAME.Substring(1)) {
+            throw "Release tag $env:GITHUB_REF_NAME does not match CMake version $($Matches.version)"
+          }
+
+      - name: Download unsigned Windows signing input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-signing-input
+          path: windows-signing-input
+
+      - name: Verify unsigned signing input inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
+          $package = Join-Path $root 'package'
+          $launcher = Join-Path $root 'vicon-lsl-bridge-portable-launcher.exe'
+          foreach ($path in @(
+            (Join-Path $package 'vicon-lsl-bridge.exe'),
+            (Join-Path $package 'vicon-lsl-bridge-gui.exe'),
+            (Join-Path $package 'labrecorder\LabRecorder.exe'),
+            (Join-Path $package 'labrecorder\LabRecorderCLI.exe'),
+            $launcher)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Signing input is missing $path" }
+          }
+          $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
+          & $packageScript -DeployDir $package -UseExistingLicenseBundle -ValidateOnly
+
+      - name: Sign packaged bridge and LabRecorder executables
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_CERTIFICATE_SUBJECT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
+          $package = Join-Path $root 'package'
+          $signScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\sign_windows.ps1'
+          & $signScript -Path @(
+            (Join-Path $package 'vicon-lsl-bridge.exe'),
+            (Join-Path $package 'vicon-lsl-bridge-gui.exe'),
+            (Join-Path $package 'labrecorder\LabRecorder.exe'),
+            (Join-Path $package 'labrecorder\LabRecorderCLI.exe'))
+
+      - name: Create signed Windows ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
+          $package = Join-Path $root 'package'
+          $windowsZip = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64.zip'
+          $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
+          & $packageScript -DeployDir $package -UseExistingLicenseBundle -OutputZip $windowsZip
+          if (-not (Test-Path -LiteralPath $windowsZip -PathType Leaf)) { throw 'Signed Windows ZIP was not created' }
+
+      - name: Rebuild native portable GUI from signed package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
+          $package = Join-Path $root 'package'
+          $launcher = Join-Path $root 'vicon-lsl-bridge-portable-launcher.exe'
+          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
+          $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
+          & $packageScript -DeployDir $package -OutputExe $portable -Mode Native `
+            -LauncherExe $launcher -UseExistingLicenseBundle -AllowSignedExecutables
+          if (-not (Test-Path -LiteralPath $portable -PathType Leaf)) { throw 'Signed portable GUI was not created' }
+
+      - name: Sign final portable GUI
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_CERTIFICATE_SUBJECT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\sign_windows.ps1'
+          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
+          & $signScript -Path $portable
+
+      - name: Test signed portable GUI and embedded executable inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
+          $testProcess = Start-Process -FilePath $portable -ArgumentList '--test' -Wait -PassThru
+          if ($testProcess.ExitCode -ne 0) {
+            throw "Signed portable GUI test failed with exit code $($testProcess.ExitCode)"
+          }
+          $extractDir = Join-Path $env:RUNNER_TEMP ('signed-portable-' + [guid]::NewGuid().ToString('N'))
+          $extractProcess = Start-Process -FilePath $portable `
+            -ArgumentList @('--extract', $extractDir) -Wait -PassThru
+          if ($extractProcess.ExitCode -ne 0) {
+            throw "Signed portable extraction failed with exit code $($extractProcess.ExitCode)"
+          }
+          $package = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input\package'
+          foreach ($relative in @(
+            'vicon-lsl-bridge.exe',
+            'vicon-lsl-bridge-gui.exe',
+            'labrecorder\LabRecorder.exe',
+            'labrecorder\LabRecorderCLI.exe')) {
+            $source = Join-Path $package $relative
+            $embedded = Join-Path $extractDir $relative
+            if (-not (Test-Path -LiteralPath $embedded -PathType Leaf)) {
+              throw "Signed portable payload is missing $relative"
+            }
+            if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
+                (Get-FileHash -LiteralPath $embedded -Algorithm SHA256).Hash) {
+              throw "Signed portable payload does not contain the signed package copy of $relative"
+            }
+          }
+
+      - name: Verify signatures in ZIP and portable GUI
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_SUBJECT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsZip = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64.zip'
+          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
+          $extractDir = Join-Path $env:RUNNER_TEMP ('signed-windows-' + [guid]::NewGuid().ToString('N'))
+          Expand-Archive -LiteralPath $windowsZip -DestinationPath $extractDir -Force
+          $signScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\sign_windows.ps1'
+          & $signScript -VerifyOnly -Path @(
+            (Join-Path $extractDir 'vicon-lsl-bridge.exe'),
+            (Join-Path $extractDir 'vicon-lsl-bridge-gui.exe'),
+            (Join-Path $extractDir 'labrecorder\LabRecorder.exe'),
+            (Join-Path $extractDir 'labrecorder\LabRecorderCLI.exe'),
+            $portable)
+
+      - name: Upload signed Windows artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: vicon-lsl-bridge-windows-x64-signed
+          path: |
+            vicon-lsl-bridge-windows-x64.zip
+            vicon-lsl-bridge-windows-x64-gui-portable.exe
+          if-no-files-found: error
+
+  release:
+    needs: [sign-windows, logic-tests, build, hololens-core-tests]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v8
+      - name: Check out source for release metadata
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          path: artifacts
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release tag provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "Release tag $GITHUB_REF_NAME resolves to $tag_commit, not $GITHUB_SHA" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release commit $GITHUB_SHA is not an ancestor of origin/main" >&2
+            exit 1
+          fi
+
+      - name: Verify tag matches CMake project version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          cmake_version="$(sed -nE 's/^[[:space:]]*project\(vicon-lsl-bridge[[:space:]]+VERSION[[:space:]]+([^[:space:])]+).*/\1/p' vicon-lsl-bridge/CMakeLists.txt | head -n1)"
+          if [ -z "$cmake_version" ]; then
+            echo "Unable to read the vicon-lsl-bridge CMake project version" >&2
+            exit 1
+          fi
+          if [ "$tag_version" != "$cmake_version" ]; then
+            echo "Release tag $GITHUB_REF_NAME does not match CMake version $cmake_version" >&2
+            exit 1
+          fi
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: vicon-lsl-bridge-linux-x64
+          path: artifacts/vicon-lsl-bridge-linux-x64
+
+      - name: Download signed Windows artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: vicon-lsl-bridge-windows-x64-signed
+          path: artifacts/vicon-lsl-bridge-windows-x64-signed
+
+      - name: Assemble versioned release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ -e release-assets ]]; then
+            echo "Release asset staging path unexpectedly already exists" >&2
+            exit 1
+          fi
+          mkdir -p release-assets
+          windows_dir="artifacts/vicon-lsl-bridge-windows-x64-signed"
+          linux_dir="artifacts/vicon-lsl-bridge-linux-x64"
+          portable_src="$windows_dir/vicon-lsl-bridge-windows-x64-gui-portable.exe"
+          windows_zip_src="$windows_dir/vicon-lsl-bridge-windows-x64.zip"
+          linux_tar_src="$linux_dir/vicon-lsl-bridge-linux-x64.tar.gz"
+          for source in "$portable_src" "$windows_zip_src" "$linux_tar_src"; do
+            if [[ ! -f "$source" ]]; then
+              echo "Release artifact is missing: $source" >&2
+              exit 1
+            fi
+          done
+          cp -- "$portable_src" "release-assets/vicon-lsl-bridge-v${version}-windows-x64-gui-portable.exe"
+          cp -- "$windows_zip_src" "release-assets/vicon-lsl-bridge-v${version}-windows-x64.zip"
+          cp -- "$linux_tar_src" "release-assets/vicon-lsl-bridge-v${version}-linux-x64.tar.gz"
+          mapfile -t payloads < <(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [[ "${#payloads[@]}" -ne 3 ]]; then
+            echo "Expected exactly three payload files, found ${#payloads[@]}" >&2
+            exit 1
+          fi
+          (
+            cd release-assets
+            sha256sum "${payloads[@]}" > SHA256SUMS.txt
+          )
 
       - name: Create release
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: artifacts/**/*
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes
