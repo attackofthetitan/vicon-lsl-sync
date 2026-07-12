@@ -298,7 +298,7 @@ if(BUILD_TESTING)
         include(FetchContent)
         FetchContent_Declare(Catch2
             GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG        v3.15.0
+            GIT_TAG        6ee0826dcae55ed1e06b2c5701981221e979e1e6 # v3.15.0
             GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(Catch2)

@@ -201,7 +201,7 @@ jobs:
 
       # Build LabRecorder (skip x86)
       - name: Configure LabRecorder
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=6ca188c266c21f7228dc67077303fa6abaf2e8be -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install
 
       - name: Build LabRecorder
         run: cmake --build build-labrecorder --config Release --parallel
@@ -562,7 +562,8 @@ jobs:
           $package = Join-Path $root 'package'
           $windowsZip = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64.zip'
           $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
-          & $packageScript -DeployDir $package -UseExistingLicenseBundle -OutputZip $windowsZip
+          & $packageScript -DeployDir $package -UseExistingLicenseBundle `
+            -AllowSignedExecutables -OutputZip $windowsZip
           if (-not (Test-Path -LiteralPath $windowsZip -PathType Leaf)) { throw 'Signed Windows ZIP was not created' }
 
       - name: Rebuild native portable GUI from signed package

@@ -7,8 +7,10 @@ copying their license texts.
 
 * LabRecorder source submodule: commit
   6d65fa96b94d049478ef4f7188c39202fe14977d (project version 1.17.0).
-* liblsl: version 1.16.2, source commit
+* liblsl bridge runtime: version 1.16.2, source commit
   6ca188c266c21f7228dc67077303fa6abaf2e8be.
+* liblsl LabRecorder runtime: version 1.17.5, source commit
+  03316f61137485450e7a43aea972c8e55b0c796a.
 * Vicon DataStream SDK source submodule: commit
   a5096f283f484acca98b434c08810cd922551701.
 * Qt: exact patch 6.8.3 as installed by install-qt-action.  Qt and plugin
