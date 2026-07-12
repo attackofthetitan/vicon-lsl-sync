@@ -11,7 +11,7 @@ namespace GazeLSL
 
     public interface IGazeSampleOutlet
     {
-        void PushSample(double[] sample);
+        void PushSample(double[] sample, double timestamp);
     }
 
     public static class GazeSampleEncoder
@@ -30,6 +30,7 @@ namespace GazeLSL
         private readonly IGazeSampleProvider provider;
         private readonly IGazeSampleOutlet outlet;
         private readonly uint nominalRate;
+        private readonly Func<double> fallbackTimestampProvider;
 
         private Thread thread;
         private ManualResetEventSlim stopSignal;
@@ -40,11 +41,13 @@ namespace GazeLSL
         public GazePublisherWorker(
             IGazeSampleProvider provider,
             IGazeSampleOutlet outlet,
-            uint nominalRate)
+            uint nominalRate,
+            Func<double> fallbackTimestampProvider = null)
         {
             this.provider = provider ?? throw new ArgumentNullException(nameof(provider));
             this.outlet = outlet ?? throw new ArgumentNullException(nameof(outlet));
             this.nominalRate = Math.Max(1u, nominalRate);
+            this.fallbackTimestampProvider = fallbackTimestampProvider;
         }
 
         public bool IsRunning => Volatile.Read(ref running) != 0;
@@ -130,8 +133,18 @@ namespace GazeLSL
                     if (provider.TryGetNextSample(out sample))
                     {
                         GazeSampleEncoder.WriteSample(sample, sampleBuffer);
-                        outlet.PushSample(sampleBuffer);
-                        Interlocked.Increment(ref pushedSampleCount);
+                        double timestamp = sample.Timestamp;
+                        if ((!IsFinite(timestamp) || timestamp <= 0.0) &&
+                            fallbackTimestampProvider != null)
+                        {
+                            timestamp = fallbackTimestampProvider();
+                        }
+                        if (IsFinite(timestamp) && timestamp > 0.0)
+                        {
+                            outlet.PushSample(sampleBuffer, timestamp);
+                            Interlocked.Increment(ref pushedSampleCount);
+                        }
+                        // Invalid timestamps are dropped, but cadence still advances below.
                     }
 
                     nextSampleMilliseconds += intervalMilliseconds;
@@ -161,6 +174,11 @@ namespace GazeLSL
             {
                 Thread.Yield();
             }
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
     }
 }

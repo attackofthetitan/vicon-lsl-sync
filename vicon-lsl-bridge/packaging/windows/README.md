@@ -6,6 +6,9 @@ Every Windows artifact uses one directory layout:
 vicon-lsl-bridge-gui.exe
 vicon-lsl-bridge.exe
 lsl*.dll
+msvcp140.dll
+vcruntime140.dll
+vcruntime140_1.dll
 platforms/qwindows.dll
 stair_model/stair_model1.obj
 stair_model/stair_model1.mtl
@@ -15,6 +18,10 @@ labrecorder/LabRecorder.cfg
 labrecorder/LICENSE
 labrecorder/lsl*.dll
 labrecorder/platforms/qwindows.dll
+THIRD_PARTY_NOTICES.txt
+VICON-DATASTREAM-SDK-LICENSE.txt
+LICENSE-INVENTORY.txt
+licenses/              # verbatim upstream license texts (including Qt LICENSES)
 ```
 
 The regular zip is assembled from this directory. The native single-file
@@ -38,5 +45,50 @@ The CMake portable target accepts the same inputs through
 `VICON_LSL_LABRECORDER_DEPLOY_DIR`; the tracked stair model is included
 automatically.
 
+Native portable packaging writes the SHA-256 of `payload.zip` into a fixed
+launcher image slot before appending the payload.  The launcher verifies that
+digest before extraction, including after an Authenticode certificate has been
+added to the PE, so payload corruption is rejected before extraction. The
+final Authenticode signature is applied after the payload is appended and is
+the publisher-trust boundary; the operating system or consuming deployment
+process must reject a missing or invalid signature on release artifacts.
+
+The portable executable accepts `--extract <directory>`. It verifies the
+embedded payload digest and expands the complete application tree into a new,
+empty directory; the destination must not already exist and may not be a
+reparse point or junction. Users can replace LGPL-covered Qt DLLs in that
+directory (including the nested `labrecorder` Qt DLLs) and run
+`vicon-lsl-bridge-gui.exe` themselves. The `--test` switch remains available
+for the signed portable self-test.
+
+Tag builds sign the bridge CLI/GUI, LabRecorder CLI/GUI, and final portable
+executable with Authenticode.  Configure the protected repository secrets
+`WINDOWS_SIGNING_CERTIFICATE_BASE64` and
+`WINDOWS_SIGNING_CERTIFICATE_PASSWORD`, plus the protected environment variable
+`WINDOWS_SIGNING_CERTIFICATE_SUBJECT` containing the exact signer subject in
+the same protected `windows-signing` environment.
+Signing uses SHA-256 and an RFC 3161 timestamp; tag builds fail if any signing
+input is missing.  Non-tag builds remain unsigned for local development.
+
+The directory ZIP and portable executable are both retained.  Linux releases
+continue to publish the existing tarball.  Release metadata also includes a
+`SHA256SUMS.txt` inventory and checks that the `vN.N.N` tag matches the CMake
+project version. `THIRD_PARTY_NOTICES.txt`, `LICENSE-INVENTORY.txt`, the Vicon
+SDK license, and the complete `licenses/` bundle are mandatory in Windows
+layouts; packaging fails when any required upstream text cannot be located. No
+installer format is produced.
+
+CI obtains the Qt 6.8.3 `qtbase` and `qtsvg` `LICENSES` directories from the
+official source archives and verifies their published SHA-256 hashes before
+packaging them. Binary-only Qt installations that omit these texts must supply
+`VICON_LSL_QT_LICENSE_ROOT` when building the local portable target.
+
 For Enigma packaging, add `-Mode Enigma -ProjectFile path\bridge.evb` (and
 optionally `-EnigmaConsole path\enigmavbconsole.exe`).
+
+The `msvcp140*.dll` and `vcruntime140*.dll` files are Microsoft Visual C++
+Redistributable runtime binaries copied from the x64 VC143 redist installed by
+Visual Studio. They remain subject to Microsoft's Visual C++ Redistributable
+license terms; this project does not reproduce that EULA. See Microsoft's
+[latest supported VC++ Redistributable documentation](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
+and [Visual Studio license terms](https://visualstudio.microsoft.com/license-terms/).

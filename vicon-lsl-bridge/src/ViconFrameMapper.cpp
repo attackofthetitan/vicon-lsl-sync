@@ -55,6 +55,55 @@ double quietNaN() {
     return std::numeric_limits<double>::quiet_NaN();
 }
 
+double viconFrameTimestamp(double receipt_timestamp,
+                           double latency_seconds,
+                           bool latency_valid) {
+    if (!std::isfinite(receipt_timestamp)) {
+        return quietNaN();
+    }
+    if (latency_valid && std::isfinite(latency_seconds) && latency_seconds >= 0.0) {
+        const double corrected = receipt_timestamp - latency_seconds;
+        if (std::isfinite(corrected)) {
+            return corrected;
+        }
+    }
+    return receipt_timestamp;
+}
+
+bool enforceViconTimestamp(double candidate_timestamp,
+                           double receipt_timestamp,
+                           ViconTimestampState& state,
+                           double& output_timestamp,
+                           bool* adjusted) {
+    if (adjusted) {
+        *adjusted = false;
+    }
+
+    double timestamp = candidate_timestamp;
+    if (!std::isfinite(timestamp)) {
+        timestamp = receipt_timestamp;
+    }
+    if (!std::isfinite(timestamp)) {
+        return false;
+    }
+
+    if (state.have_timestamp && timestamp <= state.last_timestamp) {
+        timestamp = std::nextafter(
+            state.last_timestamp, std::numeric_limits<double>::infinity());
+        if (!std::isfinite(timestamp)) {
+            return false;
+        }
+        if (adjusted) {
+            *adjusted = true;
+        }
+    }
+
+    state.last_timestamp = timestamp;
+    state.have_timestamp = true;
+    output_timestamp = timestamp;
+    return true;
+}
+
 MarkerSample invalidMarkerSample() {
     return {quietNaN(), quietNaN(), quietNaN(), 0.0};
 }

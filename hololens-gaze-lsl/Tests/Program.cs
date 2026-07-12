@@ -11,6 +11,10 @@ internal static class Program
         {
             ModelTargetPoseEncoding,
             GazeSampleEncodingMatchesContract,
+            GazeClockMappingUsesMidpointPair,
+            GazePublisherPreservesExplicitTimestamp,
+            GazePublisherRejectsInvalidFallback,
+            GazePublisherInvalidTimestampKeepsCadence,
             GazePublisherCancellation,
             GazePublisherProviderException,
             GazePublisherOutletException,
@@ -136,6 +140,79 @@ internal static class Program
         True(worker.Stop(1000), "A responsive worker should stop within the timeout.");
         False(worker.IsRunning, "Stopped worker still reports running.");
         True(worker.Failure == null, "Cancellation should not be reported as a failure.");
+    }
+
+    private static void GazePublisherPreservesExplicitTimestamp()
+    {
+        var outlet = new CountingOutlet();
+        var worker = new GazePublisherWorker(
+            new TimestampProvider(42.5), outlet, 1000);
+        worker.Start();
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        while (outlet.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(1);
+        }
+        True(outlet.Count > 0, "Timestamped provider was never published.");
+        True(worker.Stop(1000), "Timestamped worker did not stop.");
+        Equal(42.5, outlet.LastTimestamp);
+    }
+
+    private static void GazePublisherRejectsInvalidFallback()
+    {
+        var validFallbackOutlet = new CountingOutlet();
+        var validFallbackWorker = new GazePublisherWorker(
+            new InvalidTimestampProvider(), validFallbackOutlet, 1000, () => 5.5);
+        validFallbackWorker.Start();
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        while (validFallbackOutlet.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(1);
+        }
+        True(validFallbackWorker.Stop(1000), "Worker with a valid fallback did not stop.");
+        Equal(5.5, validFallbackOutlet.LastTimestamp);
+
+        var invalidFallbackOutlet = new CountingOutlet();
+        var invalidFallbackWorker = new GazePublisherWorker(
+            new InvalidTimestampProvider(), invalidFallbackOutlet, 1000, () => double.NaN);
+        invalidFallbackWorker.Start();
+        Thread.Sleep(10);
+        True(invalidFallbackWorker.Stop(1000), "Worker with an invalid fallback did not stop.");
+        Equal(0.0, invalidFallbackOutlet.Count);
+    }
+
+    private static void GazePublisherInvalidTimestampKeepsCadence()
+    {
+        var provider = new CadenceProbeProvider();
+        var worker = new GazePublisherWorker(
+            provider, new CountingOutlet(), 10, () => double.NaN);
+        worker.Start();
+        True(provider.FirstCall.Wait(1000), "Invalid-timestamp provider was never called.");
+        False(provider.SecondCall.Wait(30),
+            "Invalid timestamp bypassed the configured publishing cadence.");
+        True(provider.SecondCall.Wait(500),
+            "Worker did not advance to the next scheduled provider call.");
+        True(worker.Stop(1000), "Invalid-timestamp cadence worker did not stop.");
+    }
+
+    private static void GazeClockMappingUsesMidpointPair()
+    {
+        long[] qpc = { 1000, 1100 };
+        int qpcIndex = 0;
+        var mapping = new GazeClockMapping(
+            1000.0,
+            () => qpc[qpcIndex++],
+            () => 10.55);
+        True(mapping.TryCalibrate(), "A finite midpoint clock pair should calibrate.");
+
+        double mapped;
+        True(mapping.TryMap(TimeSpan.FromSeconds(2.0), out mapped),
+            "A calibrated system-relative timestamp should map.");
+        Equal(11.5, mapped);
+
+        True(!GazeClockMapping.TryMap(
+                TimeSpan.FromSeconds(2.0), 1000, double.NaN, 1000.0, out mapped),
+            "A non-finite midpoint must be rejected.");
     }
 
     private static void GazePublisherProviderException()
@@ -309,7 +386,11 @@ internal static class Program
 
     private sealed class OneSampleProvider : IGazeSampleProvider
     {
-        public bool TryGetNextSample(out GazeSample sample) { sample = default(GazeSample); return true; }
+        public bool TryGetNextSample(out GazeSample sample)
+        {
+            sample = new GazeSample { Timestamp = 1.0 };
+            return true;
+        }
     }
 
     private sealed class ThrowingProvider : IGazeSampleProvider
@@ -335,14 +416,55 @@ internal static class Program
     private sealed class CountingOutlet : IGazeSampleOutlet
     {
         public int Count;
-        public void PushSample(double[] sample) { Interlocked.Increment(ref Count); }
+        public double LastTimestamp;
+        public void PushSample(double[] sample, double timestamp)
+        {
+            LastTimestamp = timestamp;
+            Interlocked.Increment(ref Count);
+        }
+    }
+
+    private sealed class TimestampProvider : IGazeSampleProvider
+    {
+        private readonly double timestamp;
+        public TimestampProvider(double timestamp) { this.timestamp = timestamp; }
+        public bool TryGetNextSample(out GazeSample sample)
+        {
+            sample = new GazeSample { Timestamp = timestamp };
+            return true;
+        }
+    }
+
+    private sealed class InvalidTimestampProvider : IGazeSampleProvider
+    {
+        public bool TryGetNextSample(out GazeSample sample)
+        {
+            sample = new GazeSample { Timestamp = double.NaN };
+            return true;
+        }
+    }
+
+    private sealed class CadenceProbeProvider : IGazeSampleProvider
+    {
+        private int calls;
+        public readonly ManualResetEventSlim FirstCall = new ManualResetEventSlim(false);
+        public readonly ManualResetEventSlim SecondCall = new ManualResetEventSlim(false);
+
+        public bool TryGetNextSample(out GazeSample sample)
+        {
+            sample = new GazeSample { Timestamp = double.NaN };
+            int call = Interlocked.Increment(ref calls);
+            if (call == 1) FirstCall.Set();
+            if (call == 2) SecondCall.Set();
+            return true;
+        }
     }
 
     private sealed class ThrowingOutlet : IGazeSampleOutlet
     {
         private readonly Exception failure;
         public ThrowingOutlet(Exception failure) { this.failure = failure; }
-        public void PushSample(double[] sample) { throw failure; }
+        public void PushSample(double[] sample, double timestamp) { throw failure; }
     }
 
     private sealed class FakeTracker

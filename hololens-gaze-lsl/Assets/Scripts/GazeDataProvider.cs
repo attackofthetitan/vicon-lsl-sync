@@ -2,6 +2,8 @@ using System;
 using System.Text;
 using UnityEngine;
 
+using Stopwatch = System.Diagnostics.Stopwatch;
+
 #if ENABLE_WINMD_SUPPORT
 using Microsoft.MixedReality.EyeTracking;
 using Windows.Perception;
@@ -22,6 +24,63 @@ namespace GazeLSL
     public sealed class GazeDataProvider : MonoBehaviour, IGazeSampleProvider
     {
         [SerializeField] private GazeLSLConfig config;
+
+        public uint EffectiveFrameRate
+        {
+            get
+            {
+                uint rate;
+                return TryGetEffectiveFrameRate(out rate) ? rate : 0u;
+            }
+        }
+
+        public bool IsFrameRateReady
+        {
+            get
+            {
+                uint rate;
+                return TryGetEffectiveFrameRate(out rate);
+            }
+        }
+
+        // Identifies the currently active tracker session. A new tracker
+        // session gets a new generation even when it negotiates the same
+        // effective frame rate, so consumers can recreate resources that are
+        // tied to the old reading buffer and clock mapping.
+        public long EffectiveSessionGeneration
+        {
+            get
+            {
+                uint rate;
+                long generation;
+                return TryGetEffectiveFrameRate(out rate, out generation)
+                    ? generation
+                    : 0L;
+            }
+        }
+
+        public bool TryGetEffectiveFrameRate(out uint rate)
+        {
+            long generation;
+            return TryGetEffectiveFrameRate(out rate, out generation);
+        }
+
+        public bool TryGetEffectiveFrameRate(out uint rate, out long generation)
+        {
+            rate = 0u;
+            generation = 0L;
+#if ENABLE_WINMD_SUPPORT
+            TrackerSessionState state;
+            if (trackerSessions.TryGetActiveState(out state) &&
+                state.EffectiveFrameRate > 0u)
+            {
+                rate = state.EffectiveFrameRate;
+                generation = state.Generation;
+                return true;
+            }
+#endif
+            return false;
+        }
 
         public bool IsTrackingAvailable
         {
@@ -53,7 +112,10 @@ namespace GazeLSL
         {
             public SpatialLocator Locator;
             public SpatialCoordinateSystem WorldCoordinateSystem;
-            public DateTime LastConsumedReadingTimestamp;
+            public TimeSpan LastConsumedSystemRelativeTime;
+            public GazeClockMapping ClockMapping;
+            public uint EffectiveFrameRate;
+            public long Generation;
             public bool IncludeIndividualEyes;
         }
 
@@ -124,14 +186,35 @@ namespace GazeLSL
                     return;
                 }
 
-                ConfigureFrameRate(newTracker);
+                uint selectedFrameRate;
+                if (!TryConfigureFrameRate(newTracker, out selectedFrameRate))
+                {
+                    trackerSessions.Abandon(attempt);
+                    Debug.LogError("Eye tracker session has no confirmed frame rate.");
+                    return;
+                }
+
+                GazeClockMapping clockMapping = new GazeClockMapping(
+                    Stopwatch.Frequency,
+                    () => Stopwatch.GetTimestamp(),
+                    () => LSL.LSL.local_clock());
+                if (!clockMapping.TryCalibrate())
+                {
+                    trackerSessions.Abandon(attempt);
+                    Debug.LogError("Failed to map eye tracker QPC time to the LSL local clock.");
+                    return;
+                }
 
                 TrackerSessionState state = new TrackerSessionState
                 {
                     Locator = newTrackerLocator,
                     WorldCoordinateSystem = newWorldCoordinateSystem,
                     // Start from now so old buffered readings are not published when tracking starts.
-                    LastConsumedReadingTimestamp = DateTime.Now,
+                    LastConsumedSystemRelativeTime = TimeSpan.FromSeconds(
+                        Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency),
+                    ClockMapping = clockMapping,
+                    EffectiveFrameRate = selectedFrameRate,
+                    Generation = attempt.Generation,
                     IncludeIndividualEyes = newTracker.AreLeftAndRightGazesSupported
                 };
 
@@ -141,7 +224,7 @@ namespace GazeLSL
                 }
 
                 Debug.Log(
-                    $"Extended eye tracking ready. " +
+                    $"Extended eye tracking ready at {state.EffectiveFrameRate} Hz. " +
                     $"Per-eye: {state.IncludeIndividualEyes}"
                 );
             }
@@ -175,23 +258,31 @@ namespace GazeLSL
             using (lease)
             {
                 TrackerSessionState state = lease.State;
-                EyeGazeTrackerReading reading = lease.Tracker.TryGetReadingAfterTimestamp(
-                    state.LastConsumedReadingTimestamp
+                EyeGazeTrackerReading reading = lease.Tracker.TryGetReadingAfterSystemRelativeTime(
+                    state.LastConsumedSystemRelativeTime
                 );
                 if (reading == null)
                 {
                     return false;
                 }
 
-                if (reading.Timestamp > state.LastConsumedReadingTimestamp)
+                if (reading.SystemRelativeTime <= state.LastConsumedSystemRelativeTime)
                 {
-                    state.LastConsumedReadingTimestamp = reading.Timestamp;
+                    return false;
+                }
+                state.LastConsumedSystemRelativeTime = reading.SystemRelativeTime;
+
+                if (state.ClockMapping == null ||
+                    !state.ClockMapping.TryMap(reading.SystemRelativeTime, out double sampleTimestamp))
+                {
+                    return false;
                 }
 
                 sample = CreateEmptySample();
+                sample.Timestamp = sampleTimestamp;
 
                 PerceptionTimestamp perceptionTimestamp =
-                    PerceptionTimestampHelper.FromHistoricalTargetTime(new DateTimeOffset(reading.Timestamp));
+                    PerceptionTimestampHelper.FromSystemRelativeTargetTime(reading.SystemRelativeTime);
 
                 SpatialLocation trackerLocation = state.Locator.TryLocateAtTimestamp(
                     perceptionTimestamp,
@@ -255,8 +346,11 @@ namespace GazeLSL
                 .CoordinateSystem;
         }
 
-        private void ConfigureFrameRate(EyeGazeTracker currentTracker)
+        private bool TryConfigureFrameRate(
+            EyeGazeTracker currentTracker,
+            out uint selectedFrameRate)
         {
+            selectedFrameRate = 0u;
             try
             {
                 uint requestedFrameRate = config != null ? config.TargetFrameRate : 90;
@@ -265,7 +359,7 @@ namespace GazeLSL
                 if (supportedRates == null || supportedRates.Count == 0)
                 {
                     Debug.LogWarning("No supported eye tracker frame rates reported.");
-                    return;
+                    return false;
                 }
 
                 int highestIndex = 0;
@@ -297,17 +391,25 @@ namespace GazeLSL
                     : highestIndex;
 
                 var selectedRate = supportedRates[selectedIndex];
+                if (selectedRate.FramesPerSecond == 0u)
+                {
+                    Debug.LogWarning("Eye tracker selected an invalid 0 Hz frame rate.");
+                    return false;
+                }
                 currentTracker.SetTargetFrameRate(selectedRate);
+                selectedFrameRate = selectedRate.FramesPerSecond;
 
                 Debug.Log(supportedRatesLog.ToString());
                 Debug.Log(
                     $"Requested eye tracker frame rate: {requestedFrameRate} Hz; " +
-                    $"selected: {selectedRate.FramesPerSecond} Hz"
+                    $"selected: {selectedFrameRate} Hz"
                 );
+                return true;
             }
             catch (Exception e)
             {
                 Debug.LogWarning($"Could not set eye tracker frame rate - {e.Message}");
+                return false;
             }
         }
 

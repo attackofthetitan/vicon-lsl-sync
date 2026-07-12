@@ -1,5 +1,8 @@
 #include "ViconClient.h"
 
+#include <lsl_cpp.h>
+
+#include <cmath>
 #include <iostream>
 #include <string>
 
@@ -95,6 +98,8 @@ bool ViconClient::connect() {
 
     connected_ = true;
     frame_number_ = 0;
+    frame_timestamp_ = 0.0;
+    frame_rate_ = 0.0;
     std::cout << "Connected to " << server_address_ << std::endl;
     return true;
 }
@@ -109,6 +114,8 @@ void ViconClient::disconnect() {
         }
         connected_ = false;
         frame_number_ = 0;
+        frame_timestamp_ = 0.0;
+        frame_rate_ = 0.0;
         std::cout << "Disconnected" << std::endl;
     }
 }
@@ -124,6 +131,18 @@ bool ViconClient::getFrame() {
         return false;
     }
 
+    // Capture the local clock immediately after GetFrame. GetLatencyTotal is a
+    // Vicon pipeline-latency estimate, not a capture-accurate timestamp or a
+    // measurement of ServerPush/network delay, so subtracting a valid value
+    // produces only an estimated acquisition timestamp. Invalid values fall
+    // back to this immediate receipt time.
+    const double receipt_timestamp = lsl::local_clock();
+    const auto latency = client_.GetLatencyTotal();
+    frame_timestamp_ = vicon_lsl::viconFrameTimestamp(
+        receipt_timestamp,
+        latency.Total,
+        latency.Result == SDK::Result::Success);
+
     const auto frame_number = client_.GetFrameNumber();
     if (frame_number.Result != SDK::Result::Success) {
         std::cerr << "GetFrameNumber failed ("
@@ -131,11 +150,25 @@ bool ViconClient::getFrame() {
         return false;
     }
     frame_number_ = frame_number.FrameNumber;
+
+    const auto rate = client_.GetFrameRate();
+    if (rate.Result == SDK::Result::Success &&
+        std::isfinite(rate.FrameRateHz) && rate.FrameRateHz > 0.0) {
+        frame_rate_ = rate.FrameRateHz;
+    }
     return true;
 }
 
 unsigned int ViconClient::frameNumber() const {
     return frame_number_;
+}
+
+double ViconClient::frameTimestamp() const {
+    return frame_timestamp_;
+}
+
+double ViconClient::frameRate() const {
+    return frame_rate_;
 }
 
 vicon_lsl::CountRead ViconClient::readSubjectCount() const {

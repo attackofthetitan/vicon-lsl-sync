@@ -16,6 +16,19 @@
 #include "StreamDefaults.h"
 #include "gui/LabRecorderRuntimePolicy.h"
 
+namespace {
+
+QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
+    auto* label = new QLabel(text);
+    label->setToolTip(tooltip);
+    if (control) {
+        control->setToolTip(tooltip);
+    }
+    return label;
+}
+
+} // namespace
+
 // --- BridgeWorker ---
 
 BridgeWorker::BridgeWorker(const Config& config, QObject* parent)
@@ -73,9 +86,18 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     marker_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconMarkers);
     segment_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconSegments);
 
-    form->addRow("Vicon server:", server_edit_);
-    form->addRow("Marker stream:", marker_stream_edit_);
-    form->addRow("Segment stream:", segment_stream_edit_);
+    form->addRow(makeTooltipLabel(
+                     "Vicon server:", server_edit_,
+                     "Vicon DataStream endpoint, for example localhost:801."),
+                 server_edit_);
+    form->addRow(makeTooltipLabel(
+                     "Marker stream:", marker_stream_edit_,
+                     "LSL stream name for Vicon marker samples."),
+                 marker_stream_edit_);
+    form->addRow(makeTooltipLabel(
+                     "Segment stream:", segment_stream_edit_,
+                     "LSL stream name for Vicon segment samples."),
+                 segment_stream_edit_);
     left_layout->addWidget(settings_group);
 
     // Buttons
@@ -149,31 +171,60 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     filename_preview_label_->setReadOnly(true);
     filename_preview_label_->setPlaceholderText("Complete the recording fields to preview the output path");
 
-    recording_form->addRow("Study root:", root_layout);
-    recording_form->addRow("File template:", filename_template_edit_);
+    recording_form->addRow(makeTooltipLabel(
+                               "Study root:", study_root_edit_,
+                               "Directory where LabRecorder stores recordings."),
+                           root_layout);
+    recording_form->addRow(makeTooltipLabel(
+                               "File template:", filename_template_edit_,
+                               "LabRecorder path template. Tokens: %p participant, %s session, "
+                               "%b task/block, %r or %n run, %a acquisition, %m modality."),
+                           filename_template_edit_);
 
     auto* metadata_grid = new QGridLayout();
     metadata_grid->setHorizontalSpacing(8);
     metadata_grid->setVerticalSpacing(4);
-    metadata_grid->addWidget(new QLabel("Participant:"), 0, 0);
+    metadata_grid->addWidget(makeTooltipLabel(
+                                 "Participant:", participant_edit_,
+                                 "Participant identifier substituted for %p."),
+                             0, 0);
     metadata_grid->addWidget(participant_edit_, 0, 1);
-    metadata_grid->addWidget(new QLabel("Session:"), 0, 2);
+    metadata_grid->addWidget(makeTooltipLabel(
+                                 "Session:", session_edit_,
+                                 "Session identifier substituted for %s."),
+                             0, 2);
     metadata_grid->addWidget(session_edit_, 0, 3);
-    metadata_grid->addWidget(new QLabel("Task/block:"), 1, 0);
+    metadata_grid->addWidget(makeTooltipLabel(
+                                 "Task/block:", task_edit_,
+                                 "Task or block identifier substituted for %b."),
+                             1, 0);
     metadata_grid->addWidget(task_edit_, 1, 1);
-    metadata_grid->addWidget(new QLabel("Run:"), 1, 2);
+    metadata_grid->addWidget(makeTooltipLabel(
+                                 "Run:", run_spin_,
+                                 "Run number substituted for %r."),
+                             1, 2);
     metadata_grid->addWidget(run_spin_, 1, 3);
-    metadata_grid->addWidget(new QLabel("Acquisition:"), 2, 0);
+    metadata_grid->addWidget(makeTooltipLabel(
+                                 "Acquisition:", acquisition_edit_,
+                                 "Acquisition label substituted for %a."),
+                             2, 0);
     metadata_grid->addWidget(acquisition_edit_, 2, 1);
-    metadata_grid->addWidget(new QLabel("Modality:"), 2, 2);
+    metadata_grid->addWidget(makeTooltipLabel(
+                                 "Modality:", modality_edit_,
+                                 "Modality label substituted for %m."),
+                             2, 2);
     metadata_grid->addWidget(modality_edit_, 2, 3);
     metadata_grid->setColumnStretch(1, 1);
     metadata_grid->setColumnStretch(3, 1);
-    recording_form->addRow("Metadata:", metadata_grid);
+    auto* metadata_label = new QLabel("Metadata:");
+    metadata_label->setToolTip("Values used to expand the filename template tokens.");
+    recording_form->addRow(metadata_label, metadata_grid);
     recording_form->addRow("Filename preview:", filename_preview_label_);
     recording_layout->addLayout(recording_form);
 
     select_all_before_start_check_ = new QCheckBox("Select all streams before start");
+    select_all_before_start_check_->setToolTip(
+        "Select all LabRecorder streams before starting a recording.");
     select_all_before_start_check_->setChecked(true);
     recording_layout->addWidget(select_all_before_start_check_);
 
@@ -190,13 +241,23 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     labrecorder_port_spin_->setRange(1, 65535);
     labrecorder_port_spin_->setValue(22345);
 
-    labrecorder_form->addRow("LabRecorder executable:", executable_layout);
+    labrecorder_form->addRow(makeTooltipLabel(
+                                  "LabRecorder executable:", labrecorder_executable_edit_,
+                                  "Optional LabRecorder executable path. Leave blank for the automatic bundled "
+                                  "startup; set a path before using Launch LabRecorder."),
+                              executable_layout);
     auto* rcs_layout = new QHBoxLayout();
-    rcs_layout->addWidget(new QLabel("Host:"));
+    auto* rcs_host_label = makeTooltipLabel(
+        "Host:", labrecorder_host_edit_, "LabRecorder remote-control server host.");
+    rcs_layout->addWidget(rcs_host_label);
     rcs_layout->addWidget(labrecorder_host_edit_, 1);
-    rcs_layout->addWidget(new QLabel("Port:"));
+    auto* rcs_port_label = makeTooltipLabel(
+        "Port:", labrecorder_port_spin_, "LabRecorder remote-control server TCP port.");
+    rcs_layout->addWidget(rcs_port_label);
     rcs_layout->addWidget(labrecorder_port_spin_);
-    labrecorder_form->addRow("RCS:", rcs_layout);
+    auto* rcs_label = new QLabel("RCS:");
+    rcs_label->setToolTip("Host and TCP port for LabRecorder's remote-control server.");
+    labrecorder_form->addRow(rcs_label, rcs_layout);
     recording_layout->addLayout(labrecorder_form);
 
     auto* recording_buttons = new QGridLayout();
@@ -322,6 +383,32 @@ bool BridgeWindow::labRecorderOwnedProcessRunning() const {
 
 bool BridgeWindow::stairModelLoaded() const {
     return preview_panel_ && preview_panel_->stairModelLoaded();
+}
+
+bool BridgeWindow::configurableTooltipsPresent() const {
+    const QWidget* const controls[] = {
+        server_edit_,
+        marker_stream_edit_,
+        segment_stream_edit_,
+        study_root_edit_,
+        filename_template_edit_,
+        participant_edit_,
+        session_edit_,
+        task_edit_,
+        run_spin_,
+        acquisition_edit_,
+        modality_edit_,
+        select_all_before_start_check_,
+        labrecorder_executable_edit_,
+        labrecorder_host_edit_,
+        labrecorder_port_spin_,
+    };
+    for (const QWidget* control : controls) {
+        if (!control || control->toolTip().trimmed().isEmpty()) {
+            return false;
+        }
+    }
+    return preview_panel_ && preview_panel_->configurableTooltipsPresent();
 }
 
 void BridgeWindow::onStart() {

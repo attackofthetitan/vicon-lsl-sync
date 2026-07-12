@@ -30,6 +30,15 @@
 namespace vicon_lsl {
 namespace {
 
+QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
+    auto* label = new QLabel(text);
+    label->setToolTip(tooltip);
+    if (control) {
+        control->setToolTip(tooltip);
+    }
+    return label;
+}
+
 QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
     auto* spin = new QDoubleSpinBox();
     spin->setRange(-100.0, 100.0);
@@ -86,19 +95,40 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     playback_speed_spin_->setDecimals(1);
     playback_speed_spin_->setSingleStep(0.1);
     playback_speed_spin_->setValue(1.0);
-    stream_grid->addWidget(new QLabel("Markers:"), 0, 0);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Markers:", marker_stream_edit_,
+                               "LSL stream containing Vicon marker samples for the preview."),
+                           0, 0);
     stream_grid->addWidget(marker_stream_edit_, 0, 1);
-    stream_grid->addWidget(new QLabel("Segments:"), 0, 2);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Segments:", segment_stream_edit_,
+                               "LSL stream containing Vicon segment samples for the preview."),
+                           0, 2);
     stream_grid->addWidget(segment_stream_edit_, 0, 3);
-    stream_grid->addWidget(new QLabel("Gaze:"), 1, 0);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Gaze:", gaze_stream_edit_,
+                               "LSL stream containing HoloLens gaze samples."),
+                           1, 0);
     stream_grid->addWidget(gaze_stream_edit_, 1, 1);
-    stream_grid->addWidget(new QLabel("Match tol. (s):"), 1, 2);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Match tol. (s):", tolerance_spin_,
+                               "Maximum timestamp gap, in seconds, when matching preview samples."),
+                           1, 2);
     stream_grid->addWidget(tolerance_spin_, 1, 3);
-    stream_grid->addWidget(new QLabel("Trail points:"), 2, 0);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Trail points:", trail_points_spin_,
+                               "Number of recent preview frames retained in the trail."),
+                           2, 0);
     stream_grid->addWidget(trail_points_spin_, 2, 1);
-    stream_grid->addWidget(new QLabel("Playback speed:"), 2, 2);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Playback speed:", playback_speed_spin_,
+                               "Playback speed multiplier for CSV and XDF recordings."),
+                           2, 2);
     stream_grid->addWidget(playback_speed_spin_, 2, 3);
-    stream_grid->addWidget(new QLabel("Stair target:"), 3, 0);
+    stream_grid->addWidget(makeTooltipLabel(
+                               "Stair target:", calibration_stream_edit_,
+                               "LSL stream containing tracked stair-target poses for calibration."),
+                           3, 0);
     stream_grid->addWidget(calibration_stream_edit_, 3, 1, 1, 3);
     stream_grid->setColumnStretch(1, 1);
     stream_grid->setColumnStretch(3, 1);
@@ -113,11 +143,23 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     gaze_rx_spin_ = makeAngleSpin();
     gaze_ry_spin_ = makeAngleSpin();
     gaze_rz_spin_ = makeAngleSpin();
-    transforms->addWidget(new QLabel("HoloLens T:"), 0, 0);
+    auto* translation_label = new QLabel("HoloLens T:");
+    translation_label->setToolTip("Manual HoloLens translation in metres (X, Y, Z).\n"
+                                  "Used when manual transform mode is selected.");
+    gaze_tx_spin_->setToolTip("Manual HoloLens translation X in metres.");
+    gaze_ty_spin_->setToolTip("Manual HoloLens translation Y in metres.");
+    gaze_tz_spin_->setToolTip("Manual HoloLens translation Z in metres.");
+    transforms->addWidget(translation_label, 0, 0);
     transforms->addWidget(gaze_tx_spin_, 0, 1);
     transforms->addWidget(gaze_ty_spin_, 0, 2);
     transforms->addWidget(gaze_tz_spin_, 0, 3);
-    transforms->addWidget(new QLabel("HoloLens R:"), 1, 0);
+    auto* rotation_label = new QLabel("HoloLens R:");
+    rotation_label->setToolTip("Manual HoloLens rotation in degrees about X, Y, and Z.\n"
+                               "Used when manual transform mode is selected.");
+    gaze_rx_spin_->setToolTip("Manual HoloLens rotation X in degrees.");
+    gaze_ry_spin_->setToolTip("Manual HoloLens rotation Y in degrees.");
+    gaze_rz_spin_->setToolTip("Manual HoloLens rotation Z in degrees.");
+    transforms->addWidget(rotation_label, 1, 0);
     transforms->addWidget(gaze_rx_spin_, 1, 1);
     transforms->addWidget(gaze_ry_spin_, 1, 2);
     transforms->addWidget(gaze_rz_spin_, 1, 3);
@@ -126,6 +168,10 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     auto* calibration_row = new QHBoxLayout();
     calibrate_button_ = new QPushButton("Calibrate from Stair Target");
     use_manual_transform_button_ = new QPushButton("Use Manual Transform");
+    calibrate_button_->setToolTip(
+        "Collect stable poses from the stair-target stream and apply a HoloLens transform for this session only.");
+    use_manual_transform_button_->setToolTip(
+        "Stop automatic calibration and use the manual HoloLens translation and rotation fields.");
     calibration_row->addWidget(calibrate_button_);
     calibration_row->addWidget(use_manual_transform_button_);
     calibration_row->addStretch(1);
@@ -135,7 +181,9 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     stair_model_edit_ = new QLineEdit();
     auto* browse_stair_button = new QPushButton("Browse");
     auto* reload_stair_button = new QPushButton("Reload Stair");
-    stair_row->addWidget(new QLabel("Stair OBJ:"));
+    stair_row->addWidget(makeTooltipLabel(
+                              "Stair OBJ:", stair_model_edit_,
+                              "Wavefront OBJ file used to render the stair target."));
     stair_row->addWidget(stair_model_edit_, 1);
     stair_row->addWidget(browse_stair_button);
     stair_row->addWidget(reload_stair_button);
@@ -192,6 +240,33 @@ PreviewPanel::~PreviewPanel() {
         worker_->wait();
     }
     saveSettings();
+}
+
+bool PreviewPanel::configurableTooltipsPresent() const {
+    const QWidget* const controls[] = {
+        marker_stream_edit_,
+        segment_stream_edit_,
+        gaze_stream_edit_,
+        calibration_stream_edit_,
+        stair_model_edit_,
+        tolerance_spin_,
+        playback_speed_spin_,
+        gaze_tx_spin_,
+        gaze_ty_spin_,
+        gaze_tz_spin_,
+        gaze_rx_spin_,
+        gaze_ry_spin_,
+        gaze_rz_spin_,
+        trail_points_spin_,
+        calibrate_button_,
+        use_manual_transform_button_,
+    };
+    for (const QWidget* control : controls) {
+        if (!control || control->toolTip().trimmed().isEmpty()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void PreviewPanel::startPreview() {

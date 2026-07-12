@@ -1,0 +1,36 @@
+Vicon LSL Bridge — Windows release inventory
+
+The complete upstream license texts are in the licenses/ directory and the
+SHA-256 list in LICENSE-INVENTORY.txt.  This notice lists the exact source
+revisions used by this build; packaging verifies those Git revisions before
+copying their license texts.
+
+* LabRecorder source submodule: commit
+  6d65fa96b94d049478ef4f7188c39202fe14977d (project version 1.17.0).
+* liblsl bridge runtime: version 1.16.2, source commit
+  6ca188c266c21f7228dc67077303fa6abaf2e8be.
+* liblsl LabRecorder runtime: version 1.17.5, source commit
+  03316f61137485450e7a43aea972c8e55b0c796a.
+* Vicon DataStream SDK source submodule: commit
+  a5096f283f484acca98b434c08810cd922551701.
+* Qt: exact patch 6.8.3 as installed by install-qt-action.  Qt and plugin
+  notices are copied verbatim from the official qtbase and qtsvg 6.8.3
+  source archives after verifying SHA-256 values
+  992bf7766e214a341ef793eb3665fb784787d2fd666955f5f507f4c6f1f770dd
+  and 90643c1ba05245abedc2bcd9d4f745568dc27a1b37dd3ba861fd19d8ac6a7c46.
+  The upstream release source and licensing information are available at
+  https://download.qt.io/official_releases/qt/6.8/6.8.3/ and
+  https://www.qt.io/licensing/.
+* Boost: the Boost Software License text shipped by the exact vcpkg package
+  used by the Windows runner is copied to licenses/Boost/LICENSE_1_0.txt.
+
+The bundle also includes liblsl's own license, the bundled pugixml readme
+(which contains its license), Loguru's license, and the portable-archive
+license.  No license text is reconstructed or fetched during packaging.
+
+* Microsoft Visual C++ Redistributable runtime: the x64 VC143
+  msvcp140*.dll and vcruntime140*.dll files are copied from the Visual Studio
+  installation used for the build.  They are redistributed under Microsoft's
+  applicable Visual C++ Redistributable license terms.  The project does not
+  reproduce that EULA; see https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170
+  and https://visualstudio.microsoft.com/license-terms/.

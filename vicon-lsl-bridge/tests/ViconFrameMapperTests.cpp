@@ -149,6 +149,34 @@ struct FakeClient {
 
 } // namespace
 
+TEST_CASE("Vicon frame timestamp applies valid latency") {
+    REQUIRE(std::abs(vicon_lsl::viconFrameTimestamp(100.0, 2.5, true) - 97.5) < 1e-12);
+}
+
+TEST_CASE("Vicon frame timestamp falls back for invalid latency") {
+    REQUIRE(std::abs(vicon_lsl::viconFrameTimestamp(100.0, -1.0, true) - 100.0) < 1e-12);
+    REQUIRE(std::abs(vicon_lsl::viconFrameTimestamp(100.0, vicon_lsl::quietNaN(), true) -
+                     100.0) < 1e-12);
+    REQUIRE(std::abs(vicon_lsl::viconFrameTimestamp(100.0, 2.5, false) - 100.0) < 1e-12);
+}
+
+TEST_CASE("Vicon timestamp policy clamps regressions without dropping frames") {
+    vicon_lsl::ViconTimestampState state;
+    double timestamp = 0.0;
+    bool adjusted = false;
+    REQUIRE(vicon_lsl::enforceViconTimestamp(10.0, 10.0, state, timestamp, &adjusted));
+    REQUIRE(!adjusted);
+    REQUIRE(std::abs(timestamp - 10.0) < 1e-12);
+
+    REQUIRE(vicon_lsl::enforceViconTimestamp(9.0, 11.0, state, timestamp, &adjusted));
+    REQUIRE(adjusted);
+    REQUIRE(timestamp > 10.0);
+    REQUIRE(vicon_lsl::enforceViconTimestamp(
+        vicon_lsl::quietNaN(), 12.0, state, timestamp, &adjusted));
+    REQUIRE(!adjusted);
+    REQUIRE(timestamp > 10.0);
+}
+
 TEST_CASE("Vicon layout collection preserves discovered order") {
     FakeClient client;
     client.subjects = {

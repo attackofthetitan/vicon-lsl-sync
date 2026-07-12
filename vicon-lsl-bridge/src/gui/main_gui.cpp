@@ -24,6 +24,11 @@ int main(int argc, char* argv[]) {
     if (QCoreApplication::arguments().contains("--test")) {
         QTimer::singleShot(0, [&app, &window]() {
             try {
+                if (!window.configurableTooltipsPresent()) {
+                    app.exit(10);
+                    return;
+                }
+
                 ViconClient unavailable_vicon("127.0.0.1:1");
                 if (unavailable_vicon.connect()) {
                     unavailable_vicon.disconnect();

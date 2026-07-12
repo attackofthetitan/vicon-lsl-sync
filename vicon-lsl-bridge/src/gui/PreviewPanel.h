@@ -27,6 +27,7 @@ public:
     ~PreviewPanel() override;
 
     bool stairModelLoaded() const { return stair_model_loaded_; }
+    bool configurableTooltipsPresent() const;
 
 private slots:
     void startPreview();
