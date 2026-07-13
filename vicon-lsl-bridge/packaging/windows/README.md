@@ -47,11 +47,7 @@ automatically.
 
 Native portable packaging writes the SHA-256 of `payload.zip` into a fixed
 launcher image slot before appending the payload.  The launcher verifies that
-digest before extraction, including after an Authenticode certificate has been
-added to the PE, so payload corruption is rejected before extraction. The
-final Authenticode signature is applied after the payload is appended and is
-the publisher-trust boundary; the operating system or consuming deployment
-process must reject a missing or invalid signature on release artifacts.
+digest before extraction, so payload corruption is rejected before extraction.
 
 The portable executable accepts `--extract <directory>`. It verifies the
 embedded payload digest and expands the complete application tree into a new,
@@ -59,16 +55,11 @@ empty directory; the destination must not already exist and may not be a
 reparse point or junction. Users can replace LGPL-covered Qt DLLs in that
 directory (including the nested `labrecorder` Qt DLLs) and run
 `vicon-lsl-bridge-gui.exe` themselves. The `--test` switch remains available
-for the signed portable self-test.
+for the portable self-test.
 
-Tag builds sign the bridge CLI/GUI, LabRecorder CLI/GUI, and final portable
-executable with Authenticode.  Configure the protected repository secrets
-`WINDOWS_SIGNING_CERTIFICATE_BASE64` and
-`WINDOWS_SIGNING_CERTIFICATE_PASSWORD`, plus the protected environment variable
-`WINDOWS_SIGNING_CERTIFICATE_SUBJECT` containing the exact signer subject in
-the same protected `windows-signing` environment.
-Signing uses SHA-256 and an RFC 3161 timestamp; tag builds fail if any signing
-input is missing.  Non-tag builds remain unsigned for local development.
+Windows release artifacts are intentionally unsigned. Windows may therefore
+display an unknown-publisher or reputation warning. Verify downloaded files
+against the release's `SHA256SUMS.txt` before running them.
 
 The directory ZIP and portable executable are both retained.  Linux releases
 continue to publish the existing tarball.  Release metadata also includes a
