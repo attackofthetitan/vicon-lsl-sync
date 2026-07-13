@@ -21,7 +21,6 @@ param(
     [string]$ViconSdkDir = "",
     [string]$LabRecorderSourceDir = "",
     [switch]$UseExistingLicenseBundle,
-    [switch]$AllowSignedExecutables,
     [switch]$ValidateOnly,
     [string]$StageMarkerName = ".vicon-lsl-bridge-package-stage"
 )
@@ -40,10 +39,6 @@ $packageManifestName = ".vicon-lsl-bridge-package-manifest"
 if ($ValidateOnly -and -not $UseExistingLicenseBundle) {
     throw "-ValidateOnly requires -UseExistingLicenseBundle and an existing package manifest."
 }
-if ($AllowSignedExecutables -and -not $UseExistingLicenseBundle) {
-    throw "-AllowSignedExecutables requires -UseExistingLicenseBundle."
-}
-
 function Assert-NoReparseAncestors {
     param([string]$Path, [string]$Description = "path")
 
@@ -141,7 +136,7 @@ function Write-PackageManifest {
 }
 
 function Validate-PackageManifest {
-    param([string]$Root, [switch]$AllowSignedExecutables)
+    param([string]$Root)
 
     $manifestPath = Join-Path $Root $packageManifestName
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
@@ -177,17 +172,8 @@ function Validate-PackageManifest {
         throw "Deployment directory does not match its deterministic package manifest; stale or unexpected files were found."
     }
 
-    $signedExecutables = @{
-        "vicon-lsl-bridge.exe" = $true
-        "vicon-lsl-bridge-gui.exe" = $true
-        "labrecorder/labrecorder.exe" = $true
-        "labrecorder/labrecordercli.exe" = $true
-    }
     foreach ($relative in $actual) {
         $key = $relative.ToLowerInvariant()
-        if ($AllowSignedExecutables -and $signedExecutables.ContainsKey($key)) {
-            continue
-        }
         $path = Join-Path $Root $relative.Replace('/', '\')
         $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actualHash -cne $expectedHashes[$key]) {
@@ -260,9 +246,8 @@ function Invoke-NativePackage {
         Compress-Archive -Path @($payloadEntries.FullName) -DestinationPath $payload -Force
         Copy-Item -LiteralPath $LauncherPath -Destination $ExpectedOutput -Force
 
-        # Bind the overlay payload to bytes inside the launcher image.  The
-        # Authenticode hash excludes PE overlay data, so signing the final SFX
-        # alone must not be treated as payload integrity protection.
+        # Bind the overlay payload to bytes inside the launcher image so the
+        # extracted package can be checked independently of the PE image.
         $payloadHash = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
         $digestPlaceholder = [System.Text.Encoding]::ASCII.GetBytes(
             "VICONLSL_PAYLOAD_SHA256=" + ('0' * 64))
@@ -627,7 +612,7 @@ if (-not $UseExistingLicenseBundle -and (Test-Path -LiteralPath (Join-Path $depl
     throw "A fresh package staging tree must not already contain a deterministic package manifest: $deployPath"
 }
 if ($UseExistingLicenseBundle) {
-    Validate-PackageManifest $deployPath -AllowSignedExecutables:$AllowSignedExecutables
+    Validate-PackageManifest $deployPath
 }
 
 # Keep deployment inputs in the same directory layout used by both the
@@ -708,10 +693,8 @@ if (Test-Path -LiteralPath $labRecorderPath -PathType Container) {
     Assert-MsvcRuntime $labRecorderPath "LabRecorder deployment"
 }
 
-# License collection is mandatory for a fresh package.  The signing job may
-# rebuild the portable wrapper from an already-collected package, but it must
-# validate that immutable inventory before using it and must not execute any
-# packaged binary.
+# License collection is mandatory for a fresh package. Reusing an existing
+# bundle requires validating its immutable inventory before packaging.
 if ($UseExistingLicenseBundle) {
     Validate-LicenseBundle $deployPath
 } else {
@@ -745,7 +728,7 @@ if ($UseExistingLicenseBundle) {
 
 Assert-NoReparseTree $deployPath "final deployment tree"
 if ($UseExistingLicenseBundle) {
-    Validate-PackageManifest $deployPath -AllowSignedExecutables:$AllowSignedExecutables
+    Validate-PackageManifest $deployPath
 } else {
     Write-PackageManifest $deployPath
     Validate-PackageManifest $deployPath

@@ -289,8 +289,7 @@ jobs:
 
           $packageScript = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1"
           $windowsZip = "$env:GITHUB_WORKSPACE\${{ matrix.artifact }}.zip"
-          & $packageScript -DeployDir $package -UseExistingLicenseBundle `
-            -AllowSignedExecutables -OutputZip $windowsZip
+          & $packageScript -DeployDir $package -UseExistingLicenseBundle -OutputZip $windowsZip
 
           $portableSource = "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\build\vicon-lsl-bridge-gui-portable.exe"
           $portableOutput = "$env:GITHUB_WORKSPACE\${{ matrix.artifact }}-gui-portable.exe"
@@ -444,17 +443,6 @@ jobs:
             ${{ matrix.artifact }}.*
             ${{ matrix.artifact }}-gui-portable.exe
 
-      - name: Upload Windows signing input (tag)
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: windows-signing-input
-          path: |
-            package/**
-            vicon-lsl-bridge-portable-launcher.exe
-          include-hidden-files: true
-          if-no-files-found: error
-
   hololens-core-tests:
     runs-on: windows-latest
 
@@ -469,189 +457,8 @@ jobs:
       - name: Run platform-neutral HoloLens tests
         run: dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
 
-  sign-windows:
-    needs: [logic-tests, build, hololens-core-tests]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: windows-latest
-    environment: windows-signing
-    permissions:
-      contents: read
-
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Verify tag commit is contained in main
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $header = "AUTHORIZATION: bearer $env:GITHUB_TOKEN"
-          git -c http.extraheader=$header fetch --no-tags origin main
-          if ($LASTEXITCODE -ne 0) { throw 'Unable to fetch origin/main for tag ancestry verification' }
-          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
-          if ($LASTEXITCODE -ne 0) {
-            throw "Tag commit $env:GITHUB_SHA is not an ancestor of origin/main"
-          }
-
-      - name: Verify signing tag matches CMake project version
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ($env:GITHUB_REF_NAME -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
-            throw "Release tag must use the exact vN.N.N format: $env:GITHUB_REF_NAME"
-          }
-          $cmake = Get-Content -LiteralPath 'vicon-lsl-bridge\CMakeLists.txt' -Raw
-          if ($cmake -notmatch 'project\(vicon-lsl-bridge\s+VERSION\s+(?<version>[0-9]+\.[0-9]+\.[0-9]+)') {
-            throw 'Unable to read the vicon-lsl-bridge CMake project version'
-          }
-          if ($Matches.version -ne $env:GITHUB_REF_NAME.Substring(1)) {
-            throw "Release tag $env:GITHUB_REF_NAME does not match CMake version $($Matches.version)"
-          }
-
-      - name: Download unsigned Windows signing input
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: windows-signing-input
-          path: windows-signing-input
-
-      - name: Verify unsigned signing input inventory
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
-          $package = Join-Path $root 'package'
-          $launcher = Join-Path $root 'vicon-lsl-bridge-portable-launcher.exe'
-          foreach ($path in @(
-            (Join-Path $package 'vicon-lsl-bridge.exe'),
-            (Join-Path $package 'vicon-lsl-bridge-gui.exe'),
-            (Join-Path $package 'labrecorder\LabRecorder.exe'),
-            (Join-Path $package 'labrecorder\LabRecorderCLI.exe'),
-            $launcher)) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Signing input is missing $path" }
-          }
-          $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
-          & $packageScript -DeployDir $package -UseExistingLicenseBundle -ValidateOnly
-
-      - name: Sign packaged bridge and LabRecorder executables
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-          WINDOWS_SIGNING_CERTIFICATE_SUBJECT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_SUBJECT }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
-          $package = Join-Path $root 'package'
-          $signScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\sign_windows.ps1'
-          & $signScript -Path @(
-            (Join-Path $package 'vicon-lsl-bridge.exe'),
-            (Join-Path $package 'vicon-lsl-bridge-gui.exe'),
-            (Join-Path $package 'labrecorder\LabRecorder.exe'),
-            (Join-Path $package 'labrecorder\LabRecorderCLI.exe'))
-
-      - name: Create signed Windows ZIP
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
-          $package = Join-Path $root 'package'
-          $windowsZip = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64.zip'
-          $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
-          & $packageScript -DeployDir $package -UseExistingLicenseBundle `
-            -AllowSignedExecutables -OutputZip $windowsZip
-          if (-not (Test-Path -LiteralPath $windowsZip -PathType Leaf)) { throw 'Signed Windows ZIP was not created' }
-
-      - name: Rebuild native portable GUI from signed package
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input'
-          $package = Join-Path $root 'package'
-          $launcher = Join-Path $root 'vicon-lsl-bridge-portable-launcher.exe'
-          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
-          $packageScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\package_gui_single_exe.ps1'
-          & $packageScript -DeployDir $package -OutputExe $portable -Mode Native `
-            -LauncherExe $launcher -UseExistingLicenseBundle -AllowSignedExecutables
-          if (-not (Test-Path -LiteralPath $portable -PathType Leaf)) { throw 'Signed portable GUI was not created' }
-
-      - name: Sign final portable GUI
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-          WINDOWS_SIGNING_CERTIFICATE_SUBJECT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_SUBJECT }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $signScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\sign_windows.ps1'
-          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
-          & $signScript -Path $portable
-
-      - name: Test signed portable GUI and embedded executable inventory
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
-          $testProcess = Start-Process -FilePath $portable -ArgumentList '--test' -Wait -PassThru
-          if ($testProcess.ExitCode -ne 0) {
-            throw "Signed portable GUI test failed with exit code $($testProcess.ExitCode)"
-          }
-          $extractDir = Join-Path $env:RUNNER_TEMP ('signed-portable-' + [guid]::NewGuid().ToString('N'))
-          $extractProcess = Start-Process -FilePath $portable `
-            -ArgumentList @('--extract', $extractDir) -Wait -PassThru
-          if ($extractProcess.ExitCode -ne 0) {
-            throw "Signed portable extraction failed with exit code $($extractProcess.ExitCode)"
-          }
-          $package = Join-Path $env:GITHUB_WORKSPACE 'windows-signing-input\package'
-          foreach ($relative in @(
-            'vicon-lsl-bridge.exe',
-            'vicon-lsl-bridge-gui.exe',
-            'labrecorder\LabRecorder.exe',
-            'labrecorder\LabRecorderCLI.exe')) {
-            $source = Join-Path $package $relative
-            $embedded = Join-Path $extractDir $relative
-            if (-not (Test-Path -LiteralPath $embedded -PathType Leaf)) {
-              throw "Signed portable payload is missing $relative"
-            }
-            if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
-                (Get-FileHash -LiteralPath $embedded -Algorithm SHA256).Hash) {
-              throw "Signed portable payload does not contain the signed package copy of $relative"
-            }
-          }
-
-      - name: Verify signatures in ZIP and portable GUI
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_SUBJECT: ${{ vars.WINDOWS_SIGNING_CERTIFICATE_SUBJECT }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $windowsZip = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64.zip'
-          $portable = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge-windows-x64-gui-portable.exe'
-          $extractDir = Join-Path $env:RUNNER_TEMP ('signed-windows-' + [guid]::NewGuid().ToString('N'))
-          Expand-Archive -LiteralPath $windowsZip -DestinationPath $extractDir -Force
-          $signScript = Join-Path $env:GITHUB_WORKSPACE 'vicon-lsl-bridge\packaging\windows\sign_windows.ps1'
-          & $signScript -VerifyOnly -Path @(
-            (Join-Path $extractDir 'vicon-lsl-bridge.exe'),
-            (Join-Path $extractDir 'vicon-lsl-bridge-gui.exe'),
-            (Join-Path $extractDir 'labrecorder\LabRecorder.exe'),
-            (Join-Path $extractDir 'labrecorder\LabRecorderCLI.exe'),
-            $portable)
-
-      - name: Upload signed Windows artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: vicon-lsl-bridge-windows-x64-signed
-          path: |
-            vicon-lsl-bridge-windows-x64.zip
-            vicon-lsl-bridge-windows-x64-gui-portable.exe
-          if-no-files-found: error
-
   release:
-    needs: [sign-windows, logic-tests, build, hololens-core-tests]
+    needs: [logic-tests, build, hololens-core-tests]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -682,6 +489,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must use the exact vN.N.N format: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
           tag_version="${GITHUB_REF_NAME#v}"
           cmake_version="$(sed -nE 's/^[[:space:]]*project\(vicon-lsl-bridge[[:space:]]+VERSION[[:space:]]+([^[:space:])]+).*/\1/p' vicon-lsl-bridge/CMakeLists.txt | head -n1)"
           if [ -z "$cmake_version" ]; then
@@ -699,11 +510,11 @@ jobs:
           name: vicon-lsl-bridge-linux-x64
           path: artifacts/vicon-lsl-bridge-linux-x64
 
-      - name: Download signed Windows artifact
+      - name: Download Windows artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: vicon-lsl-bridge-windows-x64-signed
-          path: artifacts/vicon-lsl-bridge-windows-x64-signed
+          name: vicon-lsl-bridge-windows-x64
+          path: artifacts/vicon-lsl-bridge-windows-x64
 
       - name: Assemble versioned release assets
         shell: bash
@@ -715,7 +526,7 @@ jobs:
             exit 1
           fi
           mkdir -p release-assets
-          windows_dir="artifacts/vicon-lsl-bridge-windows-x64-signed"
+          windows_dir="artifacts/vicon-lsl-bridge-windows-x64"
           linux_dir="artifacts/vicon-lsl-bridge-linux-x64"
           portable_src="$windows_dir/vicon-lsl-bridge-windows-x64-gui-portable.exe"
           windows_zip_src="$windows_dir/vicon-lsl-bridge-windows-x64.zip"
