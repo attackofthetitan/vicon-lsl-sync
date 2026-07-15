@@ -23,6 +23,10 @@ struct PreviewTransformProfile {
     std::string name;
     bool enabled = true;
     double scale = 1.0;
+    // Converts a source stream's coordinate basis before the rigid transform.
+    // The current eye-tracker stream uses +Z opposite to the right-handed
+    // HoloLens target-pose convention, so its Z sign is -1.
+    PreviewVec3 input_axis_sign{1.0, 1.0, 1.0};
     PreviewVec3 rotation_degrees{};
     // Automatic calibration uses a quaternion so a solved rigid transform is not
     // degraded by an Euler-angle round trip. Manual controls keep using Euler.
@@ -66,6 +70,7 @@ enum class PreviewStreamRole {
     ViconMarkers,
     ViconSegments,
     HoloLensGaze,
+    HoloLensCalibrationTarget,
 };
 
 struct PreviewStreamSchema {

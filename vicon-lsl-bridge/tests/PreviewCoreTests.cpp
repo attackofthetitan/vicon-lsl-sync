@@ -211,6 +211,32 @@ TEST_CASE("Preview parser extracts HoloLens gaze rays from native LSL labels") {
     REQUIRE(near(vicon_lsl::length(rays.front().direction), 1.0));
 }
 
+TEST_CASE("Preview rebases raw eye-tracker gaze before rigid calibration") {
+    std::vector<double> sample(vicon_lsl::kHoloLensGazeChannelCount, 0.0);
+    sample[2] = -0.25;
+    sample[5] = 1.0;
+    sample[6] = 1.0;
+
+    const auto transform = vicon_lsl::gazeTransformForCoordinateFrame(
+        {}, "eye_tracker_space");
+    const auto rays = vicon_lsl::parseGazeSample(gazeLabels(), sample, transform);
+
+    REQUIRE(rays.front().valid);
+    REQUIRE(near(rays.front().origin.z, 0.25));
+    REQUIRE(near(rays.front().direction.z, -1.0));
+    REQUIRE(vicon_lsl::calibrationCoordinateFramesCompatible(
+        "eye_tracker_space", "hololens_stationary_shared_with_gaze"));
+}
+
+TEST_CASE("Preview recognizes the HoloLens stair target stream") {
+    vicon_lsl::PreviewStreamSchema schema;
+    schema.name = "HoloLensModelTargetPose";
+    schema.type = "Calibration";
+    schema.channel_labels = calibrationLabels();
+    REQUIRE_EQ(vicon_lsl::inferPreviewStreamRole(schema),
+               vicon_lsl::PreviewStreamRole::HoloLensCalibrationTarget);
+}
+
 TEST_CASE("Preview timestamp tolerance accepts only nearby samples") {
     REQUIRE(vicon_lsl::timestampWithinTolerance(10.0, 10.04, 0.05));
     REQUIRE(!vicon_lsl::timestampWithinTolerance(10.0, 10.06, 0.05));
@@ -276,8 +302,13 @@ TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses
         labels, {1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 2.0, 1.0});
     const auto untracked = vicon_lsl::parseCalibrationTargetPose(
         labels, {9.0, 9.0, 9.0, 0.0, 0.0, 0.0, 1.0, 0.0});
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto publisher_untracked = vicon_lsl::parseCalibrationTargetPose(
+        labels, {nan, nan, nan, nan, nan, nan, nan, 0.0});
     REQUIRE(tracked.has_value());
     REQUIRE(untracked.has_value());
+    REQUIRE(publisher_untracked.has_value());
+    REQUIRE(!publisher_untracked->tracked);
     const auto average = vicon_lsl::averageTrackedTargetPoses({*tracked, *untracked});
     REQUIRE(average.has_value());
     REQUIRE(near(average->translation.x, 1.0));
@@ -306,6 +337,65 @@ TEST_CASE("Preview calibration reports quality and rejects unstable target motio
     unstable.back().holo_from_target.translation.x += 0.1;
     REQUIRE(!vicon_lsl::targetPoseWithinTolerance(unstable.front(), unstable.back(), profile));
     REQUIRE(!vicon_lsl::solveTrackedTargetCalibration(unstable, profile).has_value());
+}
+
+TEST_CASE("Preview calibration finds a stable target window in a recording") {
+    const auto profile = vicon_lsl::defaultStairCalibrationProfile();
+    std::vector<vicon_lsl::CalibrationTargetPose> poses = {
+        {{{9.0, 9.0, 9.0}, {0.0, 0.0, 0.0, 1.0}}, false},
+        {{{5.0, 5.0, 5.0}, {0.0, 0.0, 0.0, 1.0}}, true},
+    };
+    for (std::size_t index = 0; index < profile.required_samples; ++index) {
+        poses.push_back({{{1.0 + static_cast<double>(index) * 0.0001, 2.0, 3.0},
+                          {0.0, 0.0, 0.0, 1.0}}, true});
+    }
+
+    const auto solution = vicon_lsl::solveStableTrackedTargetCalibration(poses, profile);
+    REQUIRE(solution.has_value());
+    REQUIRE(near(solution->holo_from_target.translation.x, 1.00095, 1e-9));
+}
+
+TEST_CASE("Preview XDF playback calibrates raw gaze from recorded stair poses") {
+    const auto profile = vicon_lsl::defaultStairCalibrationProfile();
+
+    vicon_lsl::XdfStreamData gaze;
+    gaze.stream_id = 1;
+    gaze.name = "HoloLensGaze";
+    gaze.role = vicon_lsl::PreviewStreamRole::HoloLensGaze;
+    gaze.coordinate_frame = "eye_tracker_space";
+    gaze.channel_labels = gazeLabels();
+    gaze.timestamps = {10.0};
+    gaze.samples = {std::vector<double>(vicon_lsl::kHoloLensGazeChannelCount, 0.0)};
+    gaze.samples.front()[0] = 1.0;
+    gaze.samples.front()[1] = 2.0;
+    gaze.samples.front()[2] = -3.0;
+    gaze.samples.front()[5] = 1.0;
+    gaze.samples.front()[6] = 1.0;
+
+    vicon_lsl::XdfStreamData target;
+    target.stream_id = 2;
+    target.name = "HoloLensModelTargetPose";
+    target.role = vicon_lsl::PreviewStreamRole::HoloLensCalibrationTarget;
+    target.coordinate_frame = "hololens_stationary_shared_with_gaze";
+    target.channel_labels = calibrationLabels();
+    for (std::size_t index = 0; index < profile.required_samples; ++index) {
+        target.timestamps.push_back(9.9 + static_cast<double>(index) * 0.005);
+        target.samples.push_back({1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0, 1.0});
+    }
+
+    vicon_lsl::XdfLoadResult xdf;
+    xdf.streams = {std::move(target), std::move(gaze)};
+    const auto recording = vicon_lsl::buildXdfPreviewRecording(xdf, {}, {}, 0.05);
+
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(recording.frames.front().gaze_rays.size(), static_cast<std::size_t>(3));
+    const auto& ray = recording.frames.front().gaze_rays.front();
+    REQUIRE(ray.valid);
+    REQUIRE(near(ray.origin.x, profile.vicon_from_target.translation.x));
+    REQUIRE(near(ray.origin.y, profile.vicon_from_target.translation.y));
+    REQUIRE(near(ray.origin.z, profile.vicon_from_target.translation.z));
+    REQUIRE(near(ray.direction.z, -1.0));
+    REQUIRE(recording.summary.find("stair-target calibration applied") != std::string::npos);
 }
 
 TEST_CASE("Preview calibration aligns a synthetic gaze ray with the stair frame") {

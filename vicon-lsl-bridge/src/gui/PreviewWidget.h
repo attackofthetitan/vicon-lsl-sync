@@ -20,6 +20,8 @@ public:
 
     void setStairMesh(const PreviewMesh& mesh, const PreviewTransformProfile& transform);
     void setTrailPointLimit(int points);
+    void resetForNewSource();
+    void requestViewRefit();
 
 public slots:
     void setFrame(vicon_lsl::PreviewFrame frame);
@@ -61,7 +63,9 @@ private:
     double elevation_degrees_ = 24.0;
     double zoom_ = 1.0;
     bool have_previous_frame_timestamp_ = false;
+    bool have_seen_valid_gaze_ = false;
     double previous_frame_timestamp_ = 0.0;
+    bool refit_on_next_frame_ = true;
     QPoint last_mouse_pos_;
 };
 

@@ -84,6 +84,25 @@ PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema) {
     if (schema.name == stream_defaults::HoloLensGaze) {
         return PreviewStreamRole::HoloLensGaze;
     }
+    if (schema.name == stream_defaults::HoloLensModelTargetPose) {
+        return PreviewStreamRole::HoloLensCalibrationTarget;
+    }
+
+    const auto has_calibration_label = [&schema](const std::string& label) {
+        return std::find(schema.channel_labels.begin(),
+                         schema.channel_labels.end(),
+                         label) != schema.channel_labels.end();
+    };
+    if (has_calibration_label("PositionX") &&
+        has_calibration_label("PositionY") &&
+        has_calibration_label("PositionZ") &&
+        has_calibration_label("RotationX") &&
+        has_calibration_label("RotationY") &&
+        has_calibration_label("RotationZ") &&
+        has_calibration_label("RotationW") &&
+        has_calibration_label("Tracked")) {
+        return PreviewStreamRole::HoloLensCalibrationTarget;
+    }
 
     const auto has_marker_suffix = std::any_of(schema.channel_labels.begin(),
                                                schema.channel_labels.end(),
