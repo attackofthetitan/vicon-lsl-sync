@@ -145,7 +145,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
     }
 
     try {
-        const auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 1, 0.05);
+        auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 1, 0.05);
         if (streams.empty()) {
             return false;
         }
