@@ -24,6 +24,7 @@ namespace GazeLSL
         private bool failureReported;
         private bool startRequested;
         private bool stopWarningReported;
+        private int reportedProviderExceptionCount;
 
         private void Start()
         {
@@ -112,12 +113,22 @@ namespace GazeLSL
 
         private void Update()
         {
+            if (worker != null &&
+                worker.ProviderExceptionCount > reportedProviderExceptionCount)
+            {
+                reportedProviderExceptionCount = worker.ProviderExceptionCount;
+                Exception providerException = worker.LastProviderException;
+                Debug.LogWarning(
+                    $"Eye tracker read threw an exception; publisher will retry - {providerException}"
+                );
+            }
+
             if (worker != null && worker.Failure != null)
             {
                 if (!failureReported)
                 {
                     failureReported = true;
-                    Debug.LogError($"Gaze LSL publisher stopped after an error - {worker.Failure.Message}");
+                    Debug.LogError($"Gaze LSL publisher stopped after an error - {worker.Failure}");
                 }
 
                 if (StopPublishing())
@@ -164,6 +175,7 @@ namespace GazeLSL
                 );
                 worker.Start();
                 failureReported = false;
+                reportedProviderExceptionCount = 0;
             }
             catch (Exception e)
             {
@@ -198,6 +210,7 @@ namespace GazeLSL
             sessionGeneration = 0L;
             failureReported = false;
             stopWarningReported = false;
+            reportedProviderExceptionCount = 0;
 
             if (currentWorker != null)
             {

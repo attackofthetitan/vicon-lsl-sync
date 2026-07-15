@@ -35,8 +35,10 @@ namespace GazeLSL
         private Thread thread;
         private ManualResetEventSlim stopSignal;
         private Exception failure;
+        private Exception lastProviderException;
         private int running;
         private int pushedSampleCount;
+        private int providerExceptionCount;
 
         public GazePublisherWorker(
             IGazeSampleProvider provider,
@@ -52,7 +54,9 @@ namespace GazeLSL
 
         public bool IsRunning => Volatile.Read(ref running) != 0;
         public int PushedSampleCount => Volatile.Read(ref pushedSampleCount);
-        public Exception Failure => failure;
+        public int ProviderExceptionCount => Volatile.Read(ref providerExceptionCount);
+        public Exception LastProviderException => Volatile.Read(ref lastProviderException);
+        public Exception Failure => Volatile.Read(ref failure);
 
         public void Start()
         {
@@ -119,6 +123,8 @@ namespace GazeLSL
                 double intervalMilliseconds = 1000.0 / nominalRate;
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 double nextSampleMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                int consecutiveProviderFailures = 0;
+                int maxConsecutiveProviderFailures = (int)Math.Max(3u, nominalRate);
 
                 while (!stopSignal.IsSet)
                 {
@@ -130,7 +136,28 @@ namespace GazeLSL
                     }
 
                     GazeSample sample;
-                    if (provider.TryGetNextSample(out sample))
+                    bool hasSample;
+                    try
+                    {
+                        hasSample = provider.TryGetNextSample(out sample);
+                        consecutiveProviderFailures = 0;
+                    }
+                    catch (Exception e)
+                    {
+                        Volatile.Write(ref lastProviderException, e);
+                        Interlocked.Increment(ref providerExceptionCount);
+                        consecutiveProviderFailures++;
+                        if (consecutiveProviderFailures >= maxConsecutiveProviderFailures)
+                        {
+                            throw new InvalidOperationException(
+                                $"Eye tracker sample acquisition failed {consecutiveProviderFailures} consecutive times.",
+                                e);
+                        }
+                        hasSample = false;
+                        sample = default(GazeSample);
+                    }
+
+                    if (hasSample)
                     {
                         GazeSampleEncoder.WriteSample(sample, sampleBuffer);
                         double timestamp = sample.Timestamp;

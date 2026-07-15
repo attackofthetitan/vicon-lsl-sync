@@ -16,6 +16,7 @@ internal static class Program
             GazePublisherRejectsInvalidFallback,
             GazePublisherInvalidTimestampKeepsCadence,
             GazePublisherCancellation,
+            GazePublisherRecoversFromTransientProviderException,
             GazePublisherProviderException,
             GazePublisherOutletException,
             GazePublisherTimeoutRetainsOwnership,
@@ -218,11 +219,34 @@ internal static class Program
     private static void GazePublisherProviderException()
     {
         var expected = new InvalidOperationException("provider failed");
-        var worker = new GazePublisherWorker(new ThrowingProvider(expected), new CountingOutlet(), 1000);
+        var worker = new GazePublisherWorker(new ThrowingProvider(expected), new CountingOutlet(), 20);
         worker.Start();
         WaitUntilStopped(worker);
-        Same(expected, worker.Failure);
+        True(worker.Failure is InvalidOperationException,
+            "Persistent provider failures should stop the worker.");
+        Same(expected, worker.Failure.InnerException);
         True(worker.Stop(1000), "Failed provider worker should remain joinable.");
+    }
+
+    private static void GazePublisherRecoversFromTransientProviderException()
+    {
+        var expected = new NullReferenceException("transient WinRT read failure");
+        var outlet = new CountingOutlet();
+        var worker = new GazePublisherWorker(
+            new ThrowOnceProvider(expected), outlet, 1000);
+        worker.Start();
+
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        while (outlet.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(1);
+        }
+
+        True(outlet.Count > 0, "Worker did not recover after a transient provider exception.");
+        True(worker.Failure == null, "Transient provider exception stopped the worker.");
+        Equal(1.0, worker.ProviderExceptionCount);
+        Same(expected, worker.LastProviderException);
+        True(worker.Stop(1000), "Recovered provider worker did not stop.");
     }
 
     private static void GazePublisherOutletException()
@@ -398,6 +422,19 @@ internal static class Program
         private readonly Exception failure;
         public ThrowingProvider(Exception failure) { this.failure = failure; }
         public bool TryGetNextSample(out GazeSample sample) { sample = default(GazeSample); throw failure; }
+    }
+
+    private sealed class ThrowOnceProvider : IGazeSampleProvider
+    {
+        private readonly Exception failure;
+        private int calls;
+        public ThrowOnceProvider(Exception failure) { this.failure = failure; }
+        public bool TryGetNextSample(out GazeSample sample)
+        {
+            sample = new GazeSample { Timestamp = 1.0 };
+            if (Interlocked.Increment(ref calls) == 1) throw failure;
+            return true;
+        }
     }
 
     private sealed class BlockingProvider : IGazeSampleProvider

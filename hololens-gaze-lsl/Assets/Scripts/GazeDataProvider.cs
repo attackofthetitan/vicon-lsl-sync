@@ -266,14 +266,15 @@ namespace GazeLSL
                     return false;
                 }
 
-                if (reading.SystemRelativeTime <= state.LastConsumedSystemRelativeTime)
+                TimeSpan readingSystemRelativeTime = reading.SystemRelativeTime;
+                if (readingSystemRelativeTime <= state.LastConsumedSystemRelativeTime)
                 {
                     return false;
                 }
-                state.LastConsumedSystemRelativeTime = reading.SystemRelativeTime;
+                state.LastConsumedSystemRelativeTime = readingSystemRelativeTime;
 
                 if (state.ClockMapping == null ||
-                    !state.ClockMapping.TryMap(reading.SystemRelativeTime, out double sampleTimestamp))
+                    !state.ClockMapping.TryMap(readingSystemRelativeTime, out double sampleTimestamp))
                 {
                     return false;
                 }
@@ -282,7 +283,11 @@ namespace GazeLSL
                 sample.Timestamp = sampleTimestamp;
 
                 PerceptionTimestamp perceptionTimestamp =
-                    PerceptionTimestampHelper.FromSystemRelativeTargetTime(reading.SystemRelativeTime);
+                    PerceptionTimestampHelper.FromSystemRelativeTargetTime(readingSystemRelativeTime);
+                if (perceptionTimestamp == null)
+                {
+                    return false;
+                }
 
                 SpatialLocation trackerLocation = state.Locator.TryLocateAtTimestamp(
                     perceptionTimestamp,
