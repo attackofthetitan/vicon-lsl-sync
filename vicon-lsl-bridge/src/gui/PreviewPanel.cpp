@@ -280,6 +280,7 @@ void PreviewPanel::startPreview() {
     play_csv_button_->setText("Play Recording");
     saveSettings();
     widget_->setTrailPointLimit(trail_points_spin_->value());
+    widget_->resetForNewSource();
 
     PreviewWorkerConfig config;
     config.marker_stream_name = marker_stream_edit_->text().trimmed();
@@ -363,6 +364,7 @@ void PreviewPanel::useManualTransform() {
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
+    widget_->requestViewRefit();
     saveSettings();
     setStatus("Using manual HoloLens transform");
 }
@@ -409,6 +411,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
+    widget_->requestViewRefit();
     setStatus("Stair-target calibration " + QString::fromStdString(profile.id) +
               " applied for this session (RMS " +
               QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
@@ -442,6 +445,7 @@ void PreviewPanel::openMergedCsv() {
 void PreviewPanel::loadMergedCsv(const QString& path) {
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
+    widget_->resetForNewSource();
 
     try {
         PreviewTransformProfile vicon_transform;
@@ -497,6 +501,7 @@ void PreviewPanel::openXdf() {
 void PreviewPanel::loadXdf(const QString& path) {
     csv_timer_->stop();
     play_csv_button_->setText("Play Recording");
+    widget_->resetForNewSource();
 
     try {
         PreviewTransformProfile vicon_transform;
@@ -620,11 +625,10 @@ void PreviewPanel::resetCalibrationSession() {
 }
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
-    PreviewTransformProfile transform;
-    transform.name = "Stair";
+    PreviewTransformProfile transform = transformProfileFromRigid(
+        defaultStairCalibrationProfile().vicon_from_target,
+        "Stair");
     transform.scale = 0.001;
-    transform.translation = defaultStairCalibrationProfile().vicon_from_target.translation;
-    transform.rotation_degrees = {0.0, 0.0, 0.0};
     return transform;
 }
 

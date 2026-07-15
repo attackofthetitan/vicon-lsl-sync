@@ -19,6 +19,7 @@ struct XdfStreamData {
     std::string type;
     std::string source_id;
     std::string channel_format;
+    std::string coordinate_frame;
     int channel_count = 0;
     double nominal_srate = 0.0;
     PreviewStreamRole role = PreviewStreamRole::Unknown;

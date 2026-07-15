@@ -222,6 +222,7 @@ void parseStreamHeader(XdfStreamData& stream, const std::string& xml) {
     stream.channel_count = parseIntTag(xml, "channel_count", 0);
     stream.nominal_srate = parseDoubleTag(xml, "nominal_srate", 0.0);
     stream.channel_format = xmlTagValue(xml, "channel_format").value_or("double64");
+    stream.coordinate_frame = xmlTagValue(xml, "coordinate_frame").value_or("");
     stream.channel_labels = parseChannelLabels(xml, stream.channel_count);
     if (stream.channel_count <= 0) {
         stream.channel_count = static_cast<int>(stream.channel_labels.size());

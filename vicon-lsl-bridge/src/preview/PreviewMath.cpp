@@ -120,7 +120,11 @@ PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const 
     if (!transform.enabled) {
         return point;
     }
-    const PreviewVec3 scaled = point * transform.scale;
+    const PreviewVec3 scaled{
+        point.x * transform.input_axis_sign.x * transform.scale,
+        point.y * transform.input_axis_sign.y * transform.scale,
+        point.z * transform.input_axis_sign.z * transform.scale,
+    };
     const PreviewVec3 rotated = transform.use_quaternion_rotation
         ? rotateByQuaternion(scaled, transform.rotation)
         : rotateEulerDegrees(scaled, transform.rotation_degrees);
@@ -131,9 +135,14 @@ PreviewVec3 applyTransformDirection(const PreviewTransformProfile& transform, co
     if (!transform.enabled) {
         return normalize(direction);
     }
+    const PreviewVec3 rebased{
+        direction.x * transform.input_axis_sign.x,
+        direction.y * transform.input_axis_sign.y,
+        direction.z * transform.input_axis_sign.z,
+    };
     const PreviewVec3 rotated = transform.use_quaternion_rotation
-        ? rotateByQuaternion(direction, transform.rotation)
-        : rotateEulerDegrees(direction, transform.rotation_degrees);
+        ? rotateByQuaternion(rebased, transform.rotation)
+        : rotateEulerDegrees(rebased, transform.rotation_degrees);
     return normalize(rotated);
 }
 

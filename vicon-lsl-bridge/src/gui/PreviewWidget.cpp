@@ -57,7 +57,7 @@ void PreviewWidget::setStairMesh(const PreviewMesh& mesh, const PreviewTransform
     stair_transform_ = transform;
     stair_triangles_ = triangulateMesh(stair_mesh_, stair_transform_);
     resetViewFit();
-    lockViewToCurrentScene();
+    refit_on_next_frame_ = true;
     update();
 }
 
@@ -65,10 +65,29 @@ void PreviewWidget::setTrailPointLimit(int points) {
     trail_point_limit_ = std::max(2, points);
 }
 
+void PreviewWidget::resetForNewSource() {
+    frame_ = {};
+    marker_trails_.clear();
+    have_previous_frame_timestamp_ = false;
+    have_seen_valid_gaze_ = false;
+    previous_frame_timestamp_ = 0.0;
+    resetViewFit();
+    refit_on_next_frame_ = true;
+    update();
+}
+
+void PreviewWidget::requestViewRefit() {
+    refit_on_next_frame_ = true;
+}
+
 void PreviewWidget::setFrame(PreviewFrame frame) {
     const bool rewound = have_previous_frame_timestamp_
         && std::isfinite(frame.timestamp)
         && frame.timestamp + 1e-6 < previous_frame_timestamp_;
+    const bool first_valid_gaze = !have_seen_valid_gaze_ && std::any_of(
+        frame.gaze_rays.begin(), frame.gaze_rays.end(), [](const PreviewGazeRay& ray) {
+            return ray.valid && isFinite(ray.origin) && isFinite(ray.direction);
+        });
 
     frame_ = std::move(frame);
     for (const auto& marker : frame_.markers) {
@@ -81,9 +100,11 @@ void PreviewWidget::setFrame(PreviewFrame frame) {
             trail.pop_front();
         }
     }
-    if (rewound) {
+    if (rewound || refit_on_next_frame_ || first_valid_gaze) {
         resetViewFit();
+        refit_on_next_frame_ = false;
     }
+    have_seen_valid_gaze_ = have_seen_valid_gaze_ || first_valid_gaze;
     lockViewToCurrentScene();
     if (std::isfinite(frame_.timestamp)) {
         previous_frame_timestamp_ = frame_.timestamp;

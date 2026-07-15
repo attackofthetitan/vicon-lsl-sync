@@ -50,6 +50,9 @@ bool targetPoseWithinTolerance(const CalibrationTargetPose& reference,
 std::optional<CalibrationSolution> solveTrackedTargetCalibration(
     const std::vector<CalibrationTargetPose>& poses,
     const CalibrationProfile& profile);
+std::optional<CalibrationSolution> solveStableTrackedTargetCalibration(
+    const std::vector<CalibrationTargetPose>& poses,
+    const CalibrationProfile& profile);
 
 PreviewRigidTransform composeRigidTransforms(const PreviewRigidTransform& left,
                                              const PreviewRigidTransform& right);
@@ -64,5 +67,10 @@ std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
     const std::vector<CalibrationTargetPose>& poses);
 PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& transform,
                                                   const std::string& name = "HoloLens");
+PreviewTransformProfile gazeTransformForCoordinateFrame(
+    PreviewTransformProfile transform,
+    const std::string& coordinate_frame);
+bool calibrationCoordinateFramesCompatible(const std::string& gaze_frame,
+                                           const std::string& target_frame);
 
 } // namespace vicon_lsl

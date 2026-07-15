@@ -43,6 +43,7 @@ struct PreviewStreamWorker::StreamState {
     PreviewTransformProfile transform;
     std::unique_ptr<lsl::stream_inlet> inlet;
     std::vector<std::string> labels;
+    std::string coordinate_frame;
     std::vector<double> latest_sample;
     double latest_timestamp = 0.0;
     bool have_sample = false;
@@ -118,7 +119,7 @@ void PreviewStreamWorker::run() {
         if (pollStream(*calibration_target_, now)) {
             const auto pose = parseCalibrationTargetPose(calibration_target_->labels,
                                                          calibration_target_->latest_sample);
-            if (pose) {
+            if (pose && calibrationFramesCompatible()) {
                 emit targetPoseReady(*pose);
             }
         }
@@ -144,12 +145,17 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
     }
 
     try {
-        const auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 1, 0.05);
+        auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 1, 0.05);
         if (streams.empty()) {
             return false;
         }
 
         state.labels = channelLabels(streams.front());
+        const char* coordinate_frame = streams.front()
+            .desc()
+            .child("acquisition")
+            .child_value("coordinate_frame");
+        state.coordinate_frame = coordinate_frame ? coordinate_frame : "";
         state.latest_sample.assign(static_cast<std::size_t>(streams.front().channel_count()), 0.0);
         state.inlet = std::make_unique<lsl::stream_inlet>(streams.front(), 360, 0, true);
         // Live preview consumes timestamps in the local recorder clock. Keep
@@ -200,6 +206,11 @@ bool PreviewStreamWorker::streamIsFresh(const StreamState& state, qint64 now_ms)
            now_ms - state.last_sample_ms <= kStaleSampleMs;
 }
 
+bool PreviewStreamWorker::calibrationFramesCompatible() const {
+    return calibrationCoordinateFramesCompatible(gaze_->coordinate_frame,
+                                                  calibration_target_->coordinate_frame);
+}
+
 void PreviewStreamWorker::emitFrameFromMarker(qint64 now_ms) {
     PreviewFrame frame;
     frame.timestamp = markers_->latest_timestamp;
@@ -224,7 +235,9 @@ void PreviewStreamWorker::emitFrameFromMarker(qint64 now_ms) {
         PreviewTransformProfile gaze_transform;
         {
             std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
-            gaze_transform = gaze_->transform;
+            gaze_transform = gazeTransformForCoordinateFrame(
+                gaze_->transform,
+                gaze_->coordinate_frame);
         }
         frame.gaze_rays = parseGazeSample(gaze_->labels, gaze_->latest_sample, gaze_transform);
     }
@@ -266,7 +279,9 @@ void PreviewStreamWorker::emitFallbackFrame(qint64 now_ms,
         PreviewTransformProfile gaze_transform;
         {
             std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
-            gaze_transform = gaze_->transform;
+            gaze_transform = gazeTransformForCoordinateFrame(
+                gaze_->transform,
+                gaze_->coordinate_frame);
         }
         frame.gaze_rays = parseGazeSample(gaze_->labels, gaze_->latest_sample, gaze_transform);
     }
@@ -289,6 +304,13 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
     }
     if (!calibration_target_->last_error.isEmpty()) {
         status += "; calibration error: " + calibration_target_->last_error;
+    }
+    if (gaze_->connected() && calibration_target_->connected() &&
+        !calibrationFramesCompatible()) {
+        status += "; calibration unavailable: gaze frame " +
+                  QString::fromStdString(gaze_->coordinate_frame) +
+                  " differs from target frame " +
+                  QString::fromStdString(calibration_target_->coordinate_frame);
     }
     emit statusChanged(status);
 }

@@ -1,5 +1,6 @@
 #include "preview/PreviewXdf.h"
 
+#include "preview/PreviewCalibration.h"
 #include "preview/PreviewParsing.h"
 
 #include <algorithm>
@@ -77,6 +78,11 @@ const XdfStreamData* chooseMasterStream(const std::vector<XdfStreamData>& stream
         }
     }
     for (const auto& stream : streams) {
+        if (usable(stream) && stream.role == PreviewStreamRole::HoloLensGaze) {
+            return &stream;
+        }
+    }
+    for (const auto& stream : streams) {
         if (usable(stream)) {
             return &stream;
         }
@@ -100,7 +106,10 @@ void appendStreamSample(PreviewFrame& frame,
                               std::make_move_iterator(segments.begin()),
                               std::make_move_iterator(segments.end()));
     } else if (stream.role == PreviewStreamRole::HoloLensGaze) {
-        auto rays = parseGazeSample(stream.channel_labels, sample, gaze_transform);
+        const auto stream_transform = gazeTransformForCoordinateFrame(
+            gaze_transform,
+            stream.coordinate_frame);
+        auto rays = parseGazeSample(stream.channel_labels, sample, stream_transform);
         frame.gaze_rays.insert(frame.gaze_rays.end(),
                                std::make_move_iterator(rays.begin()),
                                std::make_move_iterator(rays.end()));
@@ -112,6 +121,7 @@ std::string roleName(PreviewStreamRole role) {
     case PreviewStreamRole::ViconMarkers: return "markers";
     case PreviewStreamRole::ViconSegments: return "segments";
     case PreviewStreamRole::HoloLensGaze: return "gaze";
+    case PreviewStreamRole::HoloLensCalibrationTarget: return "calibration target";
     case PreviewStreamRole::Unknown: break;
     }
     return "unknown";
@@ -126,6 +136,43 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
     const XdfStreamData* master = chooseMasterStream(xdf.streams);
     if (!master) {
         throw std::runtime_error("XDF contains no numeric streams with samples");
+    }
+
+    const XdfStreamData* gaze_stream = nullptr;
+    const XdfStreamData* target_stream = nullptr;
+    for (const auto& stream : xdf.streams) {
+        if (!gaze_stream && stream.role == PreviewStreamRole::HoloLensGaze) {
+            gaze_stream = &stream;
+        } else if (!target_stream &&
+                   stream.role == PreviewStreamRole::HoloLensCalibrationTarget) {
+            target_stream = &stream;
+        }
+    }
+
+    PreviewTransformProfile resolved_gaze_transform = gaze_transform;
+    bool automatically_calibrated = false;
+    if (gaze_stream && target_stream &&
+        calibrationCoordinateFramesCompatible(gaze_stream->coordinate_frame,
+                                              target_stream->coordinate_frame)) {
+        std::vector<CalibrationTargetPose> target_poses;
+        target_poses.reserve(target_stream->samples.size());
+        for (const auto& sample : target_stream->samples) {
+            const auto pose = parseCalibrationTargetPose(target_stream->channel_labels, sample);
+            if (pose) {
+                target_poses.push_back(*pose);
+            }
+        }
+        const auto solution = solveStableTrackedTargetCalibration(
+            target_poses,
+            defaultStairCalibrationProfile());
+        if (solution) {
+            resolved_gaze_transform = transformProfileFromRigid(
+                composeRigidTransforms(
+                    defaultStairCalibrationProfile().vicon_from_target,
+                    inverseRigidTransform(solution->holo_from_target)),
+                "HoloLens");
+            automatically_calibrated = true;
+        }
     }
 
     const bool has_markers = std::any_of(
@@ -166,7 +213,7 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
                                    stream,
                                    stream.samples[*sample_index],
                                    vicon_transform,
-                                   gaze_transform);
+                                   resolved_gaze_transform);
             }
         }
 
@@ -175,6 +222,9 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
 
     std::ostringstream summary;
     summary << xdf.streams.size() << " stream(s), " << recording.frames.size() << " frame(s)";
+    if (automatically_calibrated) {
+        summary << "; stair-target calibration applied";
+    }
     for (const auto& stream : xdf.streams) {
         summary << "; "
                 << (stream.name.empty() ? "stream_" + std::to_string(stream.stream_id) : stream.name)

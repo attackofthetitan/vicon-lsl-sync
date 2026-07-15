@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 #include <unordered_map>
 
 namespace vicon_lsl {
@@ -17,6 +18,13 @@ bool finiteQuaternion(const PreviewQuaternion& value) {
 bool usableQuaternion(const PreviewQuaternion& value) {
     return finiteQuaternion(value) &&
            value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w > 1e-24;
+}
+
+std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
 }
 
 } // namespace
@@ -103,6 +111,33 @@ std::optional<CalibrationSolution> solveTrackedTargetCalibration(
     return solution;
 }
 
+std::optional<CalibrationSolution> solveStableTrackedTargetCalibration(
+    const std::vector<CalibrationTargetPose>& poses,
+    const CalibrationProfile& profile) {
+    std::vector<CalibrationTargetPose> stable;
+    stable.reserve(profile.required_samples);
+    for (const auto& pose : poses) {
+        if (!pose.tracked) {
+            stable.clear();
+            continue;
+        }
+        if (!stable.empty() &&
+            !targetPoseWithinTolerance(stable.front(), pose, profile)) {
+            stable.clear();
+        }
+        stable.push_back(pose);
+        if (stable.size() < profile.required_samples) {
+            continue;
+        }
+        const auto solution = solveTrackedTargetCalibration(stable, profile);
+        if (solution) {
+            return solution;
+        }
+        stable.erase(stable.begin());
+    }
+    return std::nullopt;
+}
+
 PreviewRigidTransform composeRigidTransforms(const PreviewRigidTransform& left,
                                              const PreviewRigidTransform& right) {
     const PreviewQuaternion rotation = multiplyQuaternions(left.rotation, right.rotation);
@@ -137,7 +172,13 @@ std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
     const auto qx = value("RotationX"); const auto qy = value("RotationY");
     const auto qz = value("RotationZ"); const auto qw = value("RotationW");
     const auto tracked = value("Tracked");
-    if (!x || !y || !z || !qx || !qy || !qz || !qw || !tracked ||
+    if (!tracked || !std::isfinite(*tracked)) {
+        return std::nullopt;
+    }
+    if (*tracked <= 0.5) {
+        return CalibrationTargetPose{{}, false};
+    }
+    if (!x || !y || !z || !qx || !qy || !qz || !qw ||
         !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z) ||
         !finiteQuaternion({*qx, *qy, *qz, *qw})) {
         return std::nullopt;
@@ -189,6 +230,32 @@ PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& t
     profile.rotation = normalizeQuaternion(transform.rotation);
     profile.translation = transform.translation;
     return profile;
+}
+
+PreviewTransformProfile gazeTransformForCoordinateFrame(
+    PreviewTransformProfile transform,
+    const std::string& coordinate_frame) {
+    if (lower(coordinate_frame) == "eye_tracker_space") {
+        transform.input_axis_sign.z = -std::abs(transform.input_axis_sign.z);
+    }
+    return transform;
+}
+
+bool calibrationCoordinateFramesCompatible(const std::string& gaze_frame,
+                                           const std::string& target_frame) {
+    if (gaze_frame.empty() || target_frame.empty()) {
+        return true;
+    }
+    const std::string gaze = lower(gaze_frame);
+    const std::string target = lower(target_frame);
+    if (gaze == target) {
+        return true;
+    }
+    // The publisher deliberately leaves gaze in eye-tracker coordinates. The
+    // desktop preview performs the Z-basis conversion before applying the
+    // target-derived rigid transform.
+    return gaze == "eye_tracker_space" &&
+           target == "hololens_stationary_shared_with_gaze";
 }
 
 } // namespace vicon_lsl
