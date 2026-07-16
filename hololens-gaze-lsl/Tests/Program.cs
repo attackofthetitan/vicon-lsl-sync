@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Threading;
 using GazeLSL;
 
@@ -10,21 +11,16 @@ internal static class Program
         var tests = new Action[]
         {
             ModelTargetPoseEncoding,
+            GazeTrackerRayTransformsIntoWorld,
             GazeSampleEncodingMatchesContract,
-            GazeClockMappingUsesMidpointPair,
             GazePublisherPreservesExplicitTimestamp,
             GazePublisherRejectsInvalidFallback,
             GazePublisherInvalidTimestampKeepsCadence,
             GazePublisherCancellation,
             GazePublisherRecoversFromTransientProviderException,
-            GazePublisherProviderException,
+            GazePublisherRequestsRecoveryAfterPersistentProviderExceptions,
             GazePublisherOutletException,
-            GazePublisherTimeoutRetainsOwnership,
-            TrackerGenerationRejectsLateOpen,
-            TrackerSameIdentityPendingOpenStaysOwned,
-            TrackerSameIdentityGenerationSharesLifetime,
-            TrackerCloseWaitsForReadLease,
-            TrackerDestroyInvalidatesPendingOpen
+            GazePublisherTimeoutRetainsOwnership
         };
 
         int failures = 0;
@@ -196,36 +192,71 @@ internal static class Program
         True(worker.Stop(1000), "Invalid-timestamp cadence worker did not stop.");
     }
 
-    private static void GazeClockMappingUsesMidpointPair()
-    {
-        long[] qpc = { 1000, 1100 };
-        int qpcIndex = 0;
-        var mapping = new GazeClockMapping(
-            1000.0,
-            () => qpc[qpcIndex++],
-            () => 10.55);
-        True(mapping.TryCalibrate(), "A finite midpoint clock pair should calibrate.");
-
-        double mapped;
-        True(mapping.TryMap(TimeSpan.FromSeconds(2.0), out mapped),
-            "A calibrated system-relative timestamp should map.");
-        Equal(11.5, mapped);
-
-        True(!GazeClockMapping.TryMap(
-                TimeSpan.FromSeconds(2.0), 1000, double.NaN, 1000.0, out mapped),
-            "A non-finite midpoint must be rejected.");
-    }
-
-    private static void GazePublisherProviderException()
+    private static void GazePublisherRequestsRecoveryAfterPersistentProviderExceptions()
     {
         var expected = new InvalidOperationException("provider failed");
         var worker = new GazePublisherWorker(new ThrowingProvider(expected), new CountingOutlet(), 20);
         worker.Start();
-        WaitUntilStopped(worker);
-        True(worker.Failure is InvalidOperationException,
-            "Persistent provider failures should stop the worker.");
-        Same(expected, worker.Failure.InnerException);
-        True(worker.Stop(1000), "Failed provider worker should remain joinable.");
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (worker.IsRunning && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(1);
+        }
+        False(worker.IsRunning,
+            "Persistent tracker read failures did not request a fresh SDK session.");
+        True(worker.ProviderExceptionCount >= 20,
+            "The worker requested recovery before one second of consecutive failures.");
+        Same(expected, worker.ProviderFailure);
+        True(worker.Failure == null, "A recoverable tracker failure became an outlet failure.");
+        Same(expected, worker.LastProviderException);
+        True(worker.Stop(1000), "Recovering provider worker did not remain joinable.");
+    }
+
+    private static void GazeTrackerRayTransformsIntoWorld()
+    {
+        Vector3 worldOrigin;
+        Vector3 worldDirection;
+        Quaternion quarterTurnAroundY = Quaternion.CreateFromAxisAngle(
+            Vector3.UnitY,
+            (float)(Math.PI / 2.0));
+
+        True(
+            GazeCoordinateTransform.TryTransformTrackerRayToSharedWorld(
+                new Vector3(0, 0, 1),
+                new Vector3(0, 0, 2),
+                new Vector3(10, 20, 30),
+                quarterTurnAroundY,
+                Vector3.Zero,
+                Quaternion.Identity,
+                Vector3.One,
+                out worldOrigin,
+                out worldDirection),
+            "A finite tracker ray should transform into world coordinates.");
+
+        Near(9.0, worldOrigin.X);
+        Near(20.0, worldOrigin.Y);
+        Near(-30.0, worldOrigin.Z);
+        Near(-1.0, worldDirection.X);
+        Near(0.0, worldDirection.Y);
+        Near(0.0, worldDirection.Z);
+        Near(1.0, worldDirection.Length());
+
+        True(
+            GazeCoordinateTransform.TryTransformTrackerRayToSharedWorld(
+                new Vector3(1, 2, 3),
+                Vector3.UnitZ,
+                Vector3.Zero,
+                Quaternion.Identity,
+                new Vector3(5, 0, 0),
+                Quaternion.Identity,
+                new Vector3(2, 2, 2),
+                out worldOrigin,
+                out worldDirection),
+            "The playspace transform should be included in shared world coordinates.");
+        Near(7.0, worldOrigin.X);
+        Near(4.0, worldOrigin.Y);
+        Near(6.0, worldOrigin.Z);
+        Near(1.0, worldDirection.Z);
     }
 
     private static void GazePublisherRecoversFromTransientProviderException()
@@ -274,108 +305,6 @@ internal static class Program
         False(worker.IsRunning, "Worker still reports running after its retained thread exited.");
     }
 
-    private static void TrackerGenerationRejectsLateOpen()
-    {
-        var closed = new List<FakeTracker>();
-        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
-        var older = new FakeTracker("older");
-        var newer = new FakeTracker("newer");
-        var olderAttempt = coordinator.BeginOpen(older);
-        var newerAttempt = coordinator.BeginOpen(newer);
-
-        False(coordinator.TryActivate(olderAttempt, new FakeState()), "Older asynchronous open replaced a newer generation.");
-        True(closed.Contains(older), "Rejected older tracker was not closed.");
-        True(coordinator.TryActivate(newerAttempt, new FakeState()), "Newest tracker generation did not activate.");
-        coordinator.Abandon(olderAttempt);
-        False(coordinator.Retire(older), "Late removal retired a different active tracker.");
-        True(coordinator.HasActiveSession, "Late callback cleared the active generation.");
-        True(coordinator.Retire(newer), "Active tracker could not be retired.");
-        True(closed.Contains(newer), "Retired tracker was not closed.");
-    }
-
-    private static void TrackerCloseWaitsForReadLease()
-    {
-        var closed = new List<FakeTracker>();
-        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
-        var tracker = new FakeTracker("active");
-        var attempt = coordinator.BeginOpen(tracker);
-        True(coordinator.TryActivate(attempt, new FakeState()), "Tracker did not activate.");
-
-        TrackerSessionCoordinator<FakeTracker, FakeState>.ReadLease lease;
-        True(coordinator.TryAcquireRead(out lease), "Could not acquire an active read lease.");
-        True(coordinator.Retire(tracker), "Could not retire tracker with an active reader.");
-        False(closed.Contains(tracker), "Tracker closed while a read was active.");
-        lease.Dispose();
-        True(closed.Contains(tracker), "Tracker did not close after its last read completed.");
-    }
-
-    private static void TrackerSameIdentityGenerationSharesLifetime()
-    {
-        var closed = new List<FakeTracker>();
-        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
-        var tracker = new FakeTracker("reused");
-        var firstState = new FakeState();
-        var secondState = new FakeState();
-
-        var firstAttempt = coordinator.BeginOpen(tracker);
-        True(coordinator.TryActivate(firstAttempt, firstState), "First tracker generation did not activate.");
-        TrackerSessionCoordinator<FakeTracker, FakeState>.ReadLease firstLease;
-        True(coordinator.TryAcquireRead(out firstLease), "Could not acquire a read from the first generation.");
-
-        var secondAttempt = coordinator.BeginOpen(tracker);
-        True(coordinator.TryActivate(secondAttempt, secondState), "Reused tracker generation did not activate.");
-        False(closed.Contains(tracker), "Replacing a generation closed the tracker reused by its successor.");
-
-        TrackerSessionCoordinator<FakeTracker, FakeState>.ReadLease secondLease;
-        True(coordinator.TryAcquireRead(out secondLease), "Could not acquire a read from the successor generation.");
-        Same(secondState, secondLease.State);
-
-        True(coordinator.Retire(tracker), "Could not retire the reused tracker.");
-        False(closed.Contains(tracker), "Reused tracker closed while generation reads were active.");
-        firstLease.Dispose();
-        False(closed.Contains(tracker), "Reused tracker closed before the successor read completed.");
-        secondLease.Dispose();
-        Equal(1, closed.Count);
-        Same(tracker, closed[0]);
-    }
-
-    private static void TrackerSameIdentityPendingOpenStaysOwned()
-    {
-        var closed = new List<FakeTracker>();
-        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
-        var tracker = new FakeTracker("pending-reused");
-        var olderAttempt = coordinator.BeginOpen(tracker);
-        var newerAttempt = coordinator.BeginOpen(tracker);
-
-        False(coordinator.TryActivate(olderAttempt, new FakeState()),
-            "Older same-identity open replaced the newer generation.");
-        False(closed.Contains(tracker),
-            "Rejecting an old open closed a tracker still owned by a pending generation.");
-        True(coordinator.TryActivate(newerAttempt, new FakeState()),
-            "Newer same-identity open did not activate.");
-        False(closed.Contains(tracker),
-            "Activating the surviving generation closed its tracker.");
-        True(coordinator.Retire(tracker), "Could not retire same-identity pending tracker.");
-        Equal(1, closed.Count);
-        Same(tracker, closed[0]);
-    }
-
-    private static void TrackerDestroyInvalidatesPendingOpen()
-    {
-        var closed = new List<FakeTracker>();
-        var coordinator = new TrackerSessionCoordinator<FakeTracker, FakeState>(closed.Add);
-        var tracker = new FakeTracker("pending");
-        var attempt = coordinator.BeginOpen(tracker);
-        coordinator.Destroy();
-        True(closed.Contains(tracker), "Destroy did not close a pending tracker.");
-        False(coordinator.TryActivate(attempt, new FakeState()), "A pending open activated after destruction.");
-
-        var lateTracker = new FakeTracker("late");
-        var lateAttempt = coordinator.BeginOpen(lateTracker);
-        False(lateAttempt.IsValid, "Open attempt remained valid after destruction.");
-        True(closed.Contains(lateTracker), "Tracker arriving after destruction was not closed.");
-    }
-
     private static void WaitUntilStopped(GazePublisherWorker worker)
     {
         var deadline = DateTime.UtcNow.AddSeconds(1);
@@ -422,6 +351,14 @@ internal static class Program
         private readonly Exception failure;
         public ThrowingProvider(Exception failure) { this.failure = failure; }
         public bool TryGetNextSample(out GazeSample sample) { sample = default(GazeSample); throw failure; }
+    }
+
+    private static void Near(double expected, double actual)
+    {
+        if (Math.Abs(expected - actual) > 0.000001)
+        {
+            throw new InvalidOperationException($"Expected {expected}, got {actual}.");
+        }
     }
 
     private sealed class ThrowOnceProvider : IGazeSampleProvider
@@ -504,11 +441,4 @@ internal static class Program
         public void PushSample(double[] sample, double timestamp) { throw failure; }
     }
 
-    private sealed class FakeTracker
-    {
-        public FakeTracker(string name) { Name = name; }
-        public string Name { get; }
-    }
-
-    private sealed class FakeState { }
 }

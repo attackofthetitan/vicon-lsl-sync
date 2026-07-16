@@ -151,6 +151,14 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
 
     PreviewTransformProfile resolved_gaze_transform = gaze_transform;
     bool automatically_calibrated = false;
+    bool tracker_local_gaze = false;
+    if (gaze_stream) {
+        std::string frame = gaze_stream->coordinate_frame;
+        std::transform(frame.begin(), frame.end(), frame.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        tracker_local_gaze = frame == "eye_tracker_space";
+    }
     if (gaze_stream && target_stream &&
         calibrationCoordinateFramesCompatible(gaze_stream->coordinate_frame,
                                               target_stream->coordinate_frame)) {
@@ -166,11 +174,9 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
             target_poses,
             defaultStairCalibrationProfile());
         if (solution) {
-            resolved_gaze_transform = transformProfileFromRigid(
-                composeRigidTransforms(
-                    defaultStairCalibrationProfile().vicon_from_target,
-                    inverseRigidTransform(solution->holo_from_target)),
-                "HoloLens");
+            resolved_gaze_transform = gazeTransformFromTargetCalibration(
+                defaultStairCalibrationProfile(),
+                solution->holo_from_target);
             automatically_calibrated = true;
         }
     }
@@ -224,6 +230,8 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
     summary << xdf.streams.size() << " stream(s), " << recording.frames.size() << " frame(s)";
     if (automatically_calibrated) {
         summary << "; stair-target calibration applied";
+    } else if (tracker_local_gaze && target_stream) {
+        summary << "; legacy tracker-local gaze shown without stair calibration";
     }
     for (const auto& stream : xdf.streams) {
         summary << "; "

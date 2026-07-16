@@ -27,7 +27,11 @@ The DLL is a UWP ARM64 build of `liblsl` `v1.16.2`.
 
 ## Unity Setup
 
-Attach `GazeDataProvider` and `GazeLSLOutlet` to a scene object, then assign a `GazeLSLConfig` asset.
+Attach `GazeDataProvider` and `GazeLSLOutlet` to a scene object, then assign a `GazeLSLConfig` asset to the outlet.
+
+The Unity project must include the Microsoft Extended Eye Tracking SDK and Mixed Reality OpenXR 1.5.1 or later. `GazeDataProvider` requests eye-gaze access, opens `EyeGazeTracker`, and starts only when the tracker exposes an exact 90 Hz mode. The 90 Hz LSL worker acquires raw SDK readings, while Unity's main thread locates the corresponding dynamic `SpatialGraphNode` at each reading's `SystemRelativeTime` and transforms the combined, left, and right rays into the stationary Unity/OpenXR scene frame.
+
+Each distinct SDK reading is timestamped with `LSL.local_clock()` as soon as it is accepted. No QPC conversion or custom clock mapping is used. Normal LSL inlet clock correction and XDF clock-offset chunks therefore synchronize the stream with LSL streams from other hosts.
 
 `GazeLSLOutlet` creates a native LSL outlet. If `liblsl.dll` cannot be loaded or the outlet fails to initialize, gaze publishing fails loudly in Unity logs instead of falling back to a bridge relay.
 

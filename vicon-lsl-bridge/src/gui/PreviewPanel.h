@@ -100,7 +100,7 @@ private:
     QString pending_recording_path_;
     bool stair_model_loaded_ = false;
     CalibrationState calibration_state_ = CalibrationState::Manual;
-    PreviewRigidTransform automatic_gaze_transform_;
+    PreviewTransformProfile automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;
 };
 
