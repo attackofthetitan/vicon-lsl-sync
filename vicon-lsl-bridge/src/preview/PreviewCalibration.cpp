@@ -20,6 +20,16 @@ bool usableQuaternion(const PreviewQuaternion& value) {
            value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w > 1e-24;
 }
 
+PreviewVec3 reflectZ(const PreviewVec3& value) {
+    return {value.x, value.y, -value.z};
+}
+
+PreviewQuaternion reflectZBasis(const PreviewQuaternion& value) {
+    // F R(q) F, for F = diag(1, 1, -1). Quaternion vector components
+    // are axial under a reflection.
+    return {-value.x, -value.y, value.z, value.w};
+}
+
 std::string lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -232,17 +242,46 @@ PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& t
     return profile;
 }
 
+PreviewTransformProfile gazeTransformFromTargetCalibration(
+    const CalibrationProfile& profile,
+    const PreviewRigidTransform& holo_from_target) {
+    const PreviewQuaternion target_from_holo_rotation =
+        inverseQuaternion(holo_from_target.rotation);
+    const PreviewVec3 target_from_holo_translation = rotateByQuaternion(
+        holo_from_target.translation * -1.0,
+        target_from_holo_rotation);
+
+    PreviewTransformProfile transform;
+    transform.name = "HoloLens";
+    transform.use_quaternion_rotation = true;
+    transform.rotation = normalizeQuaternion(multiplyQuaternions(
+        profile.vicon_from_target.rotation,
+        reflectZBasis(target_from_holo_rotation)));
+    transform.translation = applyRigidTransformPoint(
+        profile.vicon_from_target,
+        reflectZ(target_from_holo_translation));
+    // The target pose and gaze are published in a right-handed world frame,
+    // but the Vicon-aligned stair model keeps its original Unity target-local
+    // basis. Apply that basis conversion to gaze only.
+    transform.input_axis_sign.z = -1.0;
+    return transform;
+}
+
 PreviewTransformProfile gazeTransformForCoordinateFrame(
     PreviewTransformProfile transform,
     const std::string& coordinate_frame) {
-    if (lower(coordinate_frame) == "eye_tracker_space") {
-        transform.input_axis_sign.z = -std::abs(transform.input_axis_sign.z);
-    }
+    // Extended eye-tracker samples are already right-handed (+Z forward).
+    // New recordings are transformed into the shared stationary world before
+    // publication; legacy eye_tracker_space recordings remain tracker-local.
+    (void)coordinate_frame;
     return transform;
 }
 
 bool calibrationCoordinateFramesCompatible(const std::string& gaze_frame,
                                            const std::string& target_frame) {
+    if (lower(gaze_frame) == "eye_tracker_space") {
+        return false;
+    }
     if (gaze_frame.empty() || target_frame.empty()) {
         return true;
     }
@@ -251,11 +290,7 @@ bool calibrationCoordinateFramesCompatible(const std::string& gaze_frame,
     if (gaze == target) {
         return true;
     }
-    // The publisher deliberately leaves gaze in eye-tracker coordinates. The
-    // desktop preview performs the Z-basis conversion before applying the
-    // target-derived rigid transform.
-    return gaze == "eye_tracker_space" &&
-           target == "hololens_stationary_shared_with_gaze";
+    return false;
 }
 
 } // namespace vicon_lsl

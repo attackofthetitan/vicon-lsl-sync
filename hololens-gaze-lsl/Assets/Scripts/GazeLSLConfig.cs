@@ -14,9 +14,5 @@ namespace GazeLSL
         public string ModelTargetStreamName = "HoloLensModelTargetPose";
         public string ModelTargetStreamType = "Calibration";
         public string ModelTargetSourceId = "hololens2_stair_model_target";
-
-        [Header("Eye Tracking Settings")]
-        [Tooltip("Requested Extended Eye Tracking frame rate. HoloLens 2 commonly supports 30, 60, and 90 Hz.")]
-        public uint TargetFrameRate = 90;
     }
 }

@@ -35,8 +35,11 @@ namespace GazeLSL
         private Thread thread;
         private ManualResetEventSlim stopSignal;
         private Exception failure;
+        private Exception providerFailure;
+        private Exception lastProviderException;
         private int running;
         private int pushedSampleCount;
+        private int providerExceptionCount;
 
         public GazePublisherWorker(
             IGazeSampleProvider provider,
@@ -52,7 +55,10 @@ namespace GazeLSL
 
         public bool IsRunning => Volatile.Read(ref running) != 0;
         public int PushedSampleCount => Volatile.Read(ref pushedSampleCount);
-        public Exception Failure => failure;
+        public int ProviderExceptionCount => Volatile.Read(ref providerExceptionCount);
+        public Exception LastProviderException => Volatile.Read(ref lastProviderException);
+        public Exception ProviderFailure => Volatile.Read(ref providerFailure);
+        public Exception Failure => Volatile.Read(ref failure);
 
         public void Start()
         {
@@ -64,14 +70,31 @@ namespace GazeLSL
                 }
 
                 stopSignal = new ManualResetEventSlim(false);
-                Volatile.Write(ref running, 1);
                 thread = new Thread(WorkerLoop)
                 {
                     IsBackground = true,
                     Priority = ThreadPriority.AboveNormal,
                     Name = "HoloLens Gaze LSL"
                 };
-                thread.Start();
+                try
+                {
+#if ENABLE_WINMD_SUPPORT
+                    // The Extended Eye Tracking SDK is WinRT. Unity's raw worker thread
+                    // must enter an MTA before it touches EyeGazeTracker objects.
+                    thread.SetApartmentState(ApartmentState.MTA);
+#endif
+                    Volatile.Write(ref running, 1);
+                    thread.Start();
+                }
+                catch
+                {
+                    Volatile.Write(ref running, 0);
+                    thread = null;
+                    ManualResetEventSlim failedSignal = stopSignal;
+                    stopSignal = null;
+                    failedSignal.Dispose();
+                    throw;
+                }
             }
         }
 
@@ -119,6 +142,8 @@ namespace GazeLSL
                 double intervalMilliseconds = 1000.0 / nominalRate;
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 double nextSampleMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+                int consecutiveProviderFailures = 0;
+                int providerRecoveryThreshold = (int)Math.Max(3u, nominalRate);
 
                 while (!stopSignal.IsSet)
                 {
@@ -130,7 +155,32 @@ namespace GazeLSL
                     }
 
                     GazeSample sample;
-                    if (provider.TryGetNextSample(out sample))
+                    bool hasSample;
+                    try
+                    {
+                        hasSample = provider.TryGetNextSample(out sample);
+                        consecutiveProviderFailures = 0;
+                    }
+                    catch (Exception e)
+                    {
+                        Volatile.Write(ref lastProviderException, e);
+                        Interlocked.Increment(ref providerExceptionCount);
+                        consecutiveProviderFailures++;
+                        if (consecutiveProviderFailures >= providerRecoveryThreshold)
+                        {
+                            // The main thread will retire this projected tracker and
+                            // re-enumerate a fresh Extended Eye Tracking SDK session.
+                            Volatile.Write(ref providerFailure, e);
+                            break;
+                        }
+
+                        // XR focus changes can briefly invalidate a projected WinRT
+                        // reading. Retry on the next configured acquisition tick.
+                        hasSample = false;
+                        sample = default(GazeSample);
+                    }
+
+                    if (hasSample)
                     {
                         GazeSampleEncoder.WriteSample(sample, sampleBuffer);
                         double timestamp = sample.Timestamp;

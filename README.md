@@ -14,8 +14,8 @@ The bridge connects to a Vicon DataStream server and creates marker/segment LSL 
 
 - **ViconMarkers** — 4 channels per marker (X, Y, Z in mm, Valid flag). Occluded markers are sent as NaN with Valid=0.
 - **ViconSegments** — 7 channels per segment (X, Y, Z in mm, QX, QY, QZ, QW quaternion rotation).
-- **HoloLensGaze** — native LSL stream from the HoloLens Unity app. The stream has 21 channels: combined, left-eye, and right-eye origin/direction plus valid flags.
-- **HoloLensModelTargetPose** — optional native LSL stream from the Vuforia stair model target. It contains the target position, quaternion, and tracked flag in the same HoloLens world frame as gaze.
+- **HoloLensGaze** — native LSL stream from the HoloLens Unity app. The 90 Hz sample has 21 channels containing combined, left-eye, and right-eye Unity-world rays plus valid flags.
+- **HoloLensModelTargetPose** — optional native LSL stream from the Vuforia stair model target. It contains the target position, quaternion, and tracked flag in the Unity world frame.
 
 If the marker/segment layout changes mid-session (e.g., subjects added or removed), streams are automatically destroyed and recreated.
 
@@ -33,13 +33,17 @@ There is also a seperate GUI app for windows.
 
 The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure and start streaming without using the command line. Enter the Vicon server address, optionally change stream names, and click Start.
 
-The GUI also includes an embedded native OpenGL preview. The preview subscribes to the same LSL streams that LabRecorder records (`ViconMarkers`, `ViconSegments`, and `HoloLensGaze` by default), combines them into one 3D scene, and applies saved per-stream transforms so Vicon, HoloLens gaze, and the stair model can share one coordinate frame.
+The GUI also includes an embedded native OpenGL preview. The preview subscribes to the same LSL streams that LabRecorder records (`ViconMarkers`, `ViconSegments`, and `HoloLensGaze` by default) and applies saved per-stream transforms. The HoloLens gaze and model-target streams share the same stationary Unity/OpenXR world frame, so stair-target calibration can place gaze in the Vicon world.
 
 The built-in XDF loader is intended for visual preview. It preserves absolute stream time and applies the recorded clock-offset history once; use the official [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) importer for scientific offline analysis.
 
+Recordings labeled `eye_tracker_space` predate the world-space publisher fix. The preview shows those rays for acquisition checks but does not apply stair calibration, because the time-varying tracker-to-world pose is not present in those files.
+
 ### Automatic stair-target alignment
 
-Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` without modifying the raw gaze stream.
+Automatic stair-target alignment requires world-space gaze. With Microsoft Mixed Reality OpenXR 1.5.1 or later, `GazeDataProvider` acquires raw readings on its 90 Hz worker, then locates the eye tracker's dynamic spatial-graph node on Unity's main thread at each reading's system-relative timestamp before publishing the ray in the current Unity/OpenXR scene coordinate system.
+
+Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` in the same right-handed world convention as gaze.
 
 In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and applies the resulting HoloLens-to-Vicon rigid transform for the current preview session only; automatic alignment is not saved. **Use Manual Transform** returns to the persistent translation/Euler controls.
 

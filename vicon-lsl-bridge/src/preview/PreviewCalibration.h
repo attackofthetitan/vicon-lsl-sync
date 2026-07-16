@@ -67,6 +67,9 @@ std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
     const std::vector<CalibrationTargetPose>& poses);
 PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& transform,
                                                   const std::string& name = "HoloLens");
+PreviewTransformProfile gazeTransformFromTargetCalibration(
+    const CalibrationProfile& profile,
+    const PreviewRigidTransform& holo_from_target);
 PreviewTransformProfile gazeTransformForCoordinateFrame(
     PreviewTransformProfile transform,
     const std::string& coordinate_frame);

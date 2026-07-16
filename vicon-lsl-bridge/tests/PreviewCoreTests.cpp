@@ -211,7 +211,7 @@ TEST_CASE("Preview parser extracts HoloLens gaze rays from native LSL labels") {
     REQUIRE(near(vicon_lsl::length(rays.front().direction), 1.0));
 }
 
-TEST_CASE("Preview rebases raw eye-tracker gaze before rigid calibration") {
+TEST_CASE("Preview preserves raw eye-tracker basis and rejects world calibration") {
     std::vector<double> sample(vicon_lsl::kHoloLensGazeChannelCount, 0.0);
     sample[2] = -0.25;
     sample[5] = 1.0;
@@ -222,9 +222,9 @@ TEST_CASE("Preview rebases raw eye-tracker gaze before rigid calibration") {
     const auto rays = vicon_lsl::parseGazeSample(gazeLabels(), sample, transform);
 
     REQUIRE(rays.front().valid);
-    REQUIRE(near(rays.front().origin.z, 0.25));
-    REQUIRE(near(rays.front().direction.z, -1.0));
-    REQUIRE(vicon_lsl::calibrationCoordinateFramesCompatible(
+    REQUIRE(near(rays.front().origin.z, -0.25));
+    REQUIRE(near(rays.front().direction.z, 1.0));
+    REQUIRE(!vicon_lsl::calibrationCoordinateFramesCompatible(
         "eye_tracker_space", "hololens_stationary_shared_with_gaze"));
 }
 
@@ -292,6 +292,44 @@ TEST_CASE("Preview calibration composes and inverts rigid transforms") {
     REQUIRE(near(transformed_direction.y, 1.0));
 }
 
+TEST_CASE("Preview applies target handedness conversion to gaze and not the stair model") {
+    const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
+    const double half_sqrt_two = std::sqrt(0.5);
+    const vicon_lsl::PreviewRigidTransform holo_from_target{
+        {1.0, 2.0, 3.0}, {0.0, half_sqrt_two, 0.0, half_sqrt_two}};
+    const vicon_lsl::PreviewVec3 target_model_point{0.25, 0.5, 1.0};
+    const vicon_lsl::PreviewVec3 target_model_direction{0.0, 0.0, 1.0};
+    const vicon_lsl::PreviewVec3 target_rh_point{0.25, 0.5, -1.0};
+    const vicon_lsl::PreviewVec3 target_rh_direction{0.0, 0.0, -1.0};
+    const auto holo_point =
+        vicon_lsl::applyRigidTransformPoint(holo_from_target, target_rh_point);
+    const auto holo_direction = vicon_lsl::rotateByQuaternion(
+        target_rh_direction,
+        holo_from_target.rotation);
+
+    const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(
+        calibration,
+        holo_from_target);
+    const auto point = vicon_lsl::applyTransformPoint(transform, holo_point);
+    const auto direction = vicon_lsl::applyTransformDirection(transform, holo_direction);
+    const auto expected_point = vicon_lsl::applyRigidTransformPoint(
+        calibration.vicon_from_target,
+        target_model_point);
+    const auto expected_direction = vicon_lsl::rotateByQuaternion(
+        target_model_direction,
+        calibration.vicon_from_target.rotation);
+
+    REQUIRE(near(transform.input_axis_sign.x, 1.0));
+    REQUIRE(near(transform.input_axis_sign.y, 1.0));
+    REQUIRE(near(transform.input_axis_sign.z, -1.0));
+    REQUIRE(near(point.x, expected_point.x));
+    REQUIRE(near(point.y, expected_point.y));
+    REQUIRE(near(point.z, expected_point.z));
+    REQUIRE(near(direction.x, expected_direction.x));
+    REQUIRE(near(direction.y, expected_direction.y));
+    REQUIRE(near(direction.z, expected_direction.z));
+}
+
 TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses") {
     const auto labels = calibrationLabels();
     const auto invalid = vicon_lsl::parseCalibrationTargetPose(
@@ -355,7 +393,7 @@ TEST_CASE("Preview calibration finds a stable target window in a recording") {
     REQUIRE(near(solution->holo_from_target.translation.x, 1.00095, 1e-9));
 }
 
-TEST_CASE("Preview XDF playback calibrates raw gaze from recorded stair poses") {
+TEST_CASE("Preview XDF playback keeps legacy tracker-local gaze uncalibrated") {
     const auto profile = vicon_lsl::defaultStairCalibrationProfile();
 
     vicon_lsl::XdfStreamData gaze;
@@ -368,7 +406,7 @@ TEST_CASE("Preview XDF playback calibrates raw gaze from recorded stair poses") 
     gaze.samples = {std::vector<double>(vicon_lsl::kHoloLensGazeChannelCount, 0.0)};
     gaze.samples.front()[0] = 1.0;
     gaze.samples.front()[1] = 2.0;
-    gaze.samples.front()[2] = -3.0;
+    gaze.samples.front()[2] = 3.0;
     gaze.samples.front()[5] = 1.0;
     gaze.samples.front()[6] = 1.0;
 
@@ -391,10 +429,82 @@ TEST_CASE("Preview XDF playback calibrates raw gaze from recorded stair poses") 
     REQUIRE_EQ(recording.frames.front().gaze_rays.size(), static_cast<std::size_t>(3));
     const auto& ray = recording.frames.front().gaze_rays.front();
     REQUIRE(ray.valid);
-    REQUIRE(near(ray.origin.x, profile.vicon_from_target.translation.x));
-    REQUIRE(near(ray.origin.y, profile.vicon_from_target.translation.y));
-    REQUIRE(near(ray.origin.z, profile.vicon_from_target.translation.z));
-    REQUIRE(near(ray.direction.z, -1.0));
+    REQUIRE(near(ray.origin.x, 1.0));
+    REQUIRE(near(ray.origin.y, 2.0));
+    REQUIRE(near(ray.origin.z, 3.0));
+    REQUIRE(near(ray.direction.z, 1.0));
+    REQUIRE(recording.summary.find("legacy tracker-local gaze shown without stair calibration") !=
+            std::string::npos);
+}
+
+TEST_CASE("Preview XDF playback calibrates shared Unity-world gaze from the stair target") {
+    const auto profile = vicon_lsl::defaultStairCalibrationProfile();
+    const double half_sqrt_two = std::sqrt(0.5);
+    const vicon_lsl::PreviewRigidTransform holo_from_target{
+        {1.0, 2.0, 3.0}, {0.0, half_sqrt_two, 0.0, half_sqrt_two}};
+    const vicon_lsl::PreviewVec3 target_space_origin{0.25, 0.5, 1.0};
+    const vicon_lsl::PreviewVec3 target_space_direction{0.0, 0.0, 1.0};
+    const vicon_lsl::PreviewVec3 target_rh_origin{
+        target_space_origin.x, target_space_origin.y, -target_space_origin.z};
+    const vicon_lsl::PreviewVec3 target_rh_direction{
+        target_space_direction.x, target_space_direction.y, -target_space_direction.z};
+    const auto holo_space_origin =
+        vicon_lsl::applyRigidTransformPoint(holo_from_target, target_rh_origin);
+    const auto holo_space_direction =
+        vicon_lsl::rotateByQuaternion(target_rh_direction, holo_from_target.rotation);
+
+    vicon_lsl::XdfStreamData gaze;
+    gaze.stream_id = 1;
+    gaze.name = "HoloLensGaze";
+    gaze.role = vicon_lsl::PreviewStreamRole::HoloLensGaze;
+    gaze.coordinate_frame = "hololens_stationary_shared_with_gaze";
+    gaze.channel_labels = gazeLabels();
+    gaze.timestamps = {10.0};
+    gaze.samples = {std::vector<double>(vicon_lsl::kHoloLensGazeChannelCount, 0.0)};
+    gaze.samples.front()[0] = holo_space_origin.x;
+    gaze.samples.front()[1] = holo_space_origin.y;
+    gaze.samples.front()[2] = holo_space_origin.z;
+    gaze.samples.front()[3] = holo_space_direction.x;
+    gaze.samples.front()[4] = holo_space_direction.y;
+    gaze.samples.front()[5] = holo_space_direction.z;
+    gaze.samples.front()[6] = 1.0;
+
+    vicon_lsl::XdfStreamData target;
+    target.stream_id = 2;
+    target.name = "HoloLensModelTargetPose";
+    target.role = vicon_lsl::PreviewStreamRole::HoloLensCalibrationTarget;
+    target.coordinate_frame = "hololens_stationary_shared_with_gaze";
+    target.channel_labels = calibrationLabels();
+    for (std::size_t index = 0; index < profile.required_samples; ++index) {
+        target.timestamps.push_back(9.9 + static_cast<double>(index) * 0.005);
+        target.samples.push_back({holo_from_target.translation.x,
+                                  holo_from_target.translation.y,
+                                  holo_from_target.translation.z,
+                                  holo_from_target.rotation.x,
+                                  holo_from_target.rotation.y,
+                                  holo_from_target.rotation.z,
+                                  holo_from_target.rotation.w,
+                                  1.0});
+    }
+
+    vicon_lsl::XdfLoadResult xdf;
+    xdf.streams = {std::move(target), std::move(gaze)};
+    const auto recording = vicon_lsl::buildXdfPreviewRecording(xdf, {}, {}, 0.05);
+
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+    const auto& ray = recording.frames.front().gaze_rays.front();
+    REQUIRE(ray.valid);
+    const auto expected_origin =
+        vicon_lsl::applyRigidTransformPoint(profile.vicon_from_target, target_space_origin);
+    const auto expected_direction =
+        vicon_lsl::rotateByQuaternion(target_space_direction,
+                                      profile.vicon_from_target.rotation);
+    REQUIRE(near(ray.origin.x, expected_origin.x));
+    REQUIRE(near(ray.origin.y, expected_origin.y));
+    REQUIRE(near(ray.origin.z, expected_origin.z));
+    REQUIRE(near(ray.direction.x, expected_direction.x));
+    REQUIRE(near(ray.direction.y, expected_direction.y));
+    REQUIRE(near(ray.direction.z, expected_direction.z));
     REQUIRE(recording.summary.find("stair-target calibration applied") != std::string::npos);
 }
 

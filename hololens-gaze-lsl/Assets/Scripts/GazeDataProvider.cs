@@ -1,301 +1,127 @@
 using System;
-using System.Text;
+using System.Collections.Generic;
 using UnityEngine;
-
-using Stopwatch = System.Diagnostics.Stopwatch;
 
 #if ENABLE_WINMD_SUPPORT
 using Microsoft.MixedReality.EyeTracking;
-using Windows.Perception;
-using Windows.Perception.Spatial;
-using Windows.Perception.Spatial.Preview;
+using Microsoft.MixedReality.OpenXR;
 #endif
 
 namespace GazeLSL
 {
-    /*
-    Reads HoloLens 2 Extended Eye Tracking data and converts tracker readings
-    into Unity-compatible world-space gaze samples.
-
-    The Microsoft.MixedReality.EyeTracking API is buffer-based. This provider
-    returns each acquired tracker reading. Missing or invalid gaze rays are encoded
-    as NaN values with their valid flag set to 0 by the outlet.
-    */
+    // Minimal HoloLens 2 Extended Eye Tracking provider.
+    // Rays are located in the Unity/OpenXR scene before they are published.
     public sealed class GazeDataProvider : MonoBehaviour, IGazeSampleProvider
     {
-        [SerializeField] private GazeLSLConfig config;
+        private const uint RequiredFrameRate = 90u;
+        private const int MaxTransformsPerUpdate = 32;
+        private const int MaxQueuedSamples = 360;
 
-        public uint EffectiveFrameRate
+#if ENABLE_WINMD_SUPPORT
+        private struct RawTrackerRay
         {
-            get
-            {
-                uint rate;
-                return TryGetEffectiveFrameRate(out rate) ? rate : 0u;
-            }
+            public bool IsValid;
+            public System.Numerics.Vector3 Origin;
+            public System.Numerics.Vector3 Direction;
         }
 
-        public bool IsFrameRateReady
+        private struct RawGazeReading
         {
-            get
-            {
-                uint rate;
-                return TryGetEffectiveFrameRate(out rate);
-            }
+            public long Generation;
+            public long SystemRelativeTimeTicks;
+            public double Timestamp;
+            public RawTrackerRay Combined;
+            public RawTrackerRay Left;
+            public RawTrackerRay Right;
         }
 
-        // Identifies the currently active tracker session. A new tracker
-        // session gets a new generation even when it negotiates the same
-        // effective frame rate, so consumers can recreate resources that are
-        // tied to the old reading buffer and clock mapping.
-        public long EffectiveSessionGeneration
-        {
-            get
-            {
-                uint rate;
-                long generation;
-                return TryGetEffectiveFrameRate(out rate, out generation)
-                    ? generation
-                    : 0L;
-            }
-        }
+        private readonly object trackerGate = new object();
+        private readonly Queue<RawGazeReading> pendingRawReadings =
+            new Queue<RawGazeReading>();
+        private readonly Queue<GazeSample> pendingSamples = new Queue<GazeSample>();
 
-        public bool TryGetEffectiveFrameRate(out uint rate)
+        private EyeGazeTrackerWatcher watcher;
+        private EyeGazeTracker tracker;
+        private SpatialGraphNode trackerNode;
+        private Transform mixedRealityPlayspace;
+        private DateTime lastReadingTimestamp = DateTime.MinValue;
+        private DateTime lastWallClock = DateTime.MinValue;
+        private long sessionGeneration;
+        private long watcherGeneration;
+        private long trackerLifecycleGeneration;
+        private bool includeIndividualEyes;
+        private bool restartInProgress;
+        private int consecutiveLocateFailures;
+        private volatile bool destroyed;
+#endif
+
+        private async void Start()
         {
-            long generation;
-            return TryGetEffectiveFrameRate(out rate, out generation);
+#if ENABLE_WINMD_SUPPORT
+            Camera mainCamera = Camera.main;
+            mixedRealityPlayspace = mainCamera != null
+                ? mainCamera.transform.parent
+                : null;
+            try
+            {
+                await StartWatcherAsync();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Extended eye tracking unavailable - {e.Message}");
+            }
+#else
+            Debug.LogError("Extended eye tracking requires a HoloLens/UWP device build.");
+            await System.Threading.Tasks.Task.CompletedTask;
+#endif
         }
 
         public bool TryGetEffectiveFrameRate(out uint rate, out long generation)
         {
             rate = 0u;
             generation = 0L;
+
 #if ENABLE_WINMD_SUPPORT
-            TrackerSessionState state;
-            if (trackerSessions.TryGetActiveState(out state) &&
-                state.EffectiveFrameRate > 0u)
+            lock (trackerGate)
             {
-                rate = state.EffectiveFrameRate;
-                generation = state.Generation;
+                if (tracker == null || trackerNode == null)
+                {
+                    return false;
+                }
+
+                rate = RequiredFrameRate;
+                generation = sessionGeneration;
                 return true;
             }
-#endif
+#else
             return false;
-        }
-
-        public bool IsTrackingAvailable
-        {
-            get
-            {
-#if ENABLE_WINMD_SUPPORT
-                return trackerSessions.HasActiveSession;
-#else
-                return false;
-#endif
-            }
-        }
-
-        public bool AreIndividualEyeGazesSupported
-        {
-            get
-            {
-#if ENABLE_WINMD_SUPPORT
-                TrackerSessionState state;
-                return trackerSessions.TryGetActiveState(out state) && state.IncludeIndividualEyes;
-#else
-                return false;
-#endif
-            }
-        }
-
-#if ENABLE_WINMD_SUPPORT
-        private sealed class TrackerSessionState
-        {
-            public SpatialLocator Locator;
-            public SpatialCoordinateSystem WorldCoordinateSystem;
-            public TimeSpan LastConsumedSystemRelativeTime;
-            public GazeClockMapping ClockMapping;
-            public uint EffectiveFrameRate;
-            public long Generation;
-            public bool IncludeIndividualEyes;
-        }
-
-        private readonly TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState> trackerSessions =
-            new TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState>(CloseTracker);
-        private EyeGazeTrackerWatcher watcher;
-#endif
-
-        private async void Start()
-        {
-#if ENABLE_WINMD_SUPPORT
-            try
-            {
-                watcher = new EyeGazeTrackerWatcher();
-                watcher.EyeGazeTrackerAdded += OnTrackerAdded;
-                watcher.EyeGazeTrackerRemoved += OnTrackerRemoved;
-
-                await watcher.StartAsync();
-
-                Debug.Log("Eye tracker watcher started");
-            }
-            catch (Exception e)
-            {
-#if ENABLE_WINMD_SUPPORT
-                trackerSessions.Destroy();
-#endif
-                Debug.LogError($"Extended eye tracking unavailable - {e.Message}");
-            }
-#else
-            SetTrackingUnavailable();
-            Debug.LogError("Extended eye tracking requires a HoloLens/UWP device build.");
-            await System.Threading.Tasks.Task.CompletedTask;
 #endif
         }
 
+        private void Update()
+        {
 #if ENABLE_WINMD_SUPPORT
-        private async void OnTrackerAdded(object sender, EyeGazeTracker newTracker)
-        {
-            TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState>.OpenAttempt attempt =
-                trackerSessions.BeginOpen(newTracker);
-            if (!attempt.IsValid)
-            {
-                return;
-            }
-
-            try
-            {
-                Debug.Log("Eye tracker found, opening with restricted access");
-
-                await newTracker.OpenAsync(true);
-
-                SpatialLocator newTrackerLocator = SpatialGraphInteropPreview.CreateLocatorForNode(
-                    newTracker.TrackerSpaceLocatorNodeId
-                );
-
-                if (newTrackerLocator == null)
-                {
-                    trackerSessions.Abandon(attempt);
-                    Debug.LogError("Failed to create SpatialLocator for eye tracker.");
-                    return;
-                }
-
-                SpatialCoordinateSystem newWorldCoordinateSystem = CreateWorldCoordinateSystem();
-                if (newWorldCoordinateSystem == null)
-                {
-                    trackerSessions.Abandon(attempt);
-                    Debug.LogError("Failed to create world coordinate system.");
-                    return;
-                }
-
-                uint selectedFrameRate;
-                if (!TryConfigureFrameRate(newTracker, out selectedFrameRate))
-                {
-                    trackerSessions.Abandon(attempt);
-                    Debug.LogError("Eye tracker session has no confirmed frame rate.");
-                    return;
-                }
-
-                GazeClockMapping clockMapping = new GazeClockMapping(
-                    Stopwatch.Frequency,
-                    () => Stopwatch.GetTimestamp(),
-                    () => LSL.LSL.local_clock());
-                if (!clockMapping.TryCalibrate())
-                {
-                    trackerSessions.Abandon(attempt);
-                    Debug.LogError("Failed to map eye tracker QPC time to the LSL local clock.");
-                    return;
-                }
-
-                TrackerSessionState state = new TrackerSessionState
-                {
-                    Locator = newTrackerLocator,
-                    WorldCoordinateSystem = newWorldCoordinateSystem,
-                    // Start from now so old buffered readings are not published when tracking starts.
-                    LastConsumedSystemRelativeTime = TimeSpan.FromSeconds(
-                        Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency),
-                    ClockMapping = clockMapping,
-                    EffectiveFrameRate = selectedFrameRate,
-                    Generation = attempt.Generation,
-                    IncludeIndividualEyes = newTracker.AreLeftAndRightGazesSupported
-                };
-
-                if (!trackerSessions.TryActivate(attempt, state))
-                {
-                    return;
-                }
-
-                Debug.Log(
-                    $"Extended eye tracking ready at {state.EffectiveFrameRate} Hz. " +
-                    $"Per-eye: {state.IncludeIndividualEyes}"
-                );
-            }
-            catch (Exception e)
-            {
-                trackerSessions.Abandon(attempt);
-                Debug.LogError($"Failed to open eye tracker - {e.Message}");
-            }
-        }
-
-        private void OnTrackerRemoved(object sender, EyeGazeTracker removedTracker)
-        {
-            if (trackerSessions.Retire(removedTracker))
-            {
-                Debug.LogWarning("Eye tracker removed");
-            }
-        }
+            TransformReadingsOnMainThread();
 #endif
+        }
 
         public bool TryGetNextSample(out GazeSample sample)
         {
             sample = default(GazeSample);
 
 #if ENABLE_WINMD_SUPPORT
-            TrackerSessionCoordinator<EyeGazeTracker, TrackerSessionState>.ReadLease lease;
-            if (!trackerSessions.TryAcquireRead(out lease))
+            lock (trackerGate)
             {
-                return false;
-            }
+                if (tracker != null && trackerNode != null)
+                {
+                    AcquireRawReadingLocked();
+                }
 
-            using (lease)
-            {
-                TrackerSessionState state = lease.State;
-                EyeGazeTrackerReading reading = lease.Tracker.TryGetReadingAfterSystemRelativeTime(
-                    state.LastConsumedSystemRelativeTime
-                );
-                if (reading == null)
+                if (pendingSamples.Count == 0)
                 {
                     return false;
                 }
-
-                if (reading.SystemRelativeTime <= state.LastConsumedSystemRelativeTime)
-                {
-                    return false;
-                }
-                state.LastConsumedSystemRelativeTime = reading.SystemRelativeTime;
-
-                if (state.ClockMapping == null ||
-                    !state.ClockMapping.TryMap(reading.SystemRelativeTime, out double sampleTimestamp))
-                {
-                    return false;
-                }
-
-                sample = CreateEmptySample();
-                sample.Timestamp = sampleTimestamp;
-
-                PerceptionTimestamp perceptionTimestamp =
-                    PerceptionTimestampHelper.FromSystemRelativeTargetTime(reading.SystemRelativeTime);
-
-                SpatialLocation trackerLocation = state.Locator.TryLocateAtTimestamp(
-                    perceptionTimestamp,
-                    state.WorldCoordinateSystem
-                );
-
-                if (trackerLocation != null)
-                {
-                    PopulateGazeSample(reading, trackerLocation, state.IncludeIndividualEyes, ref sample);
-                }
-
-                // Return true for every acquired tracker reading. Invalid gaze is represented
-                // by NaNs and valid flags, not by dropping the whole sample.
+                sample = pendingSamples.Dequeue();
                 return true;
             }
 #else
@@ -303,10 +129,370 @@ namespace GazeLSL
 #endif
         }
 
+        // Called by the outlet only after a persistent SDK read failure.
+        public async void RestartTrackingSession()
+        {
 #if ENABLE_WINMD_SUPPORT
+            if (destroyed || restartInProgress)
+            {
+                return;
+            }
+
+            restartInProgress = true;
+            try
+            {
+                StopWatcherAndTracker();
+                await StartWatcherAsync();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Could not restart extended eye tracking - {e.Message}");
+            }
+            finally
+            {
+                restartInProgress = false;
+            }
+#else
+            await System.Threading.Tasks.Task.CompletedTask;
+#endif
+        }
+
+#if ENABLE_WINMD_SUPPORT
+        private void AcquireRawReadingLocked()
+        {
+            DateTime wallClockNow = DateTime.Now;
+            if (wallClockNow < lastWallClock)
+            {
+                throw new InvalidOperationException(
+                    "System clock moved backwards; restart the eye tracker session.");
+            }
+            lastWallClock = wallClockNow;
+
+            EyeGazeTrackerReading reading =
+                tracker.TryGetReadingAfterTimestamp(lastReadingTimestamp);
+            if (reading == null || reading.Timestamp <= lastReadingTimestamp)
+            {
+                return;
+            }
+
+            lastReadingTimestamp = reading.Timestamp;
+            RawGazeReading raw = new RawGazeReading
+            {
+                Generation = sessionGeneration,
+                SystemRelativeTimeTicks = reading.SystemRelativeTime.Ticks,
+                Timestamp = LSL.LSL.local_clock()
+            };
+
+            raw.Combined = ReadCombinedRay(reading);
+            if (includeIndividualEyes)
+            {
+                raw.Left = ReadLeftRay(reading);
+                raw.Right = ReadRightRay(reading);
+            }
+
+            while (pendingRawReadings.Count >= MaxQueuedSamples)
+            {
+                pendingRawReadings.Dequeue();
+            }
+            pendingRawReadings.Enqueue(raw);
+        }
+
+        private void TransformReadingsOnMainThread()
+        {
+            Exception locateFailure = null;
+
+            for (int index = 0; index < MaxTransformsPerUpdate; index++)
+            {
+                RawGazeReading raw;
+                SpatialGraphNode node;
+                lock (trackerGate)
+                {
+                    if (pendingRawReadings.Count == 0)
+                    {
+                        break;
+                    }
+
+                    raw = pendingRawReadings.Dequeue();
+                    if (raw.Generation != sessionGeneration || trackerNode == null)
+                    {
+                        continue;
+                    }
+                    node = trackerNode;
+                }
+
+                GazeSample sample = CreateEmptySample();
+                sample.Timestamp = raw.Timestamp;
+
+                try
+                {
+                    if (node.TryLocate(raw.SystemRelativeTimeTicks, out Pose trackerPose))
+                    {
+                        consecutiveLocateFailures = 0;
+                        PopulateWorldSpaceRays(
+                            raw,
+                            trackerPose,
+                            mixedRealityPlayspace,
+                            ref sample);
+                    }
+                    else
+                    {
+                        consecutiveLocateFailures++;
+                        if (consecutiveLocateFailures == 1 ||
+                            consecutiveLocateFailures % (int)RequiredFrameRate == 0)
+                        {
+                            Debug.LogWarning(
+                                "Could not locate the extended eye tracker in the " +
+                                "OpenXR playspace at its reading timestamp.");
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    locateFailure = e;
+                    break;
+                }
+
+                lock (trackerGate)
+                {
+                    if (raw.Generation != sessionGeneration)
+                    {
+                        continue;
+                    }
+                    while (pendingSamples.Count >= MaxQueuedSamples)
+                    {
+                        pendingSamples.Dequeue();
+                    }
+                    pendingSamples.Enqueue(sample);
+                }
+            }
+
+            if (locateFailure != null)
+            {
+                Debug.LogWarning(
+                    $"Eye tracker locate failed; re-enumerating the tracker - {locateFailure.Message}");
+                RestartTrackingSession();
+            }
+        }
+
+        private async System.Threading.Tasks.Task StartWatcherAsync()
+        {
+            Windows.UI.Input.GazeInputAccessStatus access =
+                await Windows.Perception.People.EyesPose.RequestAccessAsync();
+
+            if (destroyed)
+            {
+                return;
+            }
+
+            if (access != Windows.UI.Input.GazeInputAccessStatus.Allowed)
+            {
+                throw new InvalidOperationException($"Eye tracking permission was not granted: {access}");
+            }
+
+            EyeGazeTrackerWatcher newWatcher = new EyeGazeTrackerWatcher();
+            newWatcher.EyeGazeTrackerAdded += OnTrackerAdded;
+            newWatcher.EyeGazeTrackerRemoved += OnTrackerRemoved;
+
+            long watcherToken = 0L;
+            bool shouldAbort;
+            lock (trackerGate)
+            {
+                shouldAbort = destroyed;
+                if (!shouldAbort)
+                {
+                    watcher = newWatcher;
+                    watcherToken = ++watcherGeneration;
+                    trackerLifecycleGeneration++;
+                }
+            }
+
+            if (shouldAbort)
+            {
+                StopWatcher(newWatcher);
+                return;
+            }
+
+            try
+            {
+                await newWatcher.StartAsync();
+            }
+            catch
+            {
+                bool isCurrent;
+                lock (trackerGate)
+                {
+                    isCurrent = ReferenceEquals(watcher, newWatcher) &&
+                                watcherGeneration == watcherToken;
+                }
+
+                if (isCurrent)
+                {
+                    StopWatcherAndTracker();
+                }
+                else
+                {
+                    StopWatcher(newWatcher);
+                }
+                throw;
+            }
+
+            bool stillCurrent;
+            lock (trackerGate)
+            {
+                stillCurrent = !destroyed &&
+                               ReferenceEquals(watcher, newWatcher) &&
+                               watcherGeneration == watcherToken;
+            }
+
+            if (!stillCurrent)
+            {
+                StopWatcher(newWatcher);
+                return;
+            }
+
+            Debug.Log("Eye tracker watcher started");
+        }
+
+        private async void OnTrackerAdded(object sender, EyeGazeTracker newTracker)
+        {
+            long openGeneration;
+            lock (trackerGate)
+            {
+                if (!ReferenceEquals(sender, watcher) || destroyed)
+                {
+                    return;
+                }
+
+                openGeneration = trackerLifecycleGeneration;
+            }
+
+            try
+            {
+                await newTracker.OpenAsync(true);
+
+                if (!TrySelect90Hz(newTracker))
+                {
+                    Debug.LogError("This eye tracker does not expose the required 90 Hz mode.");
+                    CloseTracker(newTracker);
+                    return;
+                }
+
+                SpatialGraphNode newTrackerNode =
+                    SpatialGraphNode.FromDynamicNodeId(
+                        newTracker.TrackerSpaceLocatorNodeId);
+                if (newTrackerNode == null)
+                {
+                    Debug.LogError(
+                        "Could not locate the eye tracker in the Unity/OpenXR scene.");
+                    CloseTracker(newTracker);
+                    return;
+                }
+
+                bool perEye = newTracker.AreLeftAndRightGazesSupported;
+                EyeGazeTracker previousTracker;
+                bool canActivate;
+                lock (trackerGate)
+                {
+                    canActivate = !destroyed &&
+                                  ReferenceEquals(sender, watcher) &&
+                                  trackerLifecycleGeneration == openGeneration;
+                    if (canActivate)
+                    {
+                        previousTracker = tracker;
+                        tracker = newTracker;
+                        trackerNode = newTrackerNode;
+                        // Skip readings buffered before this 90 Hz session became active.
+                        lastReadingTimestamp = DateTime.Now;
+                        lastWallClock = lastReadingTimestamp;
+                        includeIndividualEyes = perEye;
+                        pendingRawReadings.Clear();
+                        pendingSamples.Clear();
+                        consecutiveLocateFailures = 0;
+                        sessionGeneration++;
+                    }
+                    else
+                    {
+                        previousTracker = null;
+                    }
+                }
+
+                if (!canActivate)
+                {
+                    CloseTracker(newTracker);
+                    return;
+                }
+
+                if (previousTracker != null && !ReferenceEquals(previousTracker, newTracker))
+                {
+                    CloseTracker(previousTracker);
+                }
+
+                Debug.Log(
+                    $"Extended eye tracking ready at 90 Hz. Per-eye: {perEye}");
+            }
+            catch (Exception e)
+            {
+                CloseTracker(newTracker);
+                Debug.LogError($"Failed to open eye tracker - {e.Message}");
+            }
+        }
+
+        private void OnTrackerRemoved(object sender, EyeGazeTracker removedTracker)
+        {
+            bool wasActive = false;
+            lock (trackerGate)
+            {
+                if (!ReferenceEquals(sender, watcher))
+                {
+                    return;
+                }
+
+                // Invalidate any OpenAsync continuation that started before removal.
+                trackerLifecycleGeneration++;
+                if (ReferenceEquals(tracker, removedTracker))
+                {
+                    tracker = null;
+                    trackerNode = null;
+                    includeIndividualEyes = false;
+                    lastReadingTimestamp = DateTime.MinValue;
+                    lastWallClock = DateTime.MinValue;
+                    pendingRawReadings.Clear();
+                    pendingSamples.Clear();
+                    consecutiveLocateFailures = 0;
+                    wasActive = true;
+                }
+            }
+
+            CloseTracker(removedTracker);
+            if (wasActive)
+            {
+                Debug.LogWarning("Eye tracker removed");
+            }
+        }
+
+        private static bool TrySelect90Hz(EyeGazeTracker currentTracker)
+        {
+            var supportedRates = currentTracker.SupportedTargetFrameRates;
+            if (supportedRates == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < supportedRates.Count; i++)
+            {
+                if (supportedRates[i].FramesPerSecond == RequiredFrameRate)
+                {
+                    currentTracker.SetTargetFrameRate(supportedRates[i]);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static GazeSample CreateEmptySample()
         {
-            GazeSample sample = new GazeSample
+            return new GazeSample
             {
                 CombinedOriginX = double.NaN,
                 CombinedOriginY = double.NaN,
@@ -314,14 +500,12 @@ namespace GazeLSL
                 CombinedDirectionX = double.NaN,
                 CombinedDirectionY = double.NaN,
                 CombinedDirectionZ = double.NaN,
-
                 LeftEyeOriginX = double.NaN,
                 LeftEyeOriginY = double.NaN,
                 LeftEyeOriginZ = double.NaN,
                 LeftEyeDirectionX = double.NaN,
                 LeftEyeDirectionY = double.NaN,
                 LeftEyeDirectionZ = double.NaN,
-
                 RightEyeOriginX = double.NaN,
                 RightEyeOriginY = double.NaN,
                 RightEyeOriginZ = double.NaN,
@@ -329,134 +513,114 @@ namespace GazeLSL
                 RightEyeDirectionY = double.NaN,
                 RightEyeDirectionZ = double.NaN
             };
-
-            return sample;
         }
 
-        private static SpatialCoordinateSystem CreateWorldCoordinateSystem()
+        private static RawTrackerRay ReadCombinedRay(EyeGazeTrackerReading reading)
         {
-            SpatialLocator spatialLocator = SpatialLocator.GetDefault();
-            if (spatialLocator == null)
-            {
-                return null;
-            }
-
-            return spatialLocator
-                .CreateStationaryFrameOfReferenceAtCurrentLocation()
-                .CoordinateSystem;
+            RawTrackerRay ray = default(RawTrackerRay);
+            ray.IsValid = reading.TryGetCombinedEyeGazeInTrackerSpace(
+                    out ray.Origin,
+                    out ray.Direction) &&
+                IsUsableRay(ray.Origin, ray.Direction);
+            return ray;
         }
 
-        private bool TryConfigureFrameRate(
-            EyeGazeTracker currentTracker,
-            out uint selectedFrameRate)
+        private static RawTrackerRay ReadLeftRay(EyeGazeTrackerReading reading)
         {
-            selectedFrameRate = 0u;
-            try
-            {
-                uint requestedFrameRate = config != null ? config.TargetFrameRate : 90;
-                var supportedRates = currentTracker.SupportedTargetFrameRates;
-
-                if (supportedRates == null || supportedRates.Count == 0)
-                {
-                    Debug.LogWarning("No supported eye tracker frame rates reported.");
-                    return false;
-                }
-
-                int highestIndex = 0;
-                int bestAtOrBelowRequestIndex = -1;
-
-                StringBuilder supportedRatesLog = new StringBuilder();
-                supportedRatesLog.Append("Supported eye tracker frame rates:");
-
-                for (int i = 0; i < supportedRates.Count; i++)
-                {
-                    uint framesPerSecond = supportedRates[i].FramesPerSecond;
-                    supportedRatesLog.Append(' ').Append(framesPerSecond).Append("Hz");
-
-                    if (framesPerSecond > supportedRates[highestIndex].FramesPerSecond)
-                    {
-                        highestIndex = i;
-                    }
-
-                    if (framesPerSecond <= requestedFrameRate &&
-                        (bestAtOrBelowRequestIndex < 0 ||
-                         framesPerSecond > supportedRates[bestAtOrBelowRequestIndex].FramesPerSecond))
-                    {
-                        bestAtOrBelowRequestIndex = i;
-                    }
-                }
-
-                int selectedIndex = bestAtOrBelowRequestIndex >= 0
-                    ? bestAtOrBelowRequestIndex
-                    : highestIndex;
-
-                var selectedRate = supportedRates[selectedIndex];
-                if (selectedRate.FramesPerSecond == 0u)
-                {
-                    Debug.LogWarning("Eye tracker selected an invalid 0 Hz frame rate.");
-                    return false;
-                }
-                currentTracker.SetTargetFrameRate(selectedRate);
-                selectedFrameRate = selectedRate.FramesPerSecond;
-
-                Debug.Log(supportedRatesLog.ToString());
-                Debug.Log(
-                    $"Requested eye tracker frame rate: {requestedFrameRate} Hz; " +
-                    $"selected: {selectedFrameRate} Hz"
-                );
-                return true;
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"Could not set eye tracker frame rate - {e.Message}");
-                return false;
-            }
+            RawTrackerRay ray = default(RawTrackerRay);
+            ray.IsValid = reading.TryGetLeftEyeGazeInTrackerSpace(
+                    out ray.Origin,
+                    out ray.Direction) &&
+                IsUsableRay(ray.Origin, ray.Direction);
+            return ray;
         }
 
-        private static void PopulateGazeSample(
-            EyeGazeTrackerReading reading,
-            SpatialLocation trackerLocation,
-            bool includeIndividualEyes,
+        private static RawTrackerRay ReadRightRay(EyeGazeTrackerReading reading)
+        {
+            RawTrackerRay ray = default(RawTrackerRay);
+            ray.IsValid = reading.TryGetRightEyeGazeInTrackerSpace(
+                    out ray.Origin,
+                    out ray.Direction) &&
+                IsUsableRay(ray.Origin, ray.Direction);
+            return ray;
+        }
+
+        private static void PopulateWorldSpaceRays(
+            RawGazeReading reading,
+            Pose trackerPose,
+            Transform playspace,
             ref GazeSample sample)
         {
-            if (reading.TryGetCombinedEyeGazeInTrackerSpace(
-                    out System.Numerics.Vector3 combinedOrigin,
-                    out System.Numerics.Vector3 combinedDirection) &&
-                IsUsableRay(combinedOrigin, combinedDirection))
-            {
-                WriteRay(combinedOrigin, combinedDirection, trackerLocation,
-                    out sample.CombinedOriginX, out sample.CombinedOriginY, out sample.CombinedOriginZ,
-                    out sample.CombinedDirectionX, out sample.CombinedDirectionY, out sample.CombinedDirectionZ);
+            System.Numerics.Vector3 playspaceFromTrackerPosition =
+                ToNumerics(trackerPose.position);
+            System.Numerics.Quaternion playspaceFromTrackerRotation =
+                ToNumerics(trackerPose.rotation);
+            System.Numerics.Vector3 worldFromPlayspacePosition =
+                playspace != null
+                    ? ToNumerics(playspace.position)
+                    : System.Numerics.Vector3.Zero;
+            System.Numerics.Quaternion worldFromPlayspaceRotation =
+                playspace != null
+                    ? ToNumerics(playspace.rotation)
+                    : System.Numerics.Quaternion.Identity;
+            System.Numerics.Vector3 worldFromPlayspaceScale =
+                playspace != null
+                    ? ToNumerics(playspace.lossyScale)
+                    : System.Numerics.Vector3.One;
 
-                sample.CombinedValid = true;
+            if (reading.Combined.IsValid)
+            {
+                sample.CombinedValid = WriteWorldSpaceRay(
+                    reading.Combined.Origin,
+                    reading.Combined.Direction,
+                    playspaceFromTrackerPosition,
+                    playspaceFromTrackerRotation,
+                    worldFromPlayspacePosition,
+                    worldFromPlayspaceRotation,
+                    worldFromPlayspaceScale,
+                    out sample.CombinedOriginX,
+                    out sample.CombinedOriginY,
+                    out sample.CombinedOriginZ,
+                    out sample.CombinedDirectionX,
+                    out sample.CombinedDirectionY,
+                    out sample.CombinedDirectionZ);
             }
 
-            if (includeIndividualEyes &&
-                reading.TryGetLeftEyeGazeInTrackerSpace(
-                    out System.Numerics.Vector3 leftOrigin,
-                    out System.Numerics.Vector3 leftDirection) &&
-                IsUsableRay(leftOrigin, leftDirection))
+            if (reading.Left.IsValid)
             {
-                WriteRay(leftOrigin, leftDirection, trackerLocation,
-                    out sample.LeftEyeOriginX, out sample.LeftEyeOriginY, out sample.LeftEyeOriginZ,
-                    out sample.LeftEyeDirectionX, out sample.LeftEyeDirectionY, out sample.LeftEyeDirectionZ);
-
-                sample.LeftEyeValid = true;
+                sample.LeftEyeValid = WriteWorldSpaceRay(
+                    reading.Left.Origin,
+                    reading.Left.Direction,
+                    playspaceFromTrackerPosition,
+                    playspaceFromTrackerRotation,
+                    worldFromPlayspacePosition,
+                    worldFromPlayspaceRotation,
+                    worldFromPlayspaceScale,
+                    out sample.LeftEyeOriginX,
+                    out sample.LeftEyeOriginY,
+                    out sample.LeftEyeOriginZ,
+                    out sample.LeftEyeDirectionX,
+                    out sample.LeftEyeDirectionY,
+                    out sample.LeftEyeDirectionZ);
             }
 
-            if (includeIndividualEyes &&
-                reading.TryGetRightEyeGazeInTrackerSpace(
-                    out System.Numerics.Vector3 rightOrigin,
-                    out System.Numerics.Vector3 rightDirection) &&
-                IsUsableRay(rightOrigin, rightDirection))
+            if (reading.Right.IsValid)
             {
-                WriteRay(rightOrigin, rightDirection, trackerLocation,
-                    out sample.RightEyeOriginX, out sample.RightEyeOriginY, out sample.RightEyeOriginZ,
-                    out sample.RightEyeDirectionX, out sample.RightEyeDirectionY, out sample.RightEyeDirectionZ);
-
-                sample.RightEyeValid = true;
+                sample.RightEyeValid = WriteWorldSpaceRay(
+                    reading.Right.Origin,
+                    reading.Right.Direction,
+                    playspaceFromTrackerPosition,
+                    playspaceFromTrackerRotation,
+                    worldFromPlayspacePosition,
+                    worldFromPlayspaceRotation,
+                    worldFromPlayspaceScale,
+                    out sample.RightEyeOriginX,
+                    out sample.RightEyeOriginY,
+                    out sample.RightEyeOriginZ,
+                    out sample.RightEyeDirectionX,
+                    out sample.RightEyeDirectionY,
+                    out sample.RightEyeDirectionZ);
             }
-
         }
 
         private static bool IsUsableRay(
@@ -465,7 +629,7 @@ namespace GazeLSL
         {
             return IsFinite(origin.X) && IsFinite(origin.Y) && IsFinite(origin.Z) &&
                    IsFinite(direction.X) && IsFinite(direction.Y) && IsFinite(direction.Z) &&
-                   SquaredMagnitude(direction) > 0.000001f;
+                   DirectionMagnitudeSquared(direction) > 0.000001f;
         }
 
         private static bool IsFinite(float value)
@@ -473,15 +637,19 @@ namespace GazeLSL
             return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
-        private static float SquaredMagnitude(System.Numerics.Vector3 value)
+        private static float DirectionMagnitudeSquared(System.Numerics.Vector3 value)
         {
             return value.X * value.X + value.Y * value.Y + value.Z * value.Z;
         }
 
-        private static void WriteRay(
-            System.Numerics.Vector3 trackerOrigin,
-            System.Numerics.Vector3 trackerDirection,
-            SpatialLocation trackerLocation,
+        private static bool WriteWorldSpaceRay(
+            System.Numerics.Vector3 origin,
+            System.Numerics.Vector3 direction,
+            System.Numerics.Vector3 playspaceFromTrackerPosition,
+            System.Numerics.Quaternion playspaceFromTrackerRotation,
+            System.Numerics.Vector3 worldFromPlayspacePosition,
+            System.Numerics.Quaternion worldFromPlayspaceRotation,
+            System.Numerics.Vector3 worldFromPlayspaceScale,
             out double originX,
             out double originY,
             out double originZ,
@@ -489,30 +657,91 @@ namespace GazeLSL
             out double directionY,
             out double directionZ)
         {
-            System.Numerics.Vector3 worldOrigin =
-                System.Numerics.Vector3.Transform(trackerOrigin, trackerLocation.Orientation) + trackerLocation.Position;
-
-            System.Numerics.Vector3 worldDirection = System.Numerics.Vector3.Normalize(
-                System.Numerics.Vector3.Transform(trackerDirection, trackerLocation.Orientation)
-            );
+            System.Numerics.Vector3 worldOrigin;
+            System.Numerics.Vector3 worldDirection;
+            if (!GazeCoordinateTransform.TryTransformTrackerRayToSharedWorld(
+                    origin,
+                    direction,
+                    playspaceFromTrackerPosition,
+                    playspaceFromTrackerRotation,
+                    worldFromPlayspacePosition,
+                    worldFromPlayspaceRotation,
+                    worldFromPlayspaceScale,
+                    out worldOrigin,
+                    out worldDirection))
+            {
+                originX = originY = originZ = double.NaN;
+                directionX = directionY = directionZ = double.NaN;
+                return false;
+            }
 
             originX = worldOrigin.X;
             originY = worldOrigin.Y;
-            originZ = -worldOrigin.Z;
+            originZ = worldOrigin.Z;
             directionX = worldDirection.X;
             directionY = worldDirection.Y;
-            directionZ = -worldDirection.Z;
+            directionZ = worldDirection.Z;
+            return true;
         }
-#endif
 
-        private void SetTrackingUnavailable()
+        private static System.Numerics.Vector3 ToNumerics(Vector3 value)
         {
-#if ENABLE_WINMD_SUPPORT
-            trackerSessions.RetireActive();
-#endif
+            return new System.Numerics.Vector3(value.x, value.y, value.z);
         }
 
-#if ENABLE_WINMD_SUPPORT
+        private static System.Numerics.Quaternion ToNumerics(Quaternion value)
+        {
+            return new System.Numerics.Quaternion(
+                value.x,
+                value.y,
+                value.z,
+                value.w);
+        }
+
+        private void StopWatcherAndTracker()
+        {
+            EyeGazeTrackerWatcher currentWatcher;
+            EyeGazeTracker currentTracker;
+            lock (trackerGate)
+            {
+                currentWatcher = watcher;
+                watcher = null;
+                currentTracker = tracker;
+                tracker = null;
+                trackerNode = null;
+                includeIndividualEyes = false;
+                lastReadingTimestamp = DateTime.MinValue;
+                lastWallClock = DateTime.MinValue;
+                pendingRawReadings.Clear();
+                pendingSamples.Clear();
+                consecutiveLocateFailures = 0;
+                watcherGeneration++;
+                trackerLifecycleGeneration++;
+            }
+
+            StopWatcher(currentWatcher);
+            CloseTracker(currentTracker);
+        }
+
+        private void StopWatcher(EyeGazeTrackerWatcher watcherToStop)
+        {
+            if (watcherToStop == null)
+            {
+                return;
+            }
+
+            watcherToStop.EyeGazeTrackerAdded -= OnTrackerAdded;
+            watcherToStop.EyeGazeTrackerRemoved -= OnTrackerRemoved;
+            try
+            {
+                watcherToStop.Stop();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Error stopping eye tracker watcher - {e.Message}");
+            }
+        }
+
         private static void CloseTracker(EyeGazeTracker trackerToClose)
         {
             if (trackerToClose == null)
@@ -534,15 +763,8 @@ namespace GazeLSL
         private void OnDestroy()
         {
 #if ENABLE_WINMD_SUPPORT
-            if (watcher != null)
-            {
-                watcher.EyeGazeTrackerAdded -= OnTrackerAdded;
-                watcher.EyeGazeTrackerRemoved -= OnTrackerRemoved;
-                watcher.Stop();
-                watcher = null;
-            }
-
-            trackerSessions.Destroy();
+            destroyed = true;
+            StopWatcherAndTracker();
 #endif
         }
     }

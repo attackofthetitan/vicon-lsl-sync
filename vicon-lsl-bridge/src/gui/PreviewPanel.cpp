@@ -405,8 +405,9 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         return;
     }
 
-    automatic_gaze_transform_ = composeRigidTransforms(
-        profile.vicon_from_target, inverseRigidTransform(solution->holo_from_target));
+    automatic_gaze_transform_ = gazeTransformFromTargetCalibration(
+        profile,
+        solution->holo_from_target);
     calibration_state_ = CalibrationState::AutomaticSession;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
@@ -613,7 +614,7 @@ PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
 
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
     if (calibration_state_ == CalibrationState::AutomaticSession) {
-        return transformProfileFromRigid(automatic_gaze_transform_, "HoloLens");
+        return automatic_gaze_transform_;
     }
     return manualGazeTransform();
 }
