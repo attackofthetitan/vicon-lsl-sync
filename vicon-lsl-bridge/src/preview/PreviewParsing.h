@@ -9,6 +9,8 @@
 namespace vicon_lsl {
 
 PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema);
+std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
+                                                       std::size_t channel_count);
 std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& labels,
                                              const std::vector<double>& sample,
                                              const PreviewTransformProfile& transform);

@@ -19,19 +19,36 @@ constexpr int kResolveRetryMs = 1000;
 constexpr int kStatusIntervalMs = 1000;
 constexpr int kStaleSampleMs = 500;
 
-std::vector<std::string> channelLabels(lsl::stream_info info) {
+std::vector<std::string> channelLabels(lsl::stream_info info,
+                                       PreviewStreamRole role) {
     std::vector<std::string> labels;
     labels.reserve(static_cast<std::size_t>(info.channel_count()));
+    bool metadata_complete = true;
 
     lsl::xml_element channel = info.desc().child("channels").child("channel");
     for (; !channel.empty(); channel = channel.next_sibling()) {
         const char* label = channel.child_value("label");
-        labels.emplace_back(label && *label ? label : ("ch_" + std::to_string(labels.size())));
+        if (!label || !*label) {
+            metadata_complete = false;
+            labels.push_back("ch_" + std::to_string(labels.size()));
+        } else {
+            labels.emplace_back(label);
+        }
     }
 
-    while (labels.size() < static_cast<std::size_t>(info.channel_count())) {
+    const std::size_t channel_count = static_cast<std::size_t>(info.channel_count());
+    if (metadata_complete && labels.size() == channel_count) {
+        return labels;
+    }
+    auto canonical = canonicalPreviewChannelLabels(role, channel_count);
+    if (!canonical.empty()) {
+        return canonical;
+    }
+
+    while (labels.size() < channel_count) {
         labels.push_back("ch_" + std::to_string(labels.size()));
     }
+    labels.resize(channel_count);
     return labels;
 }
 
@@ -76,6 +93,7 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
     gaze_->role = PreviewStreamRole::HoloLensGaze;
     gaze_->transform = config_.gaze_transform;
     calibration_target_->requested_name = config_.calibration_stream_name;
+    calibration_target_->role = PreviewStreamRole::HoloLensCalibrationTarget;
 }
 
 PreviewStreamWorker::~PreviewStreamWorker() {
@@ -150,14 +168,23 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
             return false;
         }
 
-        state.labels = channelLabels(streams.front());
-        const char* coordinate_frame = streams.front()
+        auto inlet = std::make_unique<lsl::stream_inlet>(streams.front(), 360, 0, true);
+        lsl::stream_info metadata = streams.front();
+        try {
+            // Resolver results may contain only the short stream description.
+            // The inlet supplies the full channel and coordinate metadata.
+            metadata = inlet->info(1.0);
+        } catch (const std::exception&) {
+            // Known fixed HoloLens schemas still have a safe label fallback.
+        }
+        state.labels = channelLabels(metadata, state.role);
+        const char* coordinate_frame = metadata
             .desc()
             .child("acquisition")
             .child_value("coordinate_frame");
         state.coordinate_frame = coordinate_frame ? coordinate_frame : "";
-        state.latest_sample.assign(static_cast<std::size_t>(streams.front().channel_count()), 0.0);
-        state.inlet = std::make_unique<lsl::stream_inlet>(streams.front(), 360, 0, true);
+        state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
+        state.inlet = std::move(inlet);
         // Live preview consumes timestamps in the local recorder clock. Keep
         // clock synchronization scoped to these inlets; XDF playback applies
         // its recorded offsets independently when loading the file.
