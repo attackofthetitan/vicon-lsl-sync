@@ -250,15 +250,25 @@ PreviewTransformProfile gazeTransformFromTargetCalibration(
     const PreviewVec3 target_from_holo_translation = rotateByQuaternion(
         holo_from_target.translation * -1.0,
         target_from_holo_rotation);
+    // The fixed stair OBJ ascends from +X toward -X, while the Vuforia target's
+    // Unity-local forward basis is reversed. Reface gaze around the target
+    // origin without changing the already Vicon-aligned stair transform.
+    const PreviewRigidTransform stair_model_from_target_basis{
+        {0.0, 0.0, 0.0},
+        {0.0, 0.0, 1.0, 0.0},
+    };
+    const PreviewRigidTransform vicon_from_gaze_target = composeRigidTransforms(
+        profile.vicon_from_target,
+        stair_model_from_target_basis);
 
     PreviewTransformProfile transform;
     transform.name = "HoloLens";
     transform.use_quaternion_rotation = true;
     transform.rotation = normalizeQuaternion(multiplyQuaternions(
-        profile.vicon_from_target.rotation,
+        vicon_from_gaze_target.rotation,
         reflectZBasis(target_from_holo_rotation)));
     transform.translation = applyRigidTransformPoint(
-        profile.vicon_from_target,
+        vicon_from_gaze_target,
         reflectZ(target_from_holo_translation));
     // The target pose and gaze are published in a right-handed world frame,
     // but the Vicon-aligned stair model keeps its original Unity target-local

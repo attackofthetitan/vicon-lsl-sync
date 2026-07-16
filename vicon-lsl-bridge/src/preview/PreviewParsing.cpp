@@ -127,6 +127,27 @@ PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema) {
     return has_gaze ? PreviewStreamRole::HoloLensGaze : PreviewStreamRole::Unknown;
 }
 
+std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
+                                                       std::size_t channel_count) {
+    if (role == PreviewStreamRole::HoloLensGaze &&
+        channel_count == kHoloLensGazeChannelCount) {
+        std::vector<std::string> labels;
+        labels.reserve(kHoloLensGazeChannelCount);
+        for (const auto& channel : holoLensGazeChannels()) {
+            labels.emplace_back(channel.label);
+        }
+        return labels;
+    }
+    if (role == PreviewStreamRole::HoloLensCalibrationTarget && channel_count == 8) {
+        return {
+            "PositionX", "PositionY", "PositionZ",
+            "RotationX", "RotationY", "RotationZ", "RotationW",
+            "Tracked",
+        };
+    }
+    return {};
+}
+
 std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& labels,
                                              const std::vector<double>& sample,
                                              const PreviewTransformProfile& transform) {

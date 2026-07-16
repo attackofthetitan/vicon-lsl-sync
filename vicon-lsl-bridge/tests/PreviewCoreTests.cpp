@@ -237,6 +237,21 @@ TEST_CASE("Preview recognizes the HoloLens stair target stream") {
                vicon_lsl::PreviewStreamRole::HoloLensCalibrationTarget);
 }
 
+TEST_CASE("Preview restores fixed HoloLens labels when live LSL metadata is short") {
+    const auto gaze = vicon_lsl::canonicalPreviewChannelLabels(
+        vicon_lsl::PreviewStreamRole::HoloLensGaze,
+        vicon_lsl::kHoloLensGazeChannelCount);
+    const auto target = vicon_lsl::canonicalPreviewChannelLabels(
+        vicon_lsl::PreviewStreamRole::HoloLensCalibrationTarget,
+        8);
+
+    REQUIRE_EQ(gaze, gazeLabels());
+    REQUIRE_EQ(target, calibrationLabels());
+    REQUIRE(vicon_lsl::canonicalPreviewChannelLabels(
+        vicon_lsl::PreviewStreamRole::HoloLensGaze,
+        vicon_lsl::kHoloLensGazeChannelCount - 1).empty());
+}
+
 TEST_CASE("Preview timestamp tolerance accepts only nearby samples") {
     REQUIRE(vicon_lsl::timestampWithinTolerance(10.0, 10.04, 0.05));
     REQUIRE(!vicon_lsl::timestampWithinTolerance(10.0, 10.06, 0.05));
@@ -292,7 +307,7 @@ TEST_CASE("Preview calibration composes and inverts rigid transforms") {
     REQUIRE(near(transformed_direction.y, 1.0));
 }
 
-TEST_CASE("Preview applies target handedness conversion to gaze and not the stair model") {
+TEST_CASE("Preview refaces calibrated gaze without changing the stair model") {
     const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
     const double half_sqrt_two = std::sqrt(0.5);
     const vicon_lsl::PreviewRigidTransform holo_from_target{
@@ -312,11 +327,12 @@ TEST_CASE("Preview applies target handedness conversion to gaze and not the stai
         holo_from_target);
     const auto point = vicon_lsl::applyTransformPoint(transform, holo_point);
     const auto direction = vicon_lsl::applyTransformDirection(transform, holo_direction);
+    const vicon_lsl::PreviewQuaternion stair_facing_rotation{0.0, 0.0, 1.0, 0.0};
     const auto expected_point = vicon_lsl::applyRigidTransformPoint(
         calibration.vicon_from_target,
-        target_model_point);
+        vicon_lsl::rotateByQuaternion(target_model_point, stair_facing_rotation));
     const auto expected_direction = vicon_lsl::rotateByQuaternion(
-        target_model_direction,
+        vicon_lsl::rotateByQuaternion(target_model_direction, stair_facing_rotation),
         calibration.vicon_from_target.rotation);
 
     REQUIRE(near(transform.input_axis_sign.x, 1.0));
@@ -328,6 +344,19 @@ TEST_CASE("Preview applies target handedness conversion to gaze and not the stai
     REQUIRE(near(direction.x, expected_direction.x));
     REQUIRE(near(direction.y, expected_direction.y));
     REQUIRE(near(direction.z, expected_direction.z));
+}
+
+TEST_CASE("Preview calibrated gaze follows the fixed stair ascent direction") {
+    const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
+    const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(
+        calibration,
+        {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}});
+
+    const auto bottom = vicon_lsl::applyTransformPoint(transform, {-3.0, 0.0, -1.6});
+    const auto upper = vicon_lsl::applyTransformPoint(transform, {0.7, 0.0, -2.4});
+
+    REQUIRE(upper.x < bottom.x);
+    REQUIRE(upper.z > bottom.z);
 }
 
 TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses") {
@@ -494,11 +523,16 @@ TEST_CASE("Preview XDF playback calibrates shared Unity-world gaze from the stai
     REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
     const auto& ray = recording.frames.front().gaze_rays.front();
     REQUIRE(ray.valid);
+    const vicon_lsl::PreviewQuaternion stair_facing_rotation{0.0, 0.0, 1.0, 0.0};
     const auto expected_origin =
-        vicon_lsl::applyRigidTransformPoint(profile.vicon_from_target, target_space_origin);
+        vicon_lsl::applyRigidTransformPoint(
+            profile.vicon_from_target,
+            vicon_lsl::rotateByQuaternion(target_space_origin, stair_facing_rotation));
     const auto expected_direction =
-        vicon_lsl::rotateByQuaternion(target_space_direction,
-                                      profile.vicon_from_target.rotation);
+        vicon_lsl::rotateByQuaternion(
+            vicon_lsl::rotateByQuaternion(target_space_direction,
+                                          stair_facing_rotation),
+            profile.vicon_from_target.rotation);
     REQUIRE(near(ray.origin.x, expected_origin.x));
     REQUIRE(near(ray.origin.y, expected_origin.y));
     REQUIRE(near(ray.origin.z, expected_origin.z));

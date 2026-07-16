@@ -281,6 +281,9 @@ void PreviewPanel::startPreview() {
     saveSettings();
     widget_->setTrailPointLimit(trail_points_spin_->value());
     widget_->resetForNewSource();
+    calibration_samples_.clear();
+    automatic_gaze_transform_ = {};
+    calibration_state_ = CalibrationState::Collecting;
 
     PreviewWorkerConfig config;
     config.marker_stream_name = marker_stream_edit_->text().trimmed();
@@ -317,7 +320,7 @@ void PreviewPanel::startPreview() {
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
-    setStatus("Preview resolving LSL streams...");
+    setStatus("Preview resolving LSL streams and calibrating from the stair target...");
     worker_->start();
 }
 
