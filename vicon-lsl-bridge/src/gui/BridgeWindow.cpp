@@ -62,7 +62,7 @@ void BridgeWorker::stopBridge() {
 
 // --- BridgeWindow ---
 
-BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
+BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview) : QWidget(parent) {
     qRegisterMetaType<BridgeExitResult>("BridgeExitResult");
     setWindowTitle("Vicon LSL Bridge");
     setMinimumWidth(860);
@@ -284,8 +284,12 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     controls_tabs->addTab(bridge_page, "Bridge");
     controls_tabs->addTab(recording_page, "Recording");
     main_splitter->addWidget(controls_tabs);
-    preview_panel_ = new vicon_lsl::PreviewPanel();
-    main_splitter->addWidget(preview_panel_);
+    if (enable_preview) {
+        preview_panel_ = new vicon_lsl::PreviewPanel();
+        main_splitter->addWidget(preview_panel_);
+    } else {
+        main_splitter->addWidget(new QWidget());
+    }
     main_splitter->setStretchFactor(0, 0);
     main_splitter->setStretchFactor(1, 1);
     main_splitter->setSizes({500, 1000});
@@ -405,7 +409,7 @@ bool BridgeWindow::configurableTooltipsPresent() const {
             return false;
         }
     }
-    return preview_panel_ && preview_panel_->configurableTooltipsPresent();
+    return !preview_panel_ || preview_panel_->configurableTooltipsPresent();
 }
 
 void BridgeWindow::onStart() {

@@ -43,7 +43,7 @@ private:
 class BridgeWindow : public QWidget {
     Q_OBJECT
 public:
-    explicit BridgeWindow(QWidget* parent = nullptr);
+    explicit BridgeWindow(QWidget* parent = nullptr, bool enable_preview = true);
     ~BridgeWindow() override;
 
     // These accessors intentionally expose the small amount of state that an
@@ -121,7 +121,7 @@ private:
     QPushButton* stop_recording_button_;
     QLabel* labrecorder_status_label_;
     QLabel* readiness_label_;
-    vicon_lsl::PreviewPanel* preview_panel_;
+    vicon_lsl::PreviewPanel* preview_panel_ = nullptr;
 
     LabRecorderClient labrecorder_client_;
     std::unique_ptr<QProcess> labrecorder_process_;

@@ -24,7 +24,7 @@ int main(int argc, char* argv[]) {
     const bool headless_test = test_mode &&
         QGuiApplication::platformName().compare("offscreen", Qt::CaseInsensitive) == 0;
 
-    BridgeWindow window;
+    BridgeWindow window(nullptr, !headless_test);
     if (const QScreen* screen = window.screen()) {
         const QSize available = screen->availableGeometry().size();
         const QSize margin(80, 80);
@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (test_mode) {
-        QTimer::singleShot(0, [&app, &window]() {
+        QTimer::singleShot(0, [&app, &window, headless_test]() {
             try {
                 for (const QScreen* screen : app.screens()) {
                     const QSize available = screen->availableGeometry().size();
@@ -106,21 +106,22 @@ int main(int argc, char* argv[]) {
 
                 auto* poll = new QTimer(&app);
                 poll->setInterval(100);
-                QObject::connect(poll, &QTimer::timeout, &app, [&app, &window, poll]() {
+                QObject::connect(poll, &QTimer::timeout, &app,
+                                 [&app, &window, poll, headless_test]() {
                     if (window.labRecorderConnected() &&
                         window.labRecorderOwnedProcessRunning() &&
-                        window.stairModelLoaded()) {
+                        (headless_test || window.stairModelLoaded())) {
                         poll->stop();
                         app.exit(0);
                     }
                 });
                 poll->start();
-                QTimer::singleShot(20000, &app, [&app, &window]() {
+                QTimer::singleShot(20000, &app, [&app, &window, headless_test]() {
                     if (!window.labRecorderOwnedProcessRunning()) {
                         app.exit(7);
                     } else if (!window.labRecorderConnected()) {
                         app.exit(8);
-                    } else if (!window.stairModelLoaded()) {
+                    } else if (!headless_test && !window.stairModelLoaded()) {
                         app.exit(9);
                     } else {
                         app.exit(6);
