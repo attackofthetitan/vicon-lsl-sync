@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QScreen>
 #include <QTimer>
 
@@ -19,6 +20,10 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("Vicon LSL Bridge");
     app.setApplicationVersion(VICON_LSL_BRIDGE_VERSION);
 
+    const bool test_mode = QCoreApplication::arguments().contains("--test");
+    const bool headless_test = test_mode &&
+        QGuiApplication::platformName().compare("offscreen", Qt::CaseInsensitive) == 0;
+
     BridgeWindow window;
     if (const QScreen* screen = window.screen()) {
         const QSize available = screen->availableGeometry().size();
@@ -27,9 +32,16 @@ int main(int argc, char* argv[]) {
                            qMax(1, available.height() - margin.height()));
         window.resize(QSize(1440, 900).boundedTo(usable));
     }
-    window.show();
+    if (headless_test) {
+        // The offscreen Qt platform cannot create the QOpenGLWidget used by
+        // the preview. Layout and integration checks do not require mapping
+        // the window, so keep it hidden on headless CI runners.
+        window.ensurePolished();
+    } else {
+        window.show();
+    }
 
-    if (QCoreApplication::arguments().contains("--test")) {
+    if (test_mode) {
         QTimer::singleShot(0, [&app, &window]() {
             try {
                 for (const QScreen* screen : app.screens()) {
