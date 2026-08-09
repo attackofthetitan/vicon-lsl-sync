@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSplitter>
+#include <QTabWidget>
 #include <QCloseEvent>
 #include <QCoreApplication>
 
@@ -66,15 +67,15 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     auto* main_layout = new QVBoxLayout(this);
     main_layout->setContentsMargins(8, 8, 8, 8);
     main_layout->setSpacing(8);
-    auto* main_splitter = new QSplitter(Qt::Vertical);
-    auto* controls_page = new QWidget();
-    auto* content_layout = new QHBoxLayout(controls_page);
-    content_layout->setContentsMargins(0, 0, 0, 0);
-    content_layout->setSpacing(8);
-    auto* left_layout = new QVBoxLayout();
+    auto* main_splitter = new QSplitter(Qt::Horizontal);
+    main_splitter->setChildrenCollapsible(false);
+
+    auto* controls_tabs = new QTabWidget();
+    controls_tabs->setMinimumWidth(440);
+    auto* bridge_page = new QWidget();
+    auto* left_layout = new QVBoxLayout(bridge_page);
+    left_layout->setContentsMargins(6, 6, 6, 6);
     left_layout->setSpacing(8);
-    auto* right_layout = new QVBoxLayout();
-    right_layout->setSpacing(8);
 
     // Connection settings
     auto* settings_group = new QGroupBox("Connection Settings");
@@ -145,9 +146,9 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     left_layout->addWidget(status_group);
     left_layout->addStretch();
 
-    auto* recording_group = new QGroupBox("Recording");
-    auto* recording_layout = new QVBoxLayout(recording_group);
-    recording_layout->setContentsMargins(8, 8, 8, 8);
+    auto* recording_page = new QWidget();
+    auto* recording_layout = new QVBoxLayout(recording_page);
+    recording_layout->setContentsMargins(6, 6, 6, 6);
     recording_layout->setSpacing(6);
     auto* recording_form = new QFormLayout();
     recording_form->setVerticalSpacing(4);
@@ -222,12 +223,6 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     recording_form->addRow("Filename preview:", filename_preview_label_);
     recording_layout->addLayout(recording_form);
 
-    select_all_before_start_check_ = new QCheckBox("Select all streams before start");
-    select_all_before_start_check_->setToolTip(
-        "Select all LabRecorder streams before starting a recording.");
-    select_all_before_start_check_->setChecked(true);
-    recording_layout->addWidget(select_all_before_start_check_);
-
     auto* labrecorder_form = new QFormLayout();
     labrecorder_form->setVerticalSpacing(4);
     auto* executable_layout = new QHBoxLayout();
@@ -281,16 +276,16 @@ BridgeWindow::BridgeWindow(QWidget* parent) : QWidget(parent) {
     readiness_label_ = new QLabel();
     readiness_label_->setWordWrap(true);
     recording_layout->addWidget(readiness_label_);
+    recording_layout->addStretch(1);
 
-    right_layout->addWidget(recording_group);
-    right_layout->addStretch();
-    content_layout->addLayout(left_layout, 2);
-    content_layout->addLayout(right_layout, 3);
-    main_splitter->addWidget(controls_page);
+    controls_tabs->addTab(bridge_page, "Bridge");
+    controls_tabs->addTab(recording_page, "Recording");
+    main_splitter->addWidget(controls_tabs);
     preview_panel_ = new vicon_lsl::PreviewPanel();
     main_splitter->addWidget(preview_panel_);
     main_splitter->setStretchFactor(0, 0);
     main_splitter->setStretchFactor(1, 1);
+    main_splitter->setSizes({500, 1000});
     main_layout->addWidget(main_splitter, 1);
 
     connect(start_button_, &QPushButton::clicked, this, &BridgeWindow::onStart);
@@ -398,7 +393,6 @@ bool BridgeWindow::configurableTooltipsPresent() const {
         run_spin_,
         acquisition_edit_,
         modality_edit_,
-        select_all_before_start_check_,
         labrecorder_executable_edit_,
         labrecorder_host_edit_,
         labrecorder_port_spin_,
@@ -567,8 +561,7 @@ void BridgeWindow::onStartRecording() {
         return;
     }
 
-    if (labrecorder_client_.startRecording(
-            filenameFields(), select_all_before_start_check_->isChecked())) {
+    if (labrecorder_client_.startRecording(filenameFields(), true)) {
         setLabRecorderStatus("Recording start commands queued.");
     }
 }
@@ -746,7 +739,6 @@ void BridgeWindow::loadSettings() {
     run_spin_->setValue(settings.value("run", 1).toInt());
     acquisition_edit_->setText(settings.value("acquisition", "vicon").toString());
     modality_edit_->setText(settings.value("modality", "beh").toString());
-    select_all_before_start_check_->setChecked(settings.value("selectAllBeforeStart", true).toBool());
     labrecorder_executable_edit_->setText(settings.value("labRecorderExecutable", "").toString());
     labrecorder_host_edit_->setText(settings.value("labRecorderHost", "localhost").toString());
     labrecorder_port_spin_->setValue(settings.value("labRecorderPort", 22345).toInt());
@@ -765,7 +757,6 @@ void BridgeWindow::saveSettings() const {
     settings.setValue("run", run_spin_->value());
     settings.setValue("acquisition", acquisition_edit_->text());
     settings.setValue("modality", modality_edit_->text());
-    settings.setValue("selectAllBeforeStart", select_all_before_start_check_->isChecked());
     settings.setValue("labRecorderExecutable", labrecorder_executable_edit_->text());
     settings.setValue("labRecorderHost", labrecorder_host_edit_->text());
     settings.setValue("labRecorderPort", labrecorder_port_spin_->value());

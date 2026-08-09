@@ -58,7 +58,7 @@ The GUI can also prepare and control a LabRecorder session over LabRecorder's re
 
 The filename preview shows the `.xdf` path that will be sent to LabRecorder after applying the template and operator fields. Validation is intended to catch empty or unsafe path components before recording starts, so operators can correct participant/session/task/run values instead of discovering the problem after a failed start.
 
-By default, the GUI selects all visible LabRecorder streams immediately before starting a recording. This helps include newly discovered bridge streams without a separate manual selection step. Disable **Select all streams before start** when LabRecorder stream selection should be managed manually, for example during partial-stream tests or when another device should stay visible but unrecorded.
+Before starting a recording, the GUI refreshes LabRecorder's stream discovery and selects every visible stream. This ensures newly started bridge streams are included in bridge-controlled recordings without a separate manual refresh or selection step.
 
 Before recording, confirm the operator preflight:
 

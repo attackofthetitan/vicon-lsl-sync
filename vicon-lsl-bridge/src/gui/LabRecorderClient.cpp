@@ -313,6 +313,10 @@ QStringList LabRecorderClient::startRecordingCommands(const LabRecorderFilenameF
                                                       bool select_all_first) {
     QStringList commands;
     if (select_all_first) {
+        // Discover streams that appeared since LabRecorder's last refresh
+        // before selecting them. LabRecorder's start handler refreshes again,
+        // but that is too late to select newly discovered streams.
+        commands.append("update");
         commands.append("select all");
     }
     commands.append(filenameCommand(fields));

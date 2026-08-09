@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QWidget>
-#include <QCheckBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
@@ -112,7 +111,6 @@ private:
     QLineEdit* acquisition_edit_;
     QLineEdit* modality_edit_;
     QLineEdit* filename_preview_label_;
-    QCheckBox* select_all_before_start_check_;
     QLineEdit* labrecorder_executable_edit_;
     QLineEdit* labrecorder_host_edit_;
     QSpinBox* labrecorder_port_spin_;

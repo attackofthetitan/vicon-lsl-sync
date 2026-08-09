@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QScreen>
 #include <QTimer>
 
 #include <lsl_cpp.h>
@@ -19,11 +20,38 @@ int main(int argc, char* argv[]) {
     app.setApplicationVersion(VICON_LSL_BRIDGE_VERSION);
 
     BridgeWindow window;
+    if (const QScreen* screen = window.screen()) {
+        const QSize available = screen->availableGeometry().size();
+        const QSize margin(80, 80);
+        const QSize usable(qMax(1, available.width() - margin.width()),
+                           qMax(1, available.height() - margin.height()));
+        window.resize(QSize(1440, 900).boundedTo(usable));
+    }
     window.show();
 
     if (QCoreApplication::arguments().contains("--test")) {
         QTimer::singleShot(0, [&app, &window]() {
             try {
+                for (const QScreen* screen : app.screens()) {
+                    const QSize available = screen->availableGeometry().size();
+                    const QSize usable(qMax(1, available.width() - 80),
+                                       qMax(1, available.height() - 80));
+                    const QSize minimum = window.minimumSizeHint();
+                    if (minimum.width() > usable.width() ||
+                        minimum.height() > usable.height()) {
+                        app.exit(12);
+                        return;
+                    }
+                }
+                if (const QScreen* screen = window.screen()) {
+                    const QSize frame = window.frameGeometry().size();
+                    const QSize available = screen->availableGeometry().size();
+                    if (frame.width() > available.width() ||
+                        frame.height() > available.height()) {
+                        app.exit(11);
+                        return;
+                    }
+                }
                 if (!window.configurableTooltipsPresent()) {
                     app.exit(10);
                     return;

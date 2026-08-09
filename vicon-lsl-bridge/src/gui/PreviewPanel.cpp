@@ -20,7 +20,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
-#include <QSplitter>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -74,6 +74,16 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     auto* controls_layout = new QVBoxLayout(controls_group);
     controls_layout->setContentsMargins(8, 8, 8, 8);
     controls_layout->setSpacing(6);
+
+    auto* settings_tabs = new QTabWidget();
+    auto* sources_page = new QWidget();
+    auto* sources_layout = new QVBoxLayout(sources_page);
+    sources_layout->setContentsMargins(6, 6, 6, 6);
+    sources_layout->setSpacing(6);
+    auto* alignment_page = new QWidget();
+    auto* alignment_layout = new QVBoxLayout(alignment_page);
+    alignment_layout->setContentsMargins(6, 6, 6, 6);
+    alignment_layout->setSpacing(6);
 
     auto* stream_grid = new QGridLayout();
     stream_grid->setHorizontalSpacing(8);
@@ -132,7 +142,7 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     stream_grid->addWidget(calibration_stream_edit_, 3, 1, 1, 3);
     stream_grid->setColumnStretch(1, 1);
     stream_grid->setColumnStretch(3, 1);
-    controls_layout->addLayout(stream_grid);
+    sources_layout->addLayout(stream_grid);
 
     auto* transforms = new QGridLayout();
     transforms->setHorizontalSpacing(6);
@@ -163,7 +173,7 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     transforms->addWidget(gaze_rx_spin_, 1, 1);
     transforms->addWidget(gaze_ry_spin_, 1, 2);
     transforms->addWidget(gaze_rz_spin_, 1, 3);
-    controls_layout->addLayout(transforms);
+    alignment_layout->addLayout(transforms);
 
     auto* calibration_row = new QHBoxLayout();
     calibrate_button_ = new QPushButton("Calibrate from Stair Target");
@@ -175,19 +185,22 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
     calibration_row->addWidget(calibrate_button_);
     calibration_row->addWidget(use_manual_transform_button_);
     calibration_row->addStretch(1);
-    controls_layout->addLayout(calibration_row);
+    alignment_layout->addLayout(calibration_row);
+    alignment_layout->addStretch(1);
 
     auto* stair_row = new QHBoxLayout();
     stair_model_edit_ = new QLineEdit();
     auto* browse_stair_button = new QPushButton("Browse");
-    auto* reload_stair_button = new QPushButton("Reload Stair");
     stair_row->addWidget(makeTooltipLabel(
                               "Stair OBJ:", stair_model_edit_,
                               "Wavefront OBJ file used to render the stair target."));
     stair_row->addWidget(stair_model_edit_, 1);
     stair_row->addWidget(browse_stair_button);
-    stair_row->addWidget(reload_stair_button);
-    controls_layout->addLayout(stair_row);
+    sources_layout->addLayout(stair_row);
+
+    settings_tabs->addTab(sources_page, "Sources");
+    settings_tabs->addTab(alignment_page, "Alignment");
+    controls_layout->addWidget(settings_tabs);
 
     auto* button_row = new QHBoxLayout();
     start_button_ = new QPushButton("Start Preview");
@@ -224,7 +237,8 @@ PreviewPanel::PreviewPanel(QWidget* parent) : QWidget(parent) {
                 playback_clock_.setSpeed(speed, playback_elapsed_.elapsed() / 1000.0);
             });
     connect(browse_stair_button, &QPushButton::clicked, this, &PreviewPanel::browseStairModel);
-    connect(reload_stair_button, &QPushButton::clicked, this, &PreviewPanel::reloadStairModel);
+    connect(stair_model_edit_, &QLineEdit::editingFinished,
+            this, &PreviewPanel::reloadStairModel);
     connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
     connect(use_manual_transform_button_, &QPushButton::clicked, this, &PreviewPanel::useManualTransform);
     connect(trail_points_spin_, QOverload<int>::of(&QSpinBox::valueChanged),
