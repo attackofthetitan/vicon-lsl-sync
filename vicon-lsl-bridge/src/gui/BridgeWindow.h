@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QWidget>
-#include <QCheckBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
@@ -44,7 +43,7 @@ private:
 class BridgeWindow : public QWidget {
     Q_OBJECT
 public:
-    explicit BridgeWindow(QWidget* parent = nullptr);
+    explicit BridgeWindow(QWidget* parent = nullptr, bool enable_preview = true);
     ~BridgeWindow() override;
 
     // These accessors intentionally expose the small amount of state that an
@@ -112,7 +111,6 @@ private:
     QLineEdit* acquisition_edit_;
     QLineEdit* modality_edit_;
     QLineEdit* filename_preview_label_;
-    QCheckBox* select_all_before_start_check_;
     QLineEdit* labrecorder_executable_edit_;
     QLineEdit* labrecorder_host_edit_;
     QSpinBox* labrecorder_port_spin_;
@@ -123,7 +121,7 @@ private:
     QPushButton* stop_recording_button_;
     QLabel* labrecorder_status_label_;
     QLabel* readiness_label_;
-    vicon_lsl::PreviewPanel* preview_panel_;
+    vicon_lsl::PreviewPanel* preview_panel_ = nullptr;
 
     LabRecorderClient labrecorder_client_;
     std::unique_ptr<QProcess> labrecorder_process_;

@@ -88,8 +88,12 @@ bool enforceViconTimestamp(double candidate_timestamp,
     }
 
     if (state.have_timestamp && timestamp <= state.last_timestamp) {
-        timestamp = std::nextafter(
-            state.last_timestamp, std::numeric_limits<double>::infinity());
+        if (std::isfinite(receipt_timestamp) && receipt_timestamp > state.last_timestamp) {
+            timestamp = receipt_timestamp;
+        } else {
+            timestamp = std::nextafter(
+                state.last_timestamp, std::numeric_limits<double>::infinity());
+        }
         if (!std::isfinite(timestamp)) {
             return false;
         }

@@ -47,6 +47,10 @@ void ViconLSLBridge::stop() {
 }
 
 void ViconLSLBridge::run() {
+    // LabRecorder can recover a recreated outlet by source_id and continue it
+    // as the same XDF stream. Keep the timestamp guard alive across Vicon
+    // reconnects so that recovered samples never move backwards in that stream.
+    vicon_lsl::ViconTimestampState timestamp_state;
     while (running_) {
         connectWithRetry();
         if (!running_) {
@@ -70,7 +74,6 @@ void ViconLSLBridge::run() {
 
         std::cout << "Streaming started" << std::endl;
         reportStatus(BridgeState::Streaming, "Streaming started");
-        vicon_lsl::ViconTimestampState timestamp_state;
         while (running_ && client_.isConnected()) {
             if (!client_.getFrame()) {
                 std::cerr << "Lost connection, will reconnect" << std::endl;

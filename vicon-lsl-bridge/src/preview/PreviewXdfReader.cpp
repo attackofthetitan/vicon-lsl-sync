@@ -30,7 +30,13 @@ public:
 
     std::size_t position() const { return position_; }
     std::size_t size() const { return data_.size(); }
+    std::size_t remaining() const { return data_.size() - position_; }
     bool eof() const { return position_ >= data_.size(); }
+
+    std::uint8_t peekU8() const {
+        require(1);
+        return data_[position_];
+    }
 
     void seek(std::size_t position) {
         if (position > data_.size()) {
@@ -378,7 +384,7 @@ std::optional<ClockOffsetFit> fitClockOffsets(
     return ClockOffsetFit{stream_center, offset_center, slope};
 }
 
-void correctAndValidateTimestamps(XdfStreamData& stream) {
+std::size_t correctAndRepairTimestamps(XdfStreamData& stream) {
     std::stable_sort(stream.clock_offsets.begin(), stream.clock_offsets.end(),
                      [](const XdfClockOffset& left, const XdfClockOffset& right) {
                          return left.stream_time < right.stream_time;
@@ -405,16 +411,30 @@ void correctAndValidateTimestamps(XdfStreamData& stream) {
             }
         }
     }
-    for (double timestamp : stream.timestamps) {
-        if (!std::isfinite(timestamp)) {
+    std::size_t repaired_count = 0;
+    long double accumulated_shift = 0.0L;
+    std::optional<double> previous;
+    for (double& timestamp : stream.timestamps) {
+        const long double shifted = static_cast<long double>(timestamp) + accumulated_shift;
+        if (!std::isfinite(shifted)) {
             throw std::runtime_error("Corrected XDF timestamp is not finite");
         }
+        double repaired = static_cast<double>(shifted);
+        if (!std::isfinite(repaired)) {
+            throw std::runtime_error("Corrected XDF timestamp is not finite");
+        }
+        if (previous && repaired <= *previous) {
+            repaired = std::nextafter(*previous, std::numeric_limits<double>::infinity());
+            if (!std::isfinite(repaired)) {
+                throw std::runtime_error("Unable to repair non-monotonic XDF timestamp");
+            }
+            accumulated_shift += static_cast<long double>(repaired) - shifted;
+            ++repaired_count;
+        }
+        timestamp = repaired;
+        previous = repaired;
     }
-    if (std::adjacent_find(stream.timestamps.begin(), stream.timestamps.end(),
-                           [](double left, double right) { return right <= left; }) !=
-        stream.timestamps.end()) {
-        throw std::runtime_error("Corrected XDF timestamps are not strictly increasing");
-    }
+    return repaired_count;
 }
 
 } // namespace
@@ -425,11 +445,21 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path) {
 
     std::map<std::uint32_t, XdfStreamData> streams_by_id;
     std::map<std::uint32_t, std::optional<double>> previous_timestamps;
+    bool truncated_tail_ignored = false;
     while (!reader.eof()) {
+        const std::uint8_t varlen_width = reader.peekU8();
+        if (varlen_width != 1 && varlen_width != 4 && varlen_width != 8) {
+            throw std::runtime_error("Unsupported XDF variable-length integer width");
+        }
+        if (reader.remaining() < 1 + static_cast<std::size_t>(varlen_width)) {
+            truncated_tail_ignored = true;
+            break;
+        }
         const std::uint64_t chunk_length = reader.readVarlenInt();
         const std::size_t chunk_start = reader.position();
         if (chunk_length > reader.size() - chunk_start) {
-            throw std::runtime_error("Invalid XDF chunk length");
+            truncated_tail_ignored = true;
+            break;
         }
         const std::size_t chunk_end = chunk_start + static_cast<std::size_t>(chunk_length);
         if (chunk_end - reader.position() < sizeof(std::uint16_t)) {
@@ -459,6 +489,7 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path) {
     }
 
     XdfLoadResult result;
+    result.truncated_tail_ignored = truncated_tail_ignored;
     for (auto& item : streams_by_id) {
         XdfStreamData& stream = item.second;
         if (stream.channel_count <= 0 && !stream.samples.empty()) {
@@ -470,7 +501,7 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path) {
             }
         }
         stream.role = inferRole(stream);
-        correctAndValidateTimestamps(stream);
+        stream.repaired_timestamp_count = correctAndRepairTimestamps(stream);
         result.streams.push_back(std::move(stream));
     }
     return result;

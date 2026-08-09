@@ -123,11 +123,13 @@ void testStartRecordingCommands() {
     expect(without_select.value(1) == "start", "start command sequence starts recording last");
 
     QStringList with_select = LabRecorderClient::startRecordingCommands(fields, true);
-    expect(with_select.size() == 3, "start command sequence with select-all has three commands");
-    expect(with_select.value(0) == "select all", "start command sequence can select all first");
-    expect(with_select.value(1) == without_select.value(0),
+    expect(with_select.size() == 4, "start command sequence with select-all has four commands");
+    expect(with_select.value(0) == "update",
+           "start command sequence refreshes newly available streams first");
+    expect(with_select.value(1) == "select all", "start command sequence can select all first");
+    expect(with_select.value(2) == without_select.value(0),
            "start command sequence reuses filename command after select-all");
-    expect(with_select.value(2) == "start", "start command sequence with select-all starts recording last");
+    expect(with_select.value(3) == "start", "start command sequence with select-all starts recording last");
 }
 
 void testRuntimePolicy() {
@@ -267,6 +269,9 @@ void testTcpStartRecordingSequenceWithSelectAll() {
     fields.run = "4";
 
     expect(client.startRecording(fields, true), "sends combined start sequence with select-all");
+    expect(readCommand(socket.get()) == "update",
+           "server receives stream refresh before select-all in combined start sequence");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges stream refresh");
     expect(readCommand(socket.get()) == "select all",
            "server receives select-all before filename in combined start sequence");
     expect(writeReply(socket.get(), "OK"), "server acknowledges select-all");

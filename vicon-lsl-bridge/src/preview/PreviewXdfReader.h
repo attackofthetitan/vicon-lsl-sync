@@ -29,10 +29,12 @@ struct XdfStreamData {
     std::vector<XdfClockOffset> clock_offsets;
     std::vector<double> timestamps;
     std::vector<std::vector<double>> samples;
+    std::size_t repaired_timestamp_count = 0;
 };
 
 struct XdfLoadResult {
     std::vector<XdfStreamData> streams;
+    bool truncated_tail_ignored = false;
 };
 
 XdfLoadResult loadXdfNumericStreams(const std::string& path);

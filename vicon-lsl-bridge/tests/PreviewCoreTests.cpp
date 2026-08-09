@@ -792,7 +792,7 @@ TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp"
     REQUIRE(recording.frames.front().gaze_rays.empty());
 }
 
-TEST_CASE("Preview XDF loader rejects impossible implicit and non-monotonic timestamps") {
+TEST_CASE("Preview XDF loader rejects impossible implicit timestamps and repairs regressions") {
     const TemporaryFilePath implicit_file("_invalid_implicit.xdf");
     const TemporaryFilePath non_monotonic_file("_non_monotonic.xdf");
     const std::string implicit_path = implicit_file.string();
@@ -813,19 +813,38 @@ TEST_CASE("Preview XDF loader rejects impossible implicit and non-monotonic time
     }
 
     bool rejected_implicit = false;
-    bool rejected_non_monotonic = false;
     try {
         (void)vicon_lsl::loadXdfNumericStreams(implicit_path);
     } catch (const std::runtime_error&) {
         rejected_implicit = true;
     }
-    try {
-        (void)vicon_lsl::loadXdfNumericStreams(non_monotonic_path);
-    } catch (const std::runtime_error&) {
-        rejected_non_monotonic = true;
-    }
     REQUIRE(rejected_implicit);
-    REQUIRE(rejected_non_monotonic);
+    const auto repaired = vicon_lsl::loadXdfNumericStreams(non_monotonic_path);
+    REQUIRE_EQ(repaired.streams.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(repaired.streams.front().repaired_timestamp_count,
+               static_cast<std::size_t>(1));
+    REQUIRE(repaired.streams.front().timestamps[1] >
+            repaired.streams.front().timestamps[0]);
+}
+
+TEST_CASE("Preview XDF loader preserves complete chunks before an interrupted tail") {
+    const TemporaryFilePath temporary_path("_truncated_tail.xdf");
+    const std::string path = temporary_path.string();
+    const std::uint32_t stream_id = 1;
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", {"value"});
+        writeSampleChunk(output, stream_id, {1.0}, {{42.0}});
+        writeVarlenInt(output, 1000);
+        writeLittle(output, static_cast<std::uint16_t>(3));
+    }
+
+    const auto recovered = vicon_lsl::loadXdfNumericStreams(path);
+    REQUIRE(recovered.truncated_tail_ignored);
+    REQUIRE_EQ(recovered.streams.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(recovered.streams.front().samples.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(recovered.streams.front().samples.front().front(), 42.0));
 }
 
 TEST_CASE("Preview XDF loader rejects malformed clock-offset chunks") {
