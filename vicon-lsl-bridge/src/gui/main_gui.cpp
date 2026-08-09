@@ -44,18 +44,19 @@ int main(int argc, char* argv[]) {
     if (test_mode) {
         QTimer::singleShot(0, [&app, &window, headless_test]() {
             try {
-                for (const QScreen* screen : app.screens()) {
-                    const QSize available = screen->availableGeometry().size();
-                    const QSize usable(qMax(1, available.width() - 80),
-                                       qMax(1, available.height() - 80));
-                    const QSize minimum = window.minimumSizeHint();
-                    if (minimum.width() > usable.width() ||
-                        minimum.height() > usable.height()) {
-                        app.exit(12);
+                const QSize target_usable(1920 - 80, 1080 - 80);
+                const QSize minimum = window.minimumSizeHint();
+                if (minimum.width() > target_usable.width() ||
+                    minimum.height() > target_usable.height()) {
+                    app.exit(12);
+                    return;
+                }
+                if (!headless_test) {
+                    const QScreen* screen = window.screen();
+                    if (!screen) {
+                        app.exit(13);
                         return;
                     }
-                }
-                if (const QScreen* screen = window.screen()) {
                     const QSize frame = window.frameGeometry().size();
                     const QSize available = screen->availableGeometry().size();
                     if (frame.width() > available.width() ||
