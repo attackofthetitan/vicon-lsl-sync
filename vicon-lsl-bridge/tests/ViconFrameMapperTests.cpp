@@ -170,11 +170,17 @@ TEST_CASE("Vicon timestamp policy clamps regressions without dropping frames") {
 
     REQUIRE(vicon_lsl::enforceViconTimestamp(9.0, 11.0, state, timestamp, &adjusted));
     REQUIRE(adjusted);
-    REQUIRE(timestamp > 10.0);
+    REQUIRE(std::abs(timestamp - 11.0) < 1e-12);
     REQUIRE(vicon_lsl::enforceViconTimestamp(
         vicon_lsl::quietNaN(), 12.0, state, timestamp, &adjusted));
     REQUIRE(!adjusted);
-    REQUIRE(timestamp > 10.0);
+    REQUIRE(std::abs(timestamp - 12.0) < 1e-12);
+
+    // The same state is retained when the bridge recreates its outlets after
+    // a Vicon reconnect.
+    REQUIRE(vicon_lsl::enforceViconTimestamp(5.0, 13.0, state, timestamp, &adjusted));
+    REQUIRE(adjusted);
+    REQUIRE(std::abs(timestamp - 13.0) < 1e-12);
 }
 
 TEST_CASE("Vicon layout collection preserves discovered order") {

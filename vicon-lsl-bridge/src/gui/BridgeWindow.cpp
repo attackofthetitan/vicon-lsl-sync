@@ -19,6 +19,9 @@
 
 namespace {
 
+constexpr qint64 kBridgeCloseTimeoutMs = 4000;
+constexpr qint64 kRecordingCloseTimeoutMs = 15000;
+
 QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
     auto* label = new QLabel(text);
     label->setToolTip(tooltip);
@@ -634,14 +637,15 @@ void BridgeWindow::finishCloseIfReady() {
     if (!close_pending_) {
         return;
     }
+    const qint64 elapsed_ms = close_elapsed_.elapsed();
     const bool bridge_done = worker_ == nullptr;
     const bool recording_done = !close_stop_requested_ ||
-        labrecorder_client_.recordingState() == RecorderRecordingState::Stopped ||
-        close_elapsed_.elapsed() >= 2000;
-    if (!bridge_done || !recording_done) {
-        if (close_elapsed_.elapsed() < 4000) {
-            return;
-        }
+        labrecorder_client_.recordingState() == RecorderRecordingState::Stopped;
+    if (!bridge_done && elapsed_ms < kBridgeCloseTimeoutMs) {
+        return;
+    }
+    if (!recording_done && elapsed_ms < kRecordingCloseTimeoutMs) {
+        return;
     }
     if (close_poll_timer_) {
         close_poll_timer_->stop();

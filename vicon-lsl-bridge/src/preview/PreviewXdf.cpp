@@ -228,6 +228,16 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
 
     std::ostringstream summary;
     summary << xdf.streams.size() << " stream(s), " << recording.frames.size() << " frame(s)";
+    if (xdf.truncated_tail_ignored) {
+        summary << "; incomplete final chunk ignored";
+    }
+    std::size_t repaired_timestamps = 0;
+    for (const auto& stream : xdf.streams) {
+        repaired_timestamps += stream.repaired_timestamp_count;
+    }
+    if (repaired_timestamps > 0) {
+        summary << "; " << repaired_timestamps << " timestamp(s) repaired";
+    }
     if (automatically_calibrated) {
         summary << "; stair-target calibration applied";
     } else if (tracker_local_gaze && target_stream) {
