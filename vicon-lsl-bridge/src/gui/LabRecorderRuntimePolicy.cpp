@@ -30,3 +30,24 @@ bool LabRecorderRuntimePolicy::shouldAttemptConnection(
            state != RecorderConnectionState::Connected &&
            state != RecorderConnectionState::Connecting;
 }
+
+bool LabRecorderRuntimePolicy::canRefreshStreams(
+    RecorderConnectionState connection_state,
+    RecorderRecordingState recording_state) {
+    return connection_state == RecorderConnectionState::Connected &&
+           recording_state != RecorderRecordingState::Recording;
+}
+
+bool LabRecorderRuntimePolicy::canStartRecording(
+    RecorderConnectionState connection_state,
+    RecorderRecordingState recording_state) {
+    return connection_state == RecorderConnectionState::Connected &&
+           recording_state != RecorderRecordingState::Recording;
+}
+
+bool LabRecorderRuntimePolicy::canStopRecording(
+    RecorderConnectionState connection_state,
+    RecorderRecordingState recording_state) {
+    return connection_state == RecorderConnectionState::Connected &&
+           recording_state != RecorderRecordingState::Stopped;
+}

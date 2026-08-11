@@ -67,6 +67,7 @@ private slots:
     void onStartRecording();
     void onStopRecording();
     void updateFilenamePreview();
+    void syncFilenameToLabRecorder();
     void onStatusStaleCheck();
     void onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
                         unsigned int frames, const QString& message);
@@ -83,6 +84,7 @@ private:
     QString filenameValidationError() const;
     void setLabRecorderStatus(const QString& status);
     bool isFilenameValid() const;
+    void scheduleFilenameSync();
     void updateReadiness();
     void updateRecordingButtons();
     QString resolveLabRecorderExecutable() const;
@@ -127,6 +129,7 @@ private:
     std::unique_ptr<QProcess> labrecorder_process_;
     bool labrecorder_process_owned_ = false;
     QTimer* labrecorder_retry_timer_ = nullptr;
+    QTimer* filename_sync_timer_ = nullptr;
     QElapsedTimer labrecorder_retry_elapsed_;
     QTimer* close_poll_timer_ = nullptr;
     QElapsedTimer close_elapsed_;

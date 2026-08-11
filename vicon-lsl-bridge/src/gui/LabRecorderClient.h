@@ -37,13 +37,17 @@ class LabRecorderClient : public QObject {
 public:
     explicit LabRecorderClient(QObject* parent = nullptr);
 
-    void connectToServer(const QString& host, quint16 port, int timeout_ms = 1000);
+    void connectToServer(const QString& host,
+                         quint16 port,
+                         int connection_timeout_ms = 1000,
+                         int command_timeout_ms = 5000);
     bool isConnected() const;
     RecorderConnectionState connectionState() const { return connection_state_; }
     RecorderRecordingState recordingState() const { return recording_state_; }
 
     bool sendCommand(const QString& command);
     bool refreshStreams();
+    bool updateFilename(const LabRecorderFilenameFields& fields);
     bool startRecording(const LabRecorderFilenameFields& fields, bool select_all_first);
     bool stopRecording();
 
