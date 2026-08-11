@@ -56,7 +56,7 @@ The GUI can also prepare and control a LabRecorder session over LabRecorder's re
 3. Launch LabRecorder from the GUI, or connect to an already-running LabRecorder with RCS enabled. LabRecorder must have RCS enabled and the GUI must be connected before recording controls become active.
 4. Use **Refresh Streams**, **Start Recording**, and **Stop Recording** from the bridge GUI.
 
-The filename preview shows the `.xdf` path that will be sent to LabRecorder after applying the template and operator fields. Validation is intended to catch empty or unsafe path components before recording starts, so operators can correct participant/session/task/run values instead of discovering the problem after a failed start.
+The filename preview shows the `.xdf` path produced after applying the template and operator fields. Once connected, valid filename changes are synchronized to LabRecorder after a short typing delay; **Start Recording** sends the latest filename again in the ordered start sequence. Validation is intended to catch empty or unsafe path components before recording starts, so operators can correct participant/session/task/run values instead of discovering the problem after a failed start.
 
 Before starting a recording, the GUI refreshes LabRecorder's stream discovery and selects every visible stream. This ensures newly started bridge streams are included in bridge-controlled recordings without a separate manual refresh or selection step.
 

@@ -174,6 +174,28 @@ void testRuntimePolicy() {
     expect(!LabRecorderRuntimePolicy::shouldAttemptConnection(
                RecorderConnectionState::Disconnected, 15000),
            "expired retry window suppresses connection attempts");
+
+    expect(LabRecorderRuntimePolicy::canRefreshStreams(
+               RecorderConnectionState::Connected, RecorderRecordingState::Unknown),
+           "connected recorder with unknown state allows stream refresh");
+    expect(LabRecorderRuntimePolicy::canStartRecording(
+               RecorderConnectionState::Connected, RecorderRecordingState::Unknown),
+           "connected recorder with unknown state allows recording start");
+    expect(LabRecorderRuntimePolicy::canStopRecording(
+               RecorderConnectionState::Connected, RecorderRecordingState::Unknown),
+           "connected recorder with unknown state allows recording stop recovery");
+    expect(!LabRecorderRuntimePolicy::canRefreshStreams(
+               RecorderConnectionState::Connected, RecorderRecordingState::Recording),
+           "known recording state blocks stream refresh");
+    expect(!LabRecorderRuntimePolicy::canStartRecording(
+               RecorderConnectionState::Connected, RecorderRecordingState::Recording),
+           "known recording state blocks duplicate start");
+    expect(!LabRecorderRuntimePolicy::canStopRecording(
+               RecorderConnectionState::Connected, RecorderRecordingState::Stopped),
+           "known stopped state blocks duplicate stop");
+    expect(!LabRecorderRuntimePolicy::canStartRecording(
+               RecorderConnectionState::Disconnected, RecorderRecordingState::Stopped),
+           "disconnected recorder blocks recording controls");
 }
 
 void testTcpCommandSequence() {
@@ -218,7 +240,7 @@ void testTcpCommandSequence() {
     expect(waitUntil([&completions]() { return completions == 1; }) && last_completion_ok,
            "client completes update after acknowledgement");
 
-    expect(client.sendCommand(LabRecorderClient::filenameCommand(fields)), "sends filename");
+    expect(client.updateFilename(fields), "sends filename update");
     expect(readCommand(socket.get()) == expected[1], "server receives filename");
     expect(writeReply(socket.get(), "OK"), "server acknowledges filename");
     expect(waitUntil([&completions]() { return completions == 2; }) && last_completion_ok,
@@ -319,11 +341,48 @@ void testFragmentedReplyControlsCommandProgress() {
            "complete fragmented acknowledgement finishes command");
 }
 
+void testConnectionTimeoutDoesNotShortenCommandTimeout() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0),
+           "separate timeout server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort(), 20);
+    expect(waitUntil([&client]() { return client.isConnected(); }),
+           "separate timeout client connects within short connection deadline");
+    expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
+           "separate timeout server accepts client");
+    std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
+    if (!socket) return;
+
+    int completions = 0;
+    bool completion_ok = false;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&completions, &completion_ok](const QString&, bool ok, const QString&) {
+                         ++completions;
+                         completion_ok = ok;
+                     });
+
+    expect(client.refreshStreams(), "queues refresh after short-deadline connection");
+    expect(readCommand(socket.get()) == "update",
+           "short-deadline connection sends refresh command");
+    QElapsedTimer wait_timer;
+    wait_timer.start();
+    while (wait_timer.elapsed() < 100) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QThread::msleep(1);
+    }
+    expect(client.connectionState() == RecorderConnectionState::Connected && completions == 0,
+           "command remains connected beyond the short connection deadline");
+    expect(writeReply(socket.get(), "OK"), "separate timeout server acknowledges refresh");
+    expect(waitUntil([&completions]() { return completions == 1; }) && completion_ok,
+           "refresh completes within the independent command deadline");
+}
+
 void testCommandTimeoutDisconnectsAndDropsQueuedWork() {
     QTcpServer server;
     expect(server.listen(QHostAddress::LocalHost, 0), "timeout server listens");
     LabRecorderClient client;
-    client.connectToServer("127.0.0.1", server.serverPort(), 50);
+    client.connectToServer("127.0.0.1", server.serverPort(), 50, 50);
     expect(waitUntil([&client]() { return client.isConnected(); }), "timeout client connects");
     expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
            "timeout server accepts client");
@@ -415,6 +474,7 @@ int main(int argc, char** argv) {
     testTcpCommandSequence();
     testTcpStartRecordingSequenceWithSelectAll();
     testFragmentedReplyControlsCommandProgress();
+    testConnectionTimeoutDoesNotShortenCommandTimeout();
     testCommandTimeoutDisconnectsAndDropsQueuedWork();
     testMidCommandDisconnectReportsFailure();
     testConnectionStateTracksIdleDisconnectAndReconnect();

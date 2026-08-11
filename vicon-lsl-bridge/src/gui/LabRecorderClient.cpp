@@ -45,7 +45,10 @@ LabRecorderClient::LabRecorderClient(QObject* parent) : QObject(parent) {
     connect(&command_timeout_, &QTimer::timeout, this, &LabRecorderClient::onCommandTimeout);
 }
 
-void LabRecorderClient::connectToServer(const QString& host, quint16 port, int timeout_ms) {
+void LabRecorderClient::connectToServer(const QString& host,
+                                        quint16 port,
+                                        int connection_timeout_ms,
+                                        int command_timeout_ms) {
     connection_timeout_.stop();
     command_timeout_.stop();
     batches_.clear();
@@ -55,9 +58,8 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int t
     pending_payload_.clear();
     response_buffer_.clear();
     socket_.abort();
-    const int timeout = (std::max)(1, timeout_ms);
-    connection_timeout_.setInterval(timeout);
-    command_timeout_.setInterval(timeout);
+    connection_timeout_.setInterval((std::max)(1, connection_timeout_ms));
+    command_timeout_.setInterval((std::max)(1, command_timeout_ms));
     setRecordingState(RecorderRecordingState::Unknown);
     setConnectionState(RecorderConnectionState::Connecting,
                        "Connecting to LabRecorder RCS...");
@@ -77,6 +79,11 @@ bool LabRecorderClient::sendCommand(const QString& command) {
 
 bool LabRecorderClient::refreshStreams() {
     return enqueueCommands("refresh streams", {"update"}, RecorderRecordingState::Unknown);
+}
+
+bool LabRecorderClient::updateFilename(const LabRecorderFilenameFields& fields) {
+    return enqueueCommands(
+        "update filename", {filenameCommand(fields)}, RecorderRecordingState::Unknown);
 }
 
 bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields, bool select_all_first) {

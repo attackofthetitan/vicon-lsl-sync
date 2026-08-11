@@ -316,11 +316,17 @@ BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview) : QWidget(paren
                     state != RecorderConnectionState::Connecting);
                 updateRecordingButtons();
                 updateReadiness();
+                scheduleFilenameSync();
             });
     connect(&labrecorder_client_, &LabRecorderClient::recordingStateChanged, this,
-            [this](RecorderRecordingState) {
+            [this](RecorderRecordingState state) {
                 updateRecordingButtons();
                 updateReadiness();
+                if (state == RecorderRecordingState::Recording && filename_sync_timer_) {
+                    filename_sync_timer_->stop();
+                } else {
+                    scheduleFilenameSync();
+                }
             });
     connect(&labrecorder_client_, &LabRecorderClient::commandFinished, this,
             [this](const QString& operation, bool ok, const QString& message) {
@@ -331,7 +337,16 @@ BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview) : QWidget(paren
                 updateReadiness();
             });
 
-    const auto preview_update = [this]() { updateFilenamePreview(); };
+    filename_sync_timer_ = new QTimer(this);
+    filename_sync_timer_->setSingleShot(true);
+    filename_sync_timer_->setInterval(300);
+    connect(filename_sync_timer_, &QTimer::timeout,
+            this, &BridgeWindow::syncFilenameToLabRecorder);
+
+    const auto preview_update = [this]() {
+        updateFilenamePreview();
+        scheduleFilenameSync();
+    };
     connect(study_root_edit_, &QLineEdit::textChanged, this, preview_update);
     connect(filename_template_edit_, &QLineEdit::textChanged, this, preview_update);
     connect(participant_edit_, &QLineEdit::textChanged, this, preview_update);
@@ -562,6 +577,9 @@ void BridgeWindow::onRefreshLabRecorder() {
 
 void BridgeWindow::onStartRecording() {
     saveSettings();
+    if (filename_sync_timer_) {
+        filename_sync_timer_->stop();
+    }
     const QString validation_error = filenameValidationError();
     if (!validation_error.isEmpty()) {
         setLabRecorderStatus(validation_error);
@@ -588,6 +606,19 @@ void BridgeWindow::updateFilenamePreview() {
     }
     updateRecordingButtons();
     updateReadiness();
+}
+
+void BridgeWindow::syncFilenameToLabRecorder() {
+    const RecorderConnectionState connection_state = labrecorder_client_.connectionState();
+    const RecorderRecordingState recording_state = labrecorder_client_.recordingState();
+    if (!LabRecorderRuntimePolicy::canStartRecording(connection_state, recording_state) ||
+        !isFilenameValid()) {
+        return;
+    }
+
+    if (labrecorder_client_.updateFilename(filenameFields())) {
+        setLabRecorderStatus("Filename update queued.");
+    }
 }
 
 void BridgeWindow::onStatusStaleCheck() {
@@ -855,19 +886,34 @@ void BridgeWindow::updateRecordingButtons() {
         return;
     }
 
-    const bool connected =
-        labrecorder_client_.connectionState() == RecorderConnectionState::Connected;
+    const RecorderConnectionState connection_state = labrecorder_client_.connectionState();
     const RecorderRecordingState recording_state = labrecorder_client_.recordingState();
-    refresh_streams_button_->setEnabled(
-        connected && recording_state == RecorderRecordingState::Stopped);
+    refresh_streams_button_->setEnabled(LabRecorderRuntimePolicy::canRefreshStreams(
+        connection_state, recording_state));
     start_recording_button_->setEnabled(
-        connected && recording_state == RecorderRecordingState::Stopped && isFilenameValid());
-    stop_recording_button_->setEnabled(
-        connected && recording_state != RecorderRecordingState::Stopped);
+        LabRecorderRuntimePolicy::canStartRecording(connection_state, recording_state) &&
+        isFilenameValid());
+    stop_recording_button_->setEnabled(LabRecorderRuntimePolicy::canStopRecording(
+        connection_state, recording_state));
 }
 
 bool BridgeWindow::isFilenameValid() const {
     return filenameValidationError().isEmpty();
+}
+
+void BridgeWindow::scheduleFilenameSync() {
+    if (!filename_sync_timer_) {
+        return;
+    }
+
+    const RecorderConnectionState connection_state = labrecorder_client_.connectionState();
+    const RecorderRecordingState recording_state = labrecorder_client_.recordingState();
+    if (LabRecorderRuntimePolicy::canStartRecording(connection_state, recording_state) &&
+        isFilenameValid()) {
+        filename_sync_timer_->start();
+    } else {
+        filename_sync_timer_->stop();
+    }
 }
 
 void BridgeWindow::updateReadiness() {
