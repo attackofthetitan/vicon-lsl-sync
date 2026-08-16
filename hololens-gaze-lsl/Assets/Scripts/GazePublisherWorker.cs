@@ -30,8 +30,6 @@ namespace GazeLSL
         private readonly IGazeSampleProvider provider;
         private readonly IGazeSampleOutlet outlet;
         private readonly uint nominalRate;
-        private readonly Func<double> fallbackTimestampProvider;
-
         private Thread thread;
         private ManualResetEventSlim stopSignal;
         private Exception failure;
@@ -44,13 +42,11 @@ namespace GazeLSL
         public GazePublisherWorker(
             IGazeSampleProvider provider,
             IGazeSampleOutlet outlet,
-            uint nominalRate,
-            Func<double> fallbackTimestampProvider = null)
+            uint nominalRate)
         {
             this.provider = provider ?? throw new ArgumentNullException(nameof(provider));
             this.outlet = outlet ?? throw new ArgumentNullException(nameof(outlet));
             this.nominalRate = Math.Max(1u, nominalRate);
-            this.fallbackTimestampProvider = fallbackTimestampProvider;
         }
 
         public bool IsRunning => Volatile.Read(ref running) != 0;
@@ -184,11 +180,6 @@ namespace GazeLSL
                     {
                         GazeSampleEncoder.WriteSample(sample, sampleBuffer);
                         double timestamp = sample.Timestamp;
-                        if ((!IsFinite(timestamp) || timestamp <= 0.0) &&
-                            fallbackTimestampProvider != null)
-                        {
-                            timestamp = fallbackTimestampProvider();
-                        }
                         if (IsFinite(timestamp) && timestamp > 0.0)
                         {
                             outlet.PushSample(sampleBuffer, timestamp);

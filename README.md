@@ -43,6 +43,8 @@ Recordings labeled `eye_tracker_space` predate the world-space publisher fix. Th
 
 Automatic stair-target alignment requires world-space gaze. With Microsoft Mixed Reality OpenXR 1.5.1 or later, `GazeDataProvider` acquires raw readings on its 90 Hz worker, then locates the eye tracker's dynamic spatial-graph node on Unity's main thread at each reading's system-relative timestamp before publishing the ray in the current Unity/OpenXR scene coordinate system.
 
+The gaze stream preserves each SDK reading's QPC-derived `SystemRelativeTime` as its LSL capture timestamp (100 ns ticks converted to seconds in the QPC-backed steady-clock domain). Duplicate, regressing, invalid, or individually stale readings are rejected. Raw and transformed queues may batch normal 90 Hz samples, but once either capture-time span exceeds 25 ms the older backlog is dropped and only the newest sample is retained, creating an explicit gap instead of replaying stale gaze behind the Vicon markers.
+
 Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` in the same right-handed world convention as gaze.
 
 In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and applies the resulting HoloLens-to-Vicon rigid transform for the current preview session only; automatic alignment is not saved. **Use Manual Transform** returns to the persistent translation/Euler controls.

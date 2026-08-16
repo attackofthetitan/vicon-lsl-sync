@@ -35,17 +35,23 @@ namespace GazeLSL
             public RawTrackerRay Right;
         }
 
+        private struct QueuedGazeSample
+        {
+            public long SystemRelativeTimeTicks;
+            public GazeSample Sample;
+        }
+
         private readonly object trackerGate = new object();
         private readonly Queue<RawGazeReading> pendingRawReadings =
             new Queue<RawGazeReading>();
-        private readonly Queue<GazeSample> pendingSamples = new Queue<GazeSample>();
+        private readonly Queue<QueuedGazeSample> pendingSamples =
+            new Queue<QueuedGazeSample>();
 
         private EyeGazeTrackerWatcher watcher;
         private EyeGazeTracker tracker;
         private SpatialGraphNode trackerNode;
         private Transform mixedRealityPlayspace;
-        private DateTime lastReadingTimestamp = DateTime.MinValue;
-        private DateTime lastWallClock = DateTime.MinValue;
+        private readonly GazeReadingGate readingGate = new GazeReadingGate();
         private long sessionGeneration;
         private long watcherGeneration;
         private long trackerLifecycleGeneration;
@@ -117,11 +123,16 @@ namespace GazeLSL
                     AcquireRawReadingLocked();
                 }
 
+                GazeBacklogPolicy.CollapseIfOverSpan(
+                    pendingSamples,
+                    GetSampleTimestampTicks,
+                    GazeTiming.MaxBacklogSpanTicks);
+
                 if (pendingSamples.Count == 0)
                 {
                     return false;
                 }
-                sample = pendingSamples.Dequeue();
+                sample = pendingSamples.Dequeue().Sample;
                 return true;
             }
 #else
@@ -160,27 +171,34 @@ namespace GazeLSL
 #if ENABLE_WINMD_SUPPORT
         private void AcquireRawReadingLocked()
         {
-            DateTime wallClockNow = DateTime.Now;
-            if (wallClockNow < lastWallClock)
-            {
-                throw new InvalidOperationException(
-                    "System clock moved backwards; restart the eye tracker session.");
-            }
-            lastWallClock = wallClockNow;
-
+            TimeSpan currentSystemRelativeTime =
+                TimeSpan.FromTicks(GazeTiming.CurrentSystemRelativeTimeTicks());
             EyeGazeTrackerReading reading =
-                tracker.TryGetReadingAfterTimestamp(lastReadingTimestamp);
-            if (reading == null || reading.Timestamp <= lastReadingTimestamp)
+                tracker.TryGetReadingAtSystemRelativeTime(currentSystemRelativeTime);
+            if (reading == null)
             {
                 return;
             }
 
-            lastReadingTimestamp = reading.Timestamp;
+            long systemRelativeTimeTicks = reading.SystemRelativeTime.Ticks;
+            if (!GazeTiming.IsFreshCaptureTimestamp(
+                    systemRelativeTimeTicks,
+                    currentSystemRelativeTime.Ticks,
+                    GazeTiming.MaxBacklogSpanTicks))
+            {
+                return;
+            }
+            if (!readingGate.TryAccept(systemRelativeTimeTicks))
+            {
+                return;
+            }
+
             RawGazeReading raw = new RawGazeReading
             {
                 Generation = sessionGeneration,
-                SystemRelativeTimeTicks = reading.SystemRelativeTime.Ticks,
-                Timestamp = LSL.LSL.local_clock()
+                SystemRelativeTimeTicks = systemRelativeTimeTicks,
+                Timestamp = GazeTiming.SystemRelativeTicksToLslTimestamp(
+                    systemRelativeTimeTicks)
             };
 
             raw.Combined = ReadCombinedRay(reading);
@@ -190,11 +208,12 @@ namespace GazeLSL
                 raw.Right = ReadRightRay(reading);
             }
 
-            while (pendingRawReadings.Count >= MaxQueuedSamples)
-            {
-                pendingRawReadings.Dequeue();
-            }
-            pendingRawReadings.Enqueue(raw);
+            GazeBacklogPolicy.Enqueue(
+                pendingRawReadings,
+                raw,
+                GetRawTimestampTicks,
+                MaxQueuedSamples,
+                GazeTiming.MaxBacklogSpanTicks);
         }
 
         private void TransformReadingsOnMainThread()
@@ -207,6 +226,10 @@ namespace GazeLSL
                 SpatialGraphNode node;
                 lock (trackerGate)
                 {
+                    GazeBacklogPolicy.CollapseIfOverSpan(
+                        pendingRawReadings,
+                        GetRawTimestampTicks,
+                        GazeTiming.MaxBacklogSpanTicks);
                     if (pendingRawReadings.Count == 0)
                     {
                         break;
@@ -258,11 +281,16 @@ namespace GazeLSL
                     {
                         continue;
                     }
-                    while (pendingSamples.Count >= MaxQueuedSamples)
-                    {
-                        pendingSamples.Dequeue();
-                    }
-                    pendingSamples.Enqueue(sample);
+                    GazeBacklogPolicy.Enqueue(
+                        pendingSamples,
+                        new QueuedGazeSample
+                        {
+                            SystemRelativeTimeTicks = raw.SystemRelativeTimeTicks,
+                            Sample = sample
+                        },
+                        GetSampleTimestampTicks,
+                        MaxQueuedSamples,
+                        GazeTiming.MaxBacklogSpanTicks);
                 }
             }
 
@@ -272,6 +300,16 @@ namespace GazeLSL
                     $"Eye tracker locate failed; re-enumerating the tracker - {locateFailure.Message}");
                 RestartTrackingSession();
             }
+        }
+
+        private static long GetRawTimestampTicks(RawGazeReading reading)
+        {
+            return reading.SystemRelativeTimeTicks;
+        }
+
+        private static long GetSampleTimestampTicks(QueuedGazeSample queuedSample)
+        {
+            return queuedSample.SystemRelativeTimeTicks;
         }
 
         private async System.Threading.Tasks.Task StartWatcherAsync()
@@ -401,9 +439,10 @@ namespace GazeLSL
                         previousTracker = tracker;
                         tracker = newTracker;
                         trackerNode = newTrackerNode;
-                        // Skip readings buffered before this 90 Hz session became active.
-                        lastReadingTimestamp = DateTime.Now;
-                        lastWallClock = lastReadingTimestamp;
+                        // Start the integer capture-time gate at the new tracker
+                        // lifecycle; readings from the previous SDK session must
+                        // never be compared with this session's clock.
+                        readingGate.Reset();
                         includeIndividualEyes = perEye;
                         pendingRawReadings.Clear();
                         pendingSamples.Clear();
@@ -454,8 +493,7 @@ namespace GazeLSL
                     tracker = null;
                     trackerNode = null;
                     includeIndividualEyes = false;
-                    lastReadingTimestamp = DateTime.MinValue;
-                    lastWallClock = DateTime.MinValue;
+                    readingGate.Reset();
                     pendingRawReadings.Clear();
                     pendingSamples.Clear();
                     consecutiveLocateFailures = 0;
@@ -710,8 +748,7 @@ namespace GazeLSL
                 tracker = null;
                 trackerNode = null;
                 includeIndividualEyes = false;
-                lastReadingTimestamp = DateTime.MinValue;
-                lastWallClock = DateTime.MinValue;
+                readingGate.Reset();
                 pendingRawReadings.Clear();
                 pendingSamples.Clear();
                 consecutiveLocateFailures = 0;
