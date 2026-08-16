@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.10.2 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.10.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -47,6 +47,7 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/preview/PreviewCalibration.cpp
     src/preview/PreviewCsv.cpp
     src/preview/PreviewMath.cpp
+    src/preview/PreviewRate.cpp
     src/preview/PreviewPlaybackClock.cpp
     src/preview/PreviewParsing.cpp
     src/preview/PreviewXdf.cpp
@@ -290,6 +291,7 @@ if(BUILD_TESTING)
         tests/StreamSchemaTests.cpp
         tests/CommandLineTests.cpp
         tests/PreviewCoreTests.cpp
+        tests/PreviewRateTests.cpp
         tests/ViconFrameMapperTests.cpp
     )
 

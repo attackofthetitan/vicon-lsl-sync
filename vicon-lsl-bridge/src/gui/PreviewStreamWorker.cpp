@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <utility>
 
@@ -18,6 +19,7 @@ namespace {
 constexpr int kResolveRetryMs = 1000;
 constexpr int kStatusIntervalMs = 1000;
 constexpr int kStaleSampleMs = 500;
+constexpr double kGazeLowRateFraction = 0.8;
 
 std::vector<std::string> channelLabels(lsl::stream_info info,
                                        PreviewStreamRole role) {
@@ -62,6 +64,8 @@ struct PreviewStreamWorker::StreamState {
     std::vector<std::string> labels;
     std::string coordinate_frame;
     std::vector<double> latest_sample;
+    double nominal_rate = 0.0;
+    PreviewRateTracker rate_tracker;
     double latest_timestamp = 0.0;
     bool have_sample = false;
     qint64 last_sample_ms = -1;
@@ -184,6 +188,10 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
             .child_value("coordinate_frame");
         state.coordinate_frame = coordinate_frame ? coordinate_frame : "";
         state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
+        state.nominal_rate = metadata.nominal_srate();
+        if (!std::isfinite(state.nominal_rate) || state.nominal_rate <= 0.0) {
+            state.nominal_rate = 0.0;
+        }
         state.inlet = std::move(inlet);
         // Live preview consumes timestamps in the local recorder clock. Keep
         // clock synchronization scoped to these inlets; XDF playback applies
@@ -191,10 +199,17 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         state.inlet->set_postprocessing(lsl::post_clocksync);
         state.have_sample = false;
         state.last_sample_ms = -1;
+        state.latest_timestamp = 0.0;
+        state.rate_tracker.reset();
         state.last_error.clear();
         return true;
     } catch (const std::exception& ex) {
         state.inlet.reset();
+        state.nominal_rate = 0.0;
+        state.have_sample = false;
+        state.last_sample_ms = -1;
+        state.latest_timestamp = 0.0;
+        state.rate_tracker.reset();
         state.last_error = QString::fromStdString(ex.what());
         return false;
     }
@@ -215,6 +230,7 @@ bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
             }
             state.latest_sample = std::move(sample);
             state.latest_timestamp = timestamp;
+            state.rate_tracker.addTimestamp(timestamp);
             state.have_sample = true;
             state.last_sample_ms = now_ms;
             updated = true;
@@ -224,6 +240,8 @@ bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
         state.inlet.reset();
         state.have_sample = false;
         state.last_sample_ms = -1;
+        state.latest_timestamp = 0.0;
+        state.rate_tracker.reset();
     }
     return updated;
 }
@@ -343,19 +361,34 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
 }
 
 QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 now_ms) const {
+    QString status;
     if (!state.connected()) {
-        return state.requested_name + ": resolving";
-    }
-    if (!state.have_sample) {
-        return state.requested_name + ": connected";
-    }
-    if (!streamIsFresh(state, now_ms)) {
-        return state.requested_name + ": stale (" +
+        status = state.requested_name + ": resolving";
+    } else if (!state.have_sample) {
+        status = state.requested_name + ": connected";
+    } else if (!streamIsFresh(state, now_ms)) {
+        status = state.requested_name + ": stale (" +
                QString::number(static_cast<double>(now_ms - state.last_sample_ms) / 1000.0,
                                'f', 1) +
                "s)";
+    } else {
+        status = state.requested_name + ": " + QString::number(state.latest_sample.size()) + "ch";
     }
-    return state.requested_name + ": " + QString::number(state.latest_sample.size()) + "ch";
+
+    // A stopped stream is already reported as stale. Do not keep showing its
+    // last measured rate as if the old window were still current.
+    if (streamIsFresh(state, now_ms) && state.rate_tracker.hasFullWindow()) {
+        status += "; rate " +
+                  QString::number(state.rate_tracker.effectiveRateHz(), 'f', 1) + "Hz";
+        const bool low_gaze_rate = state.role == PreviewStreamRole::HoloLensGaze &&
+                                   state.rate_tracker.belowNominalRate(
+                                       state.nominal_rate, kGazeLowRateFraction);
+        if (low_gaze_rate) {
+            status += " LOW RATE (nominal " +
+                      QString::number(state.nominal_rate, 'f', 1) + "Hz)";
+        }
+    }
+    return status;
 }
 
 } // namespace vicon_lsl

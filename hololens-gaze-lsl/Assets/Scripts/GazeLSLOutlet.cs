@@ -101,15 +101,24 @@ namespace GazeLSL
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
             acquisition.append_child_value("acquisition_mode", "extended_eye_tracking_90hz");
-            acquisition.append_child_value("timestamp", "lsl_local_clock_at_sdk_read");
+            acquisition.append_child_value("timestamp", "sdk_system_relative_time");
+            acquisition.append_child_value("timestamp_units", "seconds");
+            acquisition.append_child_value(
+                "timestamp_conversion", "system_relative_time_100ns_ticks_divided_by_10000000");
+            acquisition.append_child_value("capture_clock_domain", "windows_qpc_system_relative");
             acquisition.append_child_value("clock_domain", "lsl_local_clock");
             acquisition.append_child_value(
                 "coordinate_frame", "hololens_stationary_shared_with_gaze");
             acquisition.append_child_value("coordinate_units", "meters");
 
             synchronization.append_child_value("clock_domain", "lsl_local_clock");
-            synchronization.append_child_value("timestamp_origin", "lsl_local_clock_at_sdk_read");
+            synchronization.append_child_value(
+                "timestamp_origin", "eye_gaze_tracker_system_relative_time");
+            synchronization.append_child_value(
+                "timestamp_mapping", "direct_qpc_ticks_to_lsl_local_clock_seconds");
             synchronization.append_child_value("can_drop_samples", "true");
+            synchronization.append_child_value(
+                "backlog_policy", "drop_when_capture_span_exceeds_25ms_retain_latest");
         }
 
         private void Update()
@@ -196,8 +205,7 @@ namespace GazeLSL
                 worker = new GazePublisherWorker(
                     gazeProvider,
                     new LslSampleOutlet(outlet),
-                    nominalRate,
-                    () => LSL.LSL.local_clock()
+                    nominalRate
                 );
                 worker.Start();
                 failureReported = false;

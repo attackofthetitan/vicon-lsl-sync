@@ -13,8 +13,12 @@ internal static class Program
             ModelTargetPoseEncoding,
             GazeTrackerRayTransformsIntoWorld,
             GazeSampleEncodingMatchesContract,
+            GazeTimingConvertsQpcTicks,
+            GazeTimingRejectsStaleAndInvalidCaptures,
+            GazeReadingGateRejectsDuplicateAndRegression,
+            GazeBacklogDropsStaleSamples,
             GazePublisherPreservesExplicitTimestamp,
-            GazePublisherRejectsInvalidFallback,
+            GazePublisherRejectsInvalidCaptureTimestamp,
             GazePublisherInvalidTimestampKeepsCadence,
             GazePublisherCancellation,
             GazePublisherRecoversFromTransientProviderException,
@@ -130,6 +134,94 @@ internal static class Program
         }
     }
 
+    private static void GazeTimingConvertsQpcTicks()
+    {
+        Equal(
+            GazeTiming.SystemRelativeTicksPerSecond,
+            GazeTiming.QpcTicksToSystemRelativeTicks(3_000_000L, 3_000_000L));
+        Equal(
+            5_000_000L,
+            GazeTiming.QpcTicksToSystemRelativeTicks(1_500_000L, 3_000_000L));
+        Near(
+            1.25,
+            GazeTiming.SystemRelativeTicksToLslTimestamp(12_500_000L));
+        Equal(
+            10_000_000L,
+            GazeTiming.QpcTicksToSystemRelativeTicks(24_000_000L, 24_000_000L));
+    }
+
+    private static void GazeTimingRejectsStaleAndInvalidCaptures()
+    {
+        const long now = 10_000_000L;
+        True(
+            GazeTiming.IsFreshCaptureTimestamp(
+                now - GazeTiming.MaxBacklogSpanTicks,
+                now,
+                GazeTiming.MaxBacklogSpanTicks),
+            "A capture exactly at the freshness boundary should be accepted.");
+        False(
+            GazeTiming.IsFreshCaptureTimestamp(
+                now - GazeTiming.MaxBacklogSpanTicks - 1L,
+                now,
+                GazeTiming.MaxBacklogSpanTicks),
+            "A stalled tracker reading beyond the freshness boundary should be rejected.");
+        False(
+            GazeTiming.IsFreshCaptureTimestamp(0L, now, GazeTiming.MaxBacklogSpanTicks),
+            "A nonpositive capture timestamp should be rejected.");
+        False(
+            GazeTiming.IsFreshCaptureTimestamp(-1L, now, GazeTiming.MaxBacklogSpanTicks),
+            "A negative capture timestamp should be rejected.");
+    }
+
+    private static void GazeReadingGateRejectsDuplicateAndRegression()
+    {
+        var gate = new GazeReadingGate();
+        True(gate.TryAccept(100L), "The first SDK reading should be accepted.");
+        False(gate.TryAccept(100L), "A duplicate SDK tick should be rejected.");
+        False(gate.TryAccept(99L), "A regressing SDK tick should be rejected.");
+        True(gate.TryAccept(101L), "A newer SDK tick should be accepted.");
+
+        gate.Reset();
+        True(gate.TryAccept(1L), "Reset should allow a new tracker clock sequence.");
+    }
+
+    private static void GazeBacklogDropsStaleSamples()
+    {
+        var queue = new Queue<long>();
+        GazeBacklogPolicy.Enqueue(
+            queue,
+            0L,
+            ticks => ticks,
+            10,
+            GazeTiming.MaxBacklogSpanTicks);
+        GazeBacklogPolicy.Enqueue(
+            queue,
+            GazeTiming.MaxBacklogSpanTicks,
+            ticks => ticks,
+            10,
+            GazeTiming.MaxBacklogSpanTicks);
+        Equal(2, queue.Count);
+
+        GazeBacklogPolicy.Enqueue(
+            queue,
+            GazeTiming.MaxBacklogSpanTicks + 1L,
+            ticks => ticks,
+            10,
+            GazeTiming.MaxBacklogSpanTicks);
+        Equal(1, queue.Count);
+        Equal(GazeTiming.MaxBacklogSpanTicks + 1L, queue.Peek());
+
+        queue.Enqueue(520_000L);
+        True(
+            GazeBacklogPolicy.CollapseIfOverSpan(
+                queue,
+                ticks => ticks,
+                GazeTiming.MaxBacklogSpanTicks),
+            "A delayed consumer should collapse an already stale queue.");
+        Equal(1, queue.Count);
+        Equal(520_000L, queue.Peek());
+    }
+
     private static void GazePublisherCancellation()
     {
         var worker = new GazePublisherWorker(new EmptyProvider(), new CountingOutlet(), 1000);
@@ -155,34 +247,22 @@ internal static class Program
         Equal(42.5, outlet.LastTimestamp);
     }
 
-    private static void GazePublisherRejectsInvalidFallback()
+    private static void GazePublisherRejectsInvalidCaptureTimestamp()
     {
-        var validFallbackOutlet = new CountingOutlet();
-        var validFallbackWorker = new GazePublisherWorker(
-            new InvalidTimestampProvider(), validFallbackOutlet, 1000, () => 5.5);
-        validFallbackWorker.Start();
-        var deadline = DateTime.UtcNow.AddSeconds(1);
-        while (validFallbackOutlet.Count == 0 && DateTime.UtcNow < deadline)
-        {
-            Thread.Sleep(1);
-        }
-        True(validFallbackWorker.Stop(1000), "Worker with a valid fallback did not stop.");
-        Equal(5.5, validFallbackOutlet.LastTimestamp);
-
-        var invalidFallbackOutlet = new CountingOutlet();
-        var invalidFallbackWorker = new GazePublisherWorker(
-            new InvalidTimestampProvider(), invalidFallbackOutlet, 1000, () => double.NaN);
-        invalidFallbackWorker.Start();
+        var outlet = new CountingOutlet();
+        var worker = new GazePublisherWorker(
+            new InvalidTimestampProvider(), outlet, 1000);
+        worker.Start();
         Thread.Sleep(10);
-        True(invalidFallbackWorker.Stop(1000), "Worker with an invalid fallback did not stop.");
-        Equal(0.0, invalidFallbackOutlet.Count);
+        True(worker.Stop(1000), "Worker with an invalid capture timestamp did not stop.");
+        Equal(0.0, outlet.Count);
     }
 
     private static void GazePublisherInvalidTimestampKeepsCadence()
     {
         var provider = new CadenceProbeProvider();
         var worker = new GazePublisherWorker(
-            provider, new CountingOutlet(), 10, () => double.NaN);
+            provider, new CountingOutlet(), 10);
         worker.Start();
         True(provider.FirstCall.Wait(1000), "Invalid-timestamp provider was never called.");
         False(provider.SecondCall.Wait(30),
@@ -323,6 +403,11 @@ internal static class Program
     private static void False(bool value, string message) => True(!value, message);
 
     private static void Equal(double expected, double actual)
+    {
+        if (expected != actual) throw new InvalidOperationException($"Expected {expected}, got {actual}.");
+    }
+
+    private static void Equal(long expected, long actual)
     {
         if (expected != actual) throw new InvalidOperationException($"Expected {expected}, got {actual}.");
     }

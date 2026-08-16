@@ -1,6 +1,7 @@
 #pragma once
 
 #include "preview/PreviewCalibration.h"
+#include "preview/PreviewRate.h"
 #include "preview/PreviewTypes.h"
 #include "StreamDefaults.h"
 
