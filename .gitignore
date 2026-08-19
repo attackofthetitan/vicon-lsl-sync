@@ -52,10 +52,17 @@ venv/
 *.xdf
 
 # Local tools and generated deliverables
+/.agents/
 /.vscode/
 /aqtinstall.log
+/downloads/
 /outputs/
+/verification/
 /vicon-lsl-bridge-windows-x64/
+/*.pptx
+/inspect_xdf.py
+/preview_csv.py
+/preview_gpu.py
 
 # Tracked preview geometry used by the Windows bridge package
 !vicon-lsl-bridge/assets/

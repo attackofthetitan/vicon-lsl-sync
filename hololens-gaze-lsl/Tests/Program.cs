@@ -136,23 +136,28 @@ internal static class Program
 
     private static void GazeTimingConvertsQpcTicks()
     {
+        long runtimeFrequency = GazeTiming.SystemRelativeTicksPerSecond;
         Equal(
-            GazeTiming.SystemRelativeTicksPerSecond,
+            runtimeFrequency,
             GazeTiming.QpcTicksToSystemRelativeTicks(3_000_000L, 3_000_000L));
         Equal(
-            5_000_000L,
-            GazeTiming.QpcTicksToSystemRelativeTicks(1_500_000L, 3_000_000L));
+            (long)Math.Round(runtimeFrequency * 0.5, MidpointRounding.AwayFromZero),
+            GazeTiming.QpcTicksToSystemRelativeTicks(9_600_000L, 19_200_000L));
         Near(
             1.25,
-            GazeTiming.SystemRelativeTicksToLslTimestamp(12_500_000L));
+            GazeTiming.SystemRelativeTicksToLslTimestamp(
+                (long)Math.Round(runtimeFrequency * 1.25, MidpointRounding.AwayFromZero)));
         Equal(
-            10_000_000L,
+            runtimeFrequency,
             GazeTiming.QpcTicksToSystemRelativeTicks(24_000_000L, 24_000_000L));
+        Equal(
+            (long)Math.Round(runtimeFrequency * 0.025, MidpointRounding.AwayFromZero),
+            GazeTiming.MaxBacklogSpanTicks);
     }
 
     private static void GazeTimingRejectsStaleAndInvalidCaptures()
     {
-        const long now = 10_000_000L;
+        long now = GazeTiming.SystemRelativeTicksPerSecond;
         True(
             GazeTiming.IsFreshCaptureTimestamp(
                 now - GazeTiming.MaxBacklogSpanTicks,

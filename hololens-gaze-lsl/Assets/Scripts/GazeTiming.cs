@@ -4,22 +4,21 @@ using System.Diagnostics;
 
 namespace GazeLSL
 {
-    // The Extended Eye Tracking SDK exposes SystemRelativeTime as a Windows
-    // Runtime TimeSpan. Its ticks express the QPC-derived system-relative
-    // clock in 100 ns units. liblsl uses the same QPC-backed steady clock but
-    // may expose it through a different duration unit, so both are converted
-    // to seconds before publication.
+    // The Extended Eye Tracking SDK exposes SystemRelativeTime as a TimeSpan,
+    // but its Ticks value is the system-relative QPC count used to locate the
+    // tracker pose. QPC frequency is device-dependent, so never assume the
+    // TimeSpan 10 MHz tick rate when converting these values to seconds.
     internal static class GazeTiming
     {
-        public const long SystemRelativeTicksPerSecond = TimeSpan.TicksPerSecond;
-        public const long MaxBacklogSpanTicks = 25L * TimeSpan.TicksPerMillisecond;
-        private const long MaximumFutureLeadTicks = TimeSpan.TicksPerMillisecond;
+        public static readonly long SystemRelativeTicksPerSecond = Stopwatch.Frequency;
+        public static readonly long MaxBacklogSpanTicks =
+            (long)Math.Round(Stopwatch.Frequency * 0.025, MidpointRounding.AwayFromZero);
+        private static readonly long MaximumFutureLeadTicks =
+            (long)Math.Round(Stopwatch.Frequency * 0.001, MidpointRounding.AwayFromZero);
 
         public static long CurrentSystemRelativeTimeTicks()
         {
-            return QpcTicksToSystemRelativeTicks(
-                Stopwatch.GetTimestamp(),
-                Stopwatch.Frequency);
+            return Stopwatch.GetTimestamp();
         }
 
         public static long QpcTicksToSystemRelativeTicks(
@@ -31,17 +30,12 @@ namespace GazeLSL
                 throw new ArgumentOutOfRangeException(nameof(qpcFrequency));
             }
 
-            // Do the conversion before constructing the TimeSpan passed to the
-            // WinRT API.  Double precision is sufficient here: the conversion
-            // only needs 100 ns resolution and QPC values on supported devices
-            // remain well below the 53-bit exact-integer limit for normal
-            // device lifetimes.
             double systemRelativeTicks =
-                qpcTicks * (double)SystemRelativeTicksPerSecond / qpcFrequency;
+                qpcTicks * (double)Stopwatch.Frequency / qpcFrequency;
             if (systemRelativeTicks > long.MaxValue ||
                 systemRelativeTicks < long.MinValue)
             {
-                throw new OverflowException("The QPC timestamp does not fit in TimeSpan ticks.");
+                throw new OverflowException("The QPC timestamp does not fit in a 64-bit tick value.");
             }
 
             return (long)Math.Round(systemRelativeTicks, MidpointRounding.AwayFromZero);
@@ -49,7 +43,7 @@ namespace GazeLSL
 
         public static double SystemRelativeTicksToLslTimestamp(long systemRelativeTimeTicks)
         {
-            return systemRelativeTimeTicks / (double)SystemRelativeTicksPerSecond;
+            return systemRelativeTimeTicks / (double)Stopwatch.Frequency;
         }
 
         public static bool IsFreshCaptureTimestamp(
