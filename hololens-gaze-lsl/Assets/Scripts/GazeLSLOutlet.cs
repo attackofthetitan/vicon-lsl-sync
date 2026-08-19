@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using LSL;
 using UnityEngine;
 
@@ -104,7 +105,10 @@ namespace GazeLSL
             acquisition.append_child_value("timestamp", "sdk_system_relative_time");
             acquisition.append_child_value("timestamp_units", "seconds");
             acquisition.append_child_value(
-                "timestamp_conversion", "system_relative_time_100ns_ticks_divided_by_10000000");
+                "timestamp_conversion", "system_relative_qpc_ticks_divided_by_runtime_qpc_frequency");
+            acquisition.append_child_value(
+                "timestamp_tick_frequency_hz",
+                GazeTiming.SystemRelativeTicksPerSecond.ToString(CultureInfo.InvariantCulture));
             acquisition.append_child_value("capture_clock_domain", "windows_qpc_system_relative");
             acquisition.append_child_value("clock_domain", "lsl_local_clock");
             acquisition.append_child_value(
