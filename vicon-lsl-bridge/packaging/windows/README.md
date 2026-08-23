@@ -1,6 +1,10 @@
-# Windows GUI packaging
+# Package the Windows app
 
-Every Windows artifact uses one directory layout:
+The Windows ZIP and the portable app contain the same files. The ZIP shows the files directly. The portable `.exe` stores a ZIP inside one launcher file and extracts it when you run it.
+
+## Package contents
+
+Every Windows package uses this layout:
 
 ```text
 vicon-lsl-bridge-gui.exe
@@ -21,14 +25,14 @@ labrecorder/platforms/qwindows.dll
 THIRD_PARTY_NOTICES.txt
 VICON-DATASTREAM-SDK-LICENSE.txt
 LICENSE-INVENTORY.txt
-licenses/              # verbatim upstream license texts (including Qt LICENSES)
+licenses/              # exact copies of upstream license files, including Qt LICENSES
 ```
 
-The regular zip is assembled from this directory. The native single-file
-launcher embeds the same directory as its payload; Enigma Virtual Box remains
-available when an `.evb` project and console are supplied.
+Packaging stops with an error if a required program, model file, runtime library, or license file is missing.
 
-To package a deployed GUI manually:
+## Build the portable app by hand
+
+From `vicon-lsl-bridge`, run:
 
 ```powershell
 .\packaging\windows\package_gui_single_exe.ps1 `
@@ -39,47 +43,66 @@ To package a deployed GUI manually:
   -StairModelDir .\assets\stair_model
 ```
 
-The script validates the bridge executable, Qt platform plugin, LSL runtime,
-stair model, and the complete isolated LabRecorder deployment.
-The CMake portable target accepts the same inputs through
-`VICON_LSL_LABRECORDER_DEPLOY_DIR`; the tracked stair model is included
-automatically.
+The matching CMake target uses `VICON_LSL_LABRECORDER_DEPLOY_DIR` for the LabRecorder folder. It adds the tracked stair model on its own.
 
-Native portable packaging writes the SHA-256 of `payload.zip` into a fixed
-launcher image slot before appending the payload.  The launcher verifies that
-digest before extraction, so payload corruption is rejected before extraction.
+Enigma Virtual Box is still supported when you provide its project and command-line program:
 
-The portable executable accepts `--extract <directory>`. It verifies the
-embedded payload digest and expands the complete application tree into a new,
-empty directory; the destination must not already exist and may not be a
-reparse point or junction. Users can replace LGPL-covered Qt DLLs in that
-directory (including the nested `labrecorder` Qt DLLs) and run
-`vicon-lsl-bridge-gui.exe` themselves. The `--test` switch remains available
-for the portable self-test.
+```powershell
+.\packaging\windows\package_gui_single_exe.ps1 `
+  -Mode Enigma `
+  -ProjectFile path\bridge.evb `
+  -EnigmaConsole path\enigmavbconsole.exe `
+  -DeployDir .\package `
+  -OutputExe .\vicon-lsl-bridge-gui-portable.exe `
+  -LabRecorderDeployDir C:\path\recorder-deploy `
+  -StairModelDir .\assets\stair_model
+```
 
-Windows release artifacts are intentionally unsigned. Windows may therefore
-display an unknown-publisher or reputation warning. Verify downloaded files
-against the release's `SHA256SUMS.txt` before running them.
+## Check and extract the portable app
 
-The directory ZIP and portable executable are both retained.  Linux releases
-continue to publish the existing tarball.  Release metadata also includes a
-`SHA256SUMS.txt` inventory and checks that the `vN.N.N` tag matches the CMake
-project version. `THIRD_PARTY_NOTICES.txt`, `LICENSE-INVENTORY.txt`, the Vicon
-SDK license, and the complete `licenses/` bundle are mandatory in Windows
-layouts; packaging fails when any required upstream text cannot be located. No
-installer format is produced.
+The launcher stores the SHA-256 checksum of its embedded ZIP. It checks that value before extracting anything. A changed or damaged embedded ZIP is rejected.
 
-CI obtains the Qt 6.8.3 `qtbase` and `qtsvg` `LICENSES` directories from the
-official source archives and verifies their published SHA-256 hashes before
-packaging them. Binary-only Qt installations that omit these texts must supply
-`VICON_LSL_QT_LICENSE_ROOT` when building the local portable target.
+Run an internal package check with:
 
-For Enigma packaging, add `-Mode Enigma -ProjectFile path\bridge.evb` (and
-optionally `-EnigmaConsole path\enigmavbconsole.exe`).
+```powershell
+.\vicon-lsl-bridge-gui-portable.exe --test
+```
 
-The `msvcp140*.dll` and `vcruntime140*.dll` files are Microsoft Visual C++
-Redistributable runtime binaries copied from the x64 VC143 redist installed by
-Visual Studio. They remain subject to Microsoft's Visual C++ Redistributable
-license terms; this project does not reproduce that EULA. See Microsoft's
-[latest supported VC++ Redistributable documentation](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
-and [Visual Studio license terms](https://visualstudio.microsoft.com/license-terms/).
+Extract all files with:
+
+```powershell
+.\vicon-lsl-bridge-gui-portable.exe --extract C:\new\empty\folder
+```
+
+The destination must not exist yet. It also cannot be a Windows reparse point or junction, which can redirect writes to another folder.
+
+After extraction, you may replace the Qt libraries covered by the LGPL. This includes the Qt libraries under `labrecorder`. Start `vicon-lsl-bridge-gui.exe` from the extracted folder when you are done.
+
+## Release files
+
+A Windows release contains:
+
+- A normal ZIP.
+- A portable GUI `.exe`.
+- `SHA256SUMS.txt`, which lists the checksum for each release file.
+
+Linux releases keep using a `.tar.gz` archive. This project does not create a Windows installer.
+
+Windows release files are not signed. Windows may show an unknown-publisher or reputation warning. Before running a download, compare its checksum with the release copy of `SHA256SUMS.txt`.
+
+The release tag must use `vN.N.N`, and its version must match the CMake project version.
+
+## License files
+
+Every package must include:
+
+- `THIRD_PARTY_NOTICES.txt`
+- `LICENSE-INVENTORY.txt`
+- `VICON-DATASTREAM-SDK-LICENSE.txt`
+- The full `licenses/` folder
+
+The hosted build downloads the Qt 6.8.3 `qtbase` and `qtsvg` license folders from the official source archives. It checks their published SHA-256 values before adding them.
+
+Some Qt binary packages do not include these license files. For a local build, set `VICON_LSL_QT_LICENSE_ROOT` to a folder that contains them.
+
+The `msvcp140*.dll` and `vcruntime140*.dll` files come from the x64 VC143 Visual C++ Redistributable installed with Visual Studio. Microsoft's license terms still apply. See the [supported Visual C++ Redistributable downloads](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) and [Visual Studio license terms](https://visualstudio.microsoft.com/license-terms/).
