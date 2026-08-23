@@ -1,35 +1,25 @@
 #include "BridgeWindow.h"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFormLayout>
-#include <QGridLayout>
-#include <QGroupBox>
-#include <QSettings>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDir>
-#include <QSplitter>
-#include <QTabWidget>
 #include <QCloseEvent>
 #include <QCoreApplication>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QSpinBox>
 
 #include <exception>
-#include "StreamDefaults.h"
+#include "gui/BridgeWindowSettings.h"
+#include "gui/BridgeWindowUi.h"
+#include "gui/LabRecorderFilenamePolicy.h"
 #include "gui/LabRecorderRuntimePolicy.h"
+#include "gui/PreviewPanel.h"
 
 namespace {
 
 constexpr qint64 kBridgeCloseTimeoutMs = 4000;
 constexpr qint64 kRecordingCloseTimeoutMs = 15000;
-
-QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
-    auto* label = new QLabel(text);
-    label->setToolTip(tooltip);
-    if (control) {
-        control->setToolTip(tooltip);
-    }
-    return label;
-}
 
 } // namespace
 
@@ -64,246 +54,19 @@ void BridgeWorker::stopBridge() {
 
 BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview) : QWidget(parent) {
     qRegisterMetaType<BridgeExitResult>("BridgeExitResult");
-    setWindowTitle("Vicon LSL Bridge");
-    setMinimumWidth(860);
+    ui_ = vicon_lsl::gui_detail::buildBridgeWindowUi(this, enable_preview);
+    auto* browse_root_button = ui_->browse_root_button;
+    auto* browse_labrecorder_button = ui_->browse_labrecorder_button;
 
-    auto* main_layout = new QVBoxLayout(this);
-    main_layout->setContentsMargins(8, 8, 8, 8);
-    main_layout->setSpacing(8);
-    auto* main_splitter = new QSplitter(Qt::Horizontal);
-    main_splitter->setChildrenCollapsible(false);
-
-    auto* controls_tabs = new QTabWidget();
-    controls_tabs->setMinimumWidth(440);
-    auto* bridge_page = new QWidget();
-    auto* left_layout = new QVBoxLayout(bridge_page);
-    left_layout->setContentsMargins(6, 6, 6, 6);
-    left_layout->setSpacing(8);
-
-    // Connection settings
-    auto* settings_group = new QGroupBox("Connection Settings");
-    auto* form = new QFormLayout(settings_group);
-    form->setContentsMargins(8, 8, 8, 8);
-    form->setVerticalSpacing(4);
-
-    server_edit_ = new QLineEdit("localhost:801");
-    marker_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconMarkers);
-    segment_stream_edit_ = new QLineEdit(vicon_lsl::stream_defaults::ViconSegments);
-
-    form->addRow(makeTooltipLabel(
-                     "Vicon server:", server_edit_,
-                     "Vicon DataStream endpoint, for example localhost:801."),
-                 server_edit_);
-    form->addRow(makeTooltipLabel(
-                     "Marker stream:", marker_stream_edit_,
-                     "LSL stream name for Vicon marker samples."),
-                 marker_stream_edit_);
-    form->addRow(makeTooltipLabel(
-                     "Segment stream:", segment_stream_edit_,
-                     "LSL stream name for Vicon segment samples."),
-                 segment_stream_edit_);
-    left_layout->addWidget(settings_group);
-
-    // Buttons
-    auto* button_layout = new QHBoxLayout();
-    start_button_ = new QPushButton("Start Streaming");
-    stop_button_ = new QPushButton("Stop");
-    stop_button_->setEnabled(false);
-    button_layout->addWidget(start_button_);
-    button_layout->addWidget(stop_button_);
-    left_layout->addLayout(button_layout);
-
-    // Status
-    auto* status_group = new QGroupBox("Status");
-    auto* status_layout = new QGridLayout(status_group);
-    status_layout->setContentsMargins(8, 8, 8, 8);
-    status_layout->setHorizontalSpacing(10);
-    status_layout->setVerticalSpacing(4);
-
-    status_label_ = new QLabel("Disconnected");
-    markers_label_ = new QLabel("0");
-    segments_label_ = new QLabel("0");
-    frames_label_ = new QLabel("0");
-    frame_rate_label_ = new QLabel("0.0 Hz");
-    last_error_label_ = new QLabel("-");
-    last_error_label_->setWordWrap(true);
-
-    int status_row = 0;
-    status_layout->addWidget(new QLabel("Bridge state:"), status_row, 0);
-    status_layout->addWidget(status_label_, status_row, 1, 1, 3);
-    ++status_row;
-    status_layout->addWidget(new QLabel("Vicon frames:"), status_row, 0);
-    status_layout->addWidget(frames_label_, status_row, 1);
-    status_layout->addWidget(new QLabel("Vicon rate:"), status_row, 2);
-    status_layout->addWidget(frame_rate_label_, status_row, 3);
-    ++status_row;
-    status_layout->addWidget(new QLabel("Markers:"), status_row, 0);
-    status_layout->addWidget(markers_label_, status_row, 1);
-    status_layout->addWidget(new QLabel("Segments:"), status_row, 2);
-    status_layout->addWidget(segments_label_, status_row, 3);
-    ++status_row;
-    status_layout->addWidget(new QLabel("Last error:"), status_row, 0);
-    status_layout->addWidget(last_error_label_, status_row, 1, 1, 3);
-    status_layout->setColumnStretch(1, 1);
-    status_layout->setColumnStretch(3, 1);
-    left_layout->addWidget(status_group);
-    left_layout->addStretch();
-
-    auto* recording_page = new QWidget();
-    auto* recording_layout = new QVBoxLayout(recording_page);
-    recording_layout->setContentsMargins(6, 6, 6, 6);
-    recording_layout->setSpacing(6);
-    auto* recording_form = new QFormLayout();
-    recording_form->setVerticalSpacing(4);
-
-    auto* root_layout = new QHBoxLayout();
-    study_root_edit_ = new QLineEdit();
-    auto* browse_root_button = new QPushButton("Browse");
-    root_layout->addWidget(study_root_edit_);
-    root_layout->addWidget(browse_root_button);
-
-    filename_template_edit_ = new QLineEdit("sub-%p/ses-%s/%m/sub-%p_ses-%s_task-%b_acq-%a_run-%r_%m.xdf");
-    participant_edit_ = new QLineEdit("P001");
-    session_edit_ = new QLineEdit("S001");
-    task_edit_ = new QLineEdit("Task");
-    run_spin_ = new QSpinBox();
-    run_spin_->setRange(1, 9999);
-    run_spin_->setValue(1);
-    acquisition_edit_ = new QLineEdit("vicon");
-    modality_edit_ = new QLineEdit("beh");
-    filename_preview_label_ = new QLineEdit();
-    filename_preview_label_->setReadOnly(true);
-    filename_preview_label_->setPlaceholderText("Complete the recording fields to preview the output path");
-
-    recording_form->addRow(makeTooltipLabel(
-                               "Study root:", study_root_edit_,
-                               "Directory where LabRecorder stores recordings."),
-                           root_layout);
-    recording_form->addRow(makeTooltipLabel(
-                               "File template:", filename_template_edit_,
-                               "LabRecorder path template. Tokens: %p participant, %s session, "
-                               "%b task/block, %r or %n run, %a acquisition, %m modality."),
-                           filename_template_edit_);
-
-    auto* metadata_grid = new QGridLayout();
-    metadata_grid->setHorizontalSpacing(8);
-    metadata_grid->setVerticalSpacing(4);
-    metadata_grid->addWidget(makeTooltipLabel(
-                                 "Participant:", participant_edit_,
-                                 "Participant identifier substituted for %p."),
-                             0, 0);
-    metadata_grid->addWidget(participant_edit_, 0, 1);
-    metadata_grid->addWidget(makeTooltipLabel(
-                                 "Session:", session_edit_,
-                                 "Session identifier substituted for %s."),
-                             0, 2);
-    metadata_grid->addWidget(session_edit_, 0, 3);
-    metadata_grid->addWidget(makeTooltipLabel(
-                                 "Task/block:", task_edit_,
-                                 "Task or block identifier substituted for %b."),
-                             1, 0);
-    metadata_grid->addWidget(task_edit_, 1, 1);
-    metadata_grid->addWidget(makeTooltipLabel(
-                                 "Run:", run_spin_,
-                                 "Run number substituted for %r."),
-                             1, 2);
-    metadata_grid->addWidget(run_spin_, 1, 3);
-    metadata_grid->addWidget(makeTooltipLabel(
-                                 "Acquisition:", acquisition_edit_,
-                                 "Acquisition label substituted for %a."),
-                             2, 0);
-    metadata_grid->addWidget(acquisition_edit_, 2, 1);
-    metadata_grid->addWidget(makeTooltipLabel(
-                                 "Modality:", modality_edit_,
-                                 "Modality label substituted for %m."),
-                             2, 2);
-    metadata_grid->addWidget(modality_edit_, 2, 3);
-    metadata_grid->setColumnStretch(1, 1);
-    metadata_grid->setColumnStretch(3, 1);
-    auto* metadata_label = new QLabel("Metadata:");
-    metadata_label->setToolTip("Values used to expand the filename template tokens.");
-    recording_form->addRow(metadata_label, metadata_grid);
-    recording_form->addRow("Filename preview:", filename_preview_label_);
-    recording_layout->addLayout(recording_form);
-
-    auto* labrecorder_form = new QFormLayout();
-    labrecorder_form->setVerticalSpacing(4);
-    auto* executable_layout = new QHBoxLayout();
-    labrecorder_executable_edit_ = new QLineEdit();
-    auto* browse_labrecorder_button = new QPushButton("Browse");
-    executable_layout->addWidget(labrecorder_executable_edit_);
-    executable_layout->addWidget(browse_labrecorder_button);
-
-    labrecorder_host_edit_ = new QLineEdit("localhost");
-    labrecorder_port_spin_ = new QSpinBox();
-    labrecorder_port_spin_->setRange(1, 65535);
-    labrecorder_port_spin_->setValue(22345);
-
-    labrecorder_form->addRow(makeTooltipLabel(
-                                  "LabRecorder executable:", labrecorder_executable_edit_,
-                                  "Optional LabRecorder executable path. Leave blank for the automatic bundled "
-                                  "startup; set a path before using Launch LabRecorder."),
-                              executable_layout);
-    auto* rcs_layout = new QHBoxLayout();
-    auto* rcs_host_label = makeTooltipLabel(
-        "Host:", labrecorder_host_edit_, "LabRecorder remote-control server host.");
-    rcs_layout->addWidget(rcs_host_label);
-    rcs_layout->addWidget(labrecorder_host_edit_, 1);
-    auto* rcs_port_label = makeTooltipLabel(
-        "Port:", labrecorder_port_spin_, "LabRecorder remote-control server TCP port.");
-    rcs_layout->addWidget(rcs_port_label);
-    rcs_layout->addWidget(labrecorder_port_spin_);
-    auto* rcs_label = new QLabel("RCS:");
-    rcs_label->setToolTip("Host and TCP port for LabRecorder's remote-control server.");
-    labrecorder_form->addRow(rcs_label, rcs_layout);
-    recording_layout->addLayout(labrecorder_form);
-
-    auto* recording_buttons = new QGridLayout();
-    recording_buttons->setHorizontalSpacing(6);
-    recording_buttons->setVerticalSpacing(4);
-    launch_labrecorder_button_ = new QPushButton("Launch LabRecorder");
-    connect_labrecorder_button_ = new QPushButton("Connect");
-    refresh_streams_button_ = new QPushButton("Refresh Streams");
-    start_recording_button_ = new QPushButton("Start Recording");
-    stop_recording_button_ = new QPushButton("Stop Recording");
-    recording_buttons->addWidget(launch_labrecorder_button_, 0, 0);
-    recording_buttons->addWidget(connect_labrecorder_button_, 0, 1);
-    recording_buttons->addWidget(refresh_streams_button_, 0, 2);
-    recording_buttons->addWidget(start_recording_button_, 1, 0, 1, 2);
-    recording_buttons->addWidget(stop_recording_button_, 1, 2);
-    recording_layout->addLayout(recording_buttons);
-
-    labrecorder_status_label_ = new QLabel("Disconnected");
-    labrecorder_status_label_->setWordWrap(true);
-    recording_layout->addWidget(labrecorder_status_label_);
-    readiness_label_ = new QLabel();
-    readiness_label_->setWordWrap(true);
-    recording_layout->addWidget(readiness_label_);
-    recording_layout->addStretch(1);
-
-    controls_tabs->addTab(bridge_page, "Bridge");
-    controls_tabs->addTab(recording_page, "Recording");
-    main_splitter->addWidget(controls_tabs);
-    if (enable_preview) {
-        preview_panel_ = new vicon_lsl::PreviewPanel();
-        main_splitter->addWidget(preview_panel_);
-    } else {
-        main_splitter->addWidget(new QWidget());
-    }
-    main_splitter->setStretchFactor(0, 0);
-    main_splitter->setStretchFactor(1, 1);
-    main_splitter->setSizes({500, 1000});
-    main_layout->addWidget(main_splitter, 1);
-
-    connect(start_button_, &QPushButton::clicked, this, &BridgeWindow::onStart);
-    connect(stop_button_, &QPushButton::clicked, this, &BridgeWindow::onStop);
+    connect(ui_->start_button, &QPushButton::clicked, this, &BridgeWindow::onStart);
+    connect(ui_->stop_button, &QPushButton::clicked, this, &BridgeWindow::onStop);
     connect(browse_root_button, &QPushButton::clicked, this, &BridgeWindow::onBrowseStudyRoot);
     connect(browse_labrecorder_button, &QPushButton::clicked, this, &BridgeWindow::onBrowseLabRecorder);
-    connect(launch_labrecorder_button_, &QPushButton::clicked, this, &BridgeWindow::onLaunchLabRecorder);
-    connect(connect_labrecorder_button_, &QPushButton::clicked, this, &BridgeWindow::onConnectLabRecorder);
-    connect(refresh_streams_button_, &QPushButton::clicked, this, &BridgeWindow::onRefreshLabRecorder);
-    connect(start_recording_button_, &QPushButton::clicked, this, &BridgeWindow::onStartRecording);
-    connect(stop_recording_button_, &QPushButton::clicked, this, &BridgeWindow::onStopRecording);
+    connect(ui_->launch_labrecorder_button, &QPushButton::clicked, this, &BridgeWindow::onLaunchLabRecorder);
+    connect(ui_->connect_labrecorder_button, &QPushButton::clicked, this, &BridgeWindow::onConnectLabRecorder);
+    connect(ui_->refresh_streams_button, &QPushButton::clicked, this, &BridgeWindow::onRefreshLabRecorder);
+    connect(ui_->start_recording_button, &QPushButton::clicked, this, &BridgeWindow::onStartRecording);
+    connect(ui_->stop_recording_button, &QPushButton::clicked, this, &BridgeWindow::onStopRecording);
     connect(&labrecorder_client_, &LabRecorderClient::connectionStateChanged, this,
             [this](RecorderConnectionState state, const QString& message) {
                 if (state == RecorderConnectionState::Connected && labrecorder_retry_timer_) {
@@ -312,7 +75,7 @@ BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview) : QWidget(paren
                 if (!message.isEmpty()) {
                     setLabRecorderStatus(message);
                 }
-                connect_labrecorder_button_->setEnabled(
+                ui_->connect_labrecorder_button->setEnabled(
                     state != RecorderConnectionState::Connecting);
                 updateRecordingButtons();
                 updateReadiness();
@@ -347,14 +110,14 @@ BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview) : QWidget(paren
         updateFilenamePreview();
         scheduleFilenameSync();
     };
-    connect(study_root_edit_, &QLineEdit::textChanged, this, preview_update);
-    connect(filename_template_edit_, &QLineEdit::textChanged, this, preview_update);
-    connect(participant_edit_, &QLineEdit::textChanged, this, preview_update);
-    connect(session_edit_, &QLineEdit::textChanged, this, preview_update);
-    connect(task_edit_, &QLineEdit::textChanged, this, preview_update);
-    connect(run_spin_, QOverload<int>::of(&QSpinBox::valueChanged), this, preview_update);
-    connect(acquisition_edit_, &QLineEdit::textChanged, this, preview_update);
-    connect(modality_edit_, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->study_root_edit, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->filename_template_edit, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->participant_edit, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->session_edit, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->task_edit, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->run_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, preview_update);
+    connect(ui_->acquisition_edit, &QLineEdit::textChanged, this, preview_update);
+    connect(ui_->modality_edit, &QLineEdit::textChanged, this, preview_update);
 
     loadSettings();
     updateFilenamePreview();
@@ -399,43 +162,22 @@ bool BridgeWindow::labRecorderOwnedProcessRunning() const {
 }
 
 bool BridgeWindow::stairModelLoaded() const {
-    return preview_panel_ && preview_panel_->stairModelLoaded();
+    return ui_->preview_panel && ui_->preview_panel->stairModelLoaded();
 }
 
 bool BridgeWindow::configurableTooltipsPresent() const {
-    const QWidget* const controls[] = {
-        server_edit_,
-        marker_stream_edit_,
-        segment_stream_edit_,
-        study_root_edit_,
-        filename_template_edit_,
-        participant_edit_,
-        session_edit_,
-        task_edit_,
-        run_spin_,
-        acquisition_edit_,
-        modality_edit_,
-        labrecorder_executable_edit_,
-        labrecorder_host_edit_,
-        labrecorder_port_spin_,
-    };
-    for (const QWidget* control : controls) {
-        if (!control || control->toolTip().trimmed().isEmpty()) {
-            return false;
-        }
-    }
-    return !preview_panel_ || preview_panel_->configurableTooltipsPresent();
+    return ui_->configurableTooltipsPresent();
 }
 
 void BridgeWindow::onStart() {
     Config config;
-    config.vicon_server = server_edit_->text().toStdString();
-    config.marker_stream_name = marker_stream_edit_->text().toStdString();
-    config.segment_stream_name = segment_stream_edit_->text().toStdString();
+    config.vicon_server = ui_->server_edit->text().toStdString();
+    config.marker_stream_name = ui_->marker_stream_edit->text().toStdString();
+    config.segment_stream_name = ui_->segment_stream_edit->text().toStdString();
 
     saveSettings();
-    start_button_->setEnabled(false);
-    stop_button_->setEnabled(true);
+    ui_->start_button->setEnabled(false);
+    ui_->stop_button->setEnabled(true);
     setInputsEnabled(false);
 
     worker_ = new BridgeWorker(config, this);
@@ -444,8 +186,8 @@ void BridgeWindow::onStart() {
     connect(worker_, &BridgeWorker::terminal, this,
             [this](BridgeExitResult result, const QString& message) {
                 if (result == BridgeExitResult::Failed) {
-                    last_error_label_->setText(message);
-                    status_label_->setText("Bridge worker failed - " + message);
+                    ui_->last_error_label->setText(message);
+                    ui_->status_label->setText("Bridge worker failed - " + message);
                 }
             });
     connect(worker_, &BridgeWorker::finished,
@@ -454,28 +196,28 @@ void BridgeWindow::onStart() {
 }
 
 void BridgeWindow::onStop() {
-    stop_button_->setEnabled(false);
+    ui_->stop_button->setEnabled(false);
     if (worker_) {
         worker_->stopBridge();
     }
 }
 
 void BridgeWindow::onBrowseStudyRoot() {
-    QString root = QFileDialog::getExistingDirectory(this, "Select Study Root", study_root_edit_->text());
+    QString root = QFileDialog::getExistingDirectory(this, "Select Study Root", ui_->study_root_edit->text());
     if (!root.isEmpty()) {
-        study_root_edit_->setText(QDir::toNativeSeparators(root));
+        ui_->study_root_edit->setText(QDir::toNativeSeparators(root));
     }
 }
 
 void BridgeWindow::onBrowseLabRecorder() {
-    QString path = QFileDialog::getOpenFileName(this, "Select LabRecorder", labrecorder_executable_edit_->text());
+    QString path = QFileDialog::getOpenFileName(this, "Select LabRecorder", ui_->labrecorder_executable_edit->text());
     if (!path.isEmpty()) {
-        labrecorder_executable_edit_->setText(QDir::toNativeSeparators(path));
+        ui_->labrecorder_executable_edit->setText(QDir::toNativeSeparators(path));
     }
 }
 
 void BridgeWindow::onLaunchLabRecorder() {
-    const QString executable = labrecorder_executable_edit_->text().trimmed();
+    const QString executable = ui_->labrecorder_executable_edit->text().trimmed();
     if (executable.isEmpty()) {
         setLabRecorderStatus("Set a LabRecorder executable path before launching.");
         return;
@@ -523,13 +265,13 @@ void BridgeWindow::onConnectLabRecorder() {
     labrecorder_retry_timer_->stop();
     saveSettings();
     labrecorder_client_.connectToServer(
-        labrecorder_host_edit_->text(),
-        static_cast<quint16>(labrecorder_port_spin_->value()));
+        ui_->labrecorder_host_edit->text(),
+        static_cast<quint16>(ui_->labrecorder_port_spin->value()));
 }
 
 QString BridgeWindow::resolveLabRecorderExecutable() const {
     return LabRecorderRuntimePolicy::resolveExecutable(
-        labrecorder_executable_edit_->text(),
+        ui_->labrecorder_executable_edit->text(),
         QCoreApplication::applicationDirPath());
 }
 
@@ -542,7 +284,7 @@ void BridgeWindow::beginLabRecorderStartup() {
     }
     // Keep a valid saved custom path; otherwise show the bundled fallback so
     // the automatic launch path is visible and reproducible.
-    labrecorder_executable_edit_->setText(executable);
+    ui_->labrecorder_executable_edit->setText(executable);
     onLaunchLabRecorder();
 }
 
@@ -564,8 +306,8 @@ void BridgeWindow::onLabRecorderRetry() {
         return;
     }
     labrecorder_client_.connectToServer(
-        labrecorder_host_edit_->text(),
-        static_cast<quint16>(labrecorder_port_spin_->value()),
+        ui_->labrecorder_host_edit->text(),
+        static_cast<quint16>(ui_->labrecorder_port_spin->value()),
         200);
 }
 
@@ -598,11 +340,11 @@ void BridgeWindow::onStopRecording() {
 }
 
 void BridgeWindow::updateFilenamePreview() {
-    if (filename_preview_label_) {
+    if (ui_->filename_preview_label) {
         const QString preview = renderedFilenamePreview();
-        filename_preview_label_->setText(preview);
-        filename_preview_label_->setToolTip(preview);
-        filename_preview_label_->setCursorPosition(0);
+        ui_->filename_preview_label->setText(preview);
+        ui_->filename_preview_label->setToolTip(preview);
+        ui_->filename_preview_label->setCursorPosition(0);
     }
     updateRecordingButtons();
     updateReadiness();
@@ -632,8 +374,8 @@ void BridgeWindow::onStatusStaleCheck() {
     }
 
     bridge_status_stale_ = true;
-    frame_rate_label_->setText("0.0 Hz");
-    status_label_->setText(status_label_->text() + " - stale status");
+    ui_->frame_rate_label->setText("0.0 Hz");
+    ui_->status_label->setText(ui_->status_label->text() + " - stale status");
     updateReadiness();
 }
 
@@ -648,7 +390,7 @@ void BridgeWindow::closeEvent(QCloseEvent* event) {
         close_stop_requested_ = false;
         if (worker_) {
             onStop();
-            status_label_->setText("Stopping bridge before closing...");
+            ui_->status_label->setText("Stopping bridge before closing...");
         }
         if (labrecorder_client_.recordingState() == RecorderRecordingState::Recording) {
             close_stop_requested_ = labrecorder_client_.stopRecording();
@@ -721,13 +463,13 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
         state_text += " - " + message;
     }
 
-    status_label_->setText(state_text);
+    ui_->status_label->setText(state_text);
     bridge_streaming_ = bridge_state == BridgeState::Streaming;
     bridge_status_stale_ = false;
-    markers_label_->setText(QString::number(markers));
-    segments_label_->setText(QString::number(segments));
-    frames_label_->setText(QString::number(frames));
-    last_error_label_->setText(message.isEmpty() ? "-" : message);
+    ui_->markers_label->setText(QString::number(markers));
+    ui_->segments_label->setText(QString::number(segments));
+    ui_->frames_label->setText(QString::number(frames));
+    ui_->last_error_label->setText(message.isEmpty() ? "-" : message);
 
     qint64 now_ms = status_timer_.elapsed();
     if (have_previous_status_) {
@@ -736,7 +478,7 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
             double seconds = static_cast<double>(delta_ms) / 1000.0;
             unsigned int frame_delta = frames >= previous_frames_ ? frames - previous_frames_ : 0;
             double frame_rate = static_cast<double>(frame_delta) / seconds;
-            frame_rate_label_->setText(QString::number(frame_rate, 'f', 1) + " Hz");
+            ui_->frame_rate_label->setText(QString::number(frame_rate, 'f', 1) + " Hz");
         }
     }
     previous_status_ms_ = now_ms;
@@ -746,13 +488,13 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
 }
 
 void BridgeWindow::onWorkerFinished() {
-    start_button_->setEnabled(true);
-    stop_button_->setEnabled(false);
+    ui_->start_button->setEnabled(true);
+    ui_->stop_button->setEnabled(false);
     setInputsEnabled(true);
     bridge_streaming_ = false;
     bridge_status_stale_ = false;
     have_previous_status_ = false;
-    frame_rate_label_->setText("0.0 Hz");
+    ui_->frame_rate_label->setText("0.0 Hz");
     updateReadiness();
 
     worker_->deleteLater();
@@ -763,137 +505,46 @@ void BridgeWindow::onWorkerFinished() {
 }
 
 void BridgeWindow::loadSettings() {
-    QSettings settings("ViconLSL", "ViconLSLBridge");
-    server_edit_->setText(settings.value("server", "localhost:801").toString());
-    marker_stream_edit_->setText(settings.value(
-        "markerStream", vicon_lsl::stream_defaults::ViconMarkers).toString());
-    segment_stream_edit_->setText(settings.value(
-        "segmentStream", vicon_lsl::stream_defaults::ViconSegments).toString());
-    study_root_edit_->setText(settings.value("recordingRoot", QDir::homePath()).toString());
-    filename_template_edit_->setText(settings.value("recordingTemplate",
-        "sub-%p/ses-%s/%m/sub-%p_ses-%s_task-%b_acq-%a_run-%r_%m.xdf").toString());
-    participant_edit_->setText(settings.value("participant", "P001").toString());
-    session_edit_->setText(settings.value("session", "S001").toString());
-    task_edit_->setText(settings.value("task", "Task").toString());
-    run_spin_->setValue(settings.value("run", 1).toInt());
-    acquisition_edit_->setText(settings.value("acquisition", "vicon").toString());
-    modality_edit_->setText(settings.value("modality", "beh").toString());
-    labrecorder_executable_edit_->setText(settings.value("labRecorderExecutable", "").toString());
-    labrecorder_host_edit_->setText(settings.value("labRecorderHost", "localhost").toString());
-    labrecorder_port_spin_->setValue(settings.value("labRecorderPort", 22345).toInt());
+    ui_->applySettings(vicon_lsl::gui_detail::loadBridgeWindowSettings());
 }
 
 void BridgeWindow::saveSettings() const {
-    QSettings settings("ViconLSL", "ViconLSLBridge");
-    settings.setValue("server", server_edit_->text());
-    settings.setValue("markerStream", marker_stream_edit_->text());
-    settings.setValue("segmentStream", segment_stream_edit_->text());
-    settings.setValue("recordingRoot", study_root_edit_->text());
-    settings.setValue("recordingTemplate", filename_template_edit_->text());
-    settings.setValue("participant", participant_edit_->text());
-    settings.setValue("session", session_edit_->text());
-    settings.setValue("task", task_edit_->text());
-    settings.setValue("run", run_spin_->value());
-    settings.setValue("acquisition", acquisition_edit_->text());
-    settings.setValue("modality", modality_edit_->text());
-    settings.setValue("labRecorderExecutable", labrecorder_executable_edit_->text());
-    settings.setValue("labRecorderHost", labrecorder_host_edit_->text());
-    settings.setValue("labRecorderPort", labrecorder_port_spin_->value());
+    vicon_lsl::gui_detail::saveBridgeWindowSettings(ui_->settings());
 }
 
 void BridgeWindow::setInputsEnabled(bool enabled) {
-    server_edit_->setEnabled(enabled);
-    marker_stream_edit_->setEnabled(enabled);
-    segment_stream_edit_->setEnabled(enabled);
+    ui_->setBridgeInputsEnabled(enabled);
 }
 
 LabRecorderFilenameFields BridgeWindow::filenameFields() const {
-    LabRecorderFilenameFields fields;
-    fields.root = study_root_edit_->text();
-    fields.templ = filename_template_edit_->text();
-    fields.participant = participant_edit_->text();
-    fields.session = session_edit_->text();
-    fields.task = task_edit_->text();
-    fields.run = QString::number(run_spin_->value());
-    fields.acquisition = acquisition_edit_->text();
-    fields.modality = modality_edit_->text();
-    return fields;
+    return ui_->filenameFields();
 }
 
 QString BridgeWindow::renderedFilenamePreview() const {
-    const LabRecorderFilenameFields fields = filenameFields();
-    const QString rendered = LabRecorderClient::renderedFilename(fields);
-    const QString root = LabRecorderClient::sanitizedValue(fields.root);
-    if (!root.isEmpty()) {
-        return QDir::toNativeSeparators(QDir(root).filePath(rendered));
-    }
-    return QDir::toNativeSeparators(rendered);
+    return LabRecorderFilenamePolicy::renderedFilenamePreview(filenameFields());
 }
 
 QString BridgeWindow::filenameValidationError() const {
-    const LabRecorderFilenameFields fields = filenameFields();
-    const QString root = LabRecorderClient::sanitizedValue(fields.root);
-    if (root.isEmpty()) {
-        return "Set a study root before starting recording.";
-    }
-
-    QFileInfo root_info(fields.root);
-    if (!root_info.exists() || !root_info.isDir()) {
-        return "Study root does not exist or is not a directory: " + fields.root;
-    }
-
-    if (LabRecorderClient::sanitizedValue(fields.templ).isEmpty()) {
-        return "Set a filename template before starting recording.";
-    }
-
-    QStringList missing_fields;
-    if (LabRecorderClient::sanitizedValue(fields.participant).isEmpty()) {
-        missing_fields.append("participant");
-    }
-    if (LabRecorderClient::sanitizedValue(fields.session).isEmpty()) {
-        missing_fields.append("session");
-    }
-    if (LabRecorderClient::sanitizedValue(fields.task).isEmpty()) {
-        missing_fields.append("task");
-    }
-    if (LabRecorderClient::sanitizedValue(fields.acquisition).isEmpty()) {
-        missing_fields.append("acquisition");
-    }
-    if (LabRecorderClient::sanitizedValue(fields.modality).isEmpty()) {
-        missing_fields.append("modality");
-    }
-    if (!missing_fields.isEmpty()) {
-        return "Complete recording metadata before starting: " + missing_fields.join(", ") + ".";
-    }
-
-    if (LabRecorderClient::hasUnresolvedFilenamePlaceholders(fields)) {
-        return "Resolve all filename template placeholders before starting recording.";
-    }
-
-    if (renderedFilenamePreview().trimmed().isEmpty()) {
-        return "Filename preview is empty; check the study root and template.";
-    }
-
-    return {};
+    return LabRecorderFilenamePolicy::validationError(filenameFields());
 }
 
 void BridgeWindow::setLabRecorderStatus(const QString& status) {
-    labrecorder_status_label_->setText(status);
+    ui_->labrecorder_status_label->setText(status);
 }
 
 void BridgeWindow::updateRecordingButtons() {
-    if (!refresh_streams_button_ || !start_recording_button_ || !stop_recording_button_) {
+    if (!ui_->refresh_streams_button || !ui_->start_recording_button || !ui_->stop_recording_button) {
         return;
     }
 
     const RecorderConnectionState connection_state = labrecorder_client_.connectionState();
     const RecorderRecordingState recording_state = labrecorder_client_.recordingState();
-    refresh_streams_button_->setEnabled(LabRecorderRuntimePolicy::canRefreshStreams(
+    ui_->refresh_streams_button->setEnabled(LabRecorderRuntimePolicy::canRefreshStreams(
         connection_state, recording_state));
-    start_recording_button_->setEnabled(
+    ui_->start_recording_button->setEnabled(
         LabRecorderRuntimePolicy::canStartRecording(connection_state, recording_state) &&
         isFilenameValid());
-    stop_recording_button_->setEnabled(LabRecorderRuntimePolicy::canStopRecording(
+    ui_->stop_recording_button->setEnabled(LabRecorderRuntimePolicy::canStopRecording(
         connection_state, recording_state));
 }
 
@@ -917,12 +568,12 @@ void BridgeWindow::scheduleFilenameSync() {
 }
 
 void BridgeWindow::updateReadiness() {
-    if (!readiness_label_) {
+    if (!ui_->readiness_label) {
         return;
     }
 
     const QString bridge_text = bridge_streaming_
-        ? QString("Bridge streaming at %1").arg(bridge_status_stale_ ? "0.0 Hz (stale)" : frame_rate_label_->text())
+        ? QString("Bridge streaming at %1").arg(bridge_status_stale_ ? "0.0 Hz (stale)" : ui_->frame_rate_label->text())
         : "Bridge not streaming";
     QString labrecorder_text;
     switch (labrecorder_client_.connectionState()) {
@@ -940,6 +591,6 @@ void BridgeWindow::updateReadiness() {
             break;
     }
     const QString filename_text = isFilenameValid() ? "filename valid" : "filename incomplete";
-    readiness_label_->setText(QString("Readiness: %1; %2; %3.")
+    ui_->readiness_label->setText(QString("Readiness: %1; %2; %3.")
                                   .arg(bridge_text, labrecorder_text, filename_text));
 }

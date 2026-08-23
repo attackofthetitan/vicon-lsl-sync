@@ -1,9 +1,7 @@
 #include "preview/PreviewXdfReader.h"
 
-#include "preview/PreviewParsing.h"
+#include "preview/PreviewXdfPrivate.h"
 
-#include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -127,116 +125,6 @@ std::vector<unsigned char> readFile(const std::string& path) {
     return data;
 }
 
-std::string lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return value;
-}
-
-std::string xmlUnescape(std::string value) {
-    const std::pair<const char*, const char*> replacements[] = {
-        {"&amp;", "&"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&apos;", "'"},
-    };
-    for (const auto& replacement : replacements) {
-        std::size_t pos = 0;
-        while ((pos = value.find(replacement.first, pos)) != std::string::npos) {
-            value.replace(pos, std::strlen(replacement.first), replacement.second);
-            pos += std::strlen(replacement.second);
-        }
-    }
-    return value;
-}
-
-std::optional<std::string> xmlTagValue(const std::string& xml, const std::string& tag) {
-    const std::string open = "<" + tag + ">";
-    const std::string close = "</" + tag + ">";
-    const std::size_t start = xml.find(open);
-    if (start == std::string::npos) {
-        return std::nullopt;
-    }
-    const std::size_t value_start = start + open.size();
-    const std::size_t end = xml.find(close, value_start);
-    if (end == std::string::npos) {
-        return std::nullopt;
-    }
-    return xmlUnescape(xml.substr(value_start, end - value_start));
-}
-
-int parseIntTag(const std::string& xml, const std::string& tag, int default_value) {
-    const auto value = xmlTagValue(xml, tag);
-    if (!value) {
-        return default_value;
-    }
-    try {
-        return std::stoi(*value);
-    } catch (...) {
-        return default_value;
-    }
-}
-
-double parseDoubleTag(const std::string& xml, const std::string& tag, double default_value) {
-    const auto value = xmlTagValue(xml, tag);
-    if (!value) {
-        return default_value;
-    }
-    try {
-        return std::stod(*value);
-    } catch (...) {
-        return default_value;
-    }
-}
-
-std::vector<std::string> parseChannelLabels(const std::string& xml, int channel_count) {
-    std::vector<std::string> labels;
-    std::size_t cursor = 0;
-    while ((cursor = xml.find("<label>", cursor)) != std::string::npos) {
-        cursor += 7;
-        const std::size_t end = xml.find("</label>", cursor);
-        if (end == std::string::npos) {
-            break;
-        }
-        std::string label = xmlUnescape(xml.substr(cursor, end - cursor));
-        labels.push_back(label.empty() ? "ch_" + std::to_string(labels.size()) : std::move(label));
-        cursor = end + 8;
-    }
-
-    if (channel_count <= 0) {
-        channel_count = static_cast<int>(labels.size());
-    }
-    if (static_cast<int>(labels.size()) != channel_count) {
-        labels.clear();
-        for (int index = 0; index < channel_count; ++index) {
-            labels.push_back("ch_" + std::to_string(index));
-        }
-    }
-    return labels;
-}
-
-PreviewStreamRole inferRole(const XdfStreamData& stream) {
-    PreviewStreamSchema schema;
-    schema.name = stream.name;
-    schema.type = stream.type;
-    schema.channel_labels = stream.channel_labels;
-    return inferPreviewStreamRole(schema);
-}
-
-void parseStreamHeader(XdfStreamData& stream, const std::string& xml) {
-    stream.name = xmlTagValue(xml, "name").value_or("stream_" + std::to_string(stream.stream_id));
-    stream.type = xmlTagValue(xml, "type").value_or("");
-    stream.source_id = xmlTagValue(xml, "source_id").value_or("");
-    stream.channel_count = parseIntTag(xml, "channel_count", 0);
-    stream.nominal_srate = parseDoubleTag(xml, "nominal_srate", 0.0);
-    stream.channel_format = xmlTagValue(xml, "channel_format").value_or("double64");
-    stream.coordinate_frame = xmlTagValue(xml, "coordinate_frame").value_or("");
-    stream.channel_labels = parseChannelLabels(xml, stream.channel_count);
-    if (stream.channel_count <= 0) {
-        stream.channel_count = static_cast<int>(stream.channel_labels.size());
-    }
-    stream.numeric = lower(stream.channel_format) != "string";
-    stream.role = inferRole(stream);
-}
-
 std::optional<double> readTimestamp(BinaryReader& reader) {
     const std::uint8_t bytes = reader.readU8();
     if (bytes == 0) {
@@ -257,7 +145,8 @@ void skipStringValue(BinaryReader& reader) {
 }
 
 double readNumericValue(BinaryReader& reader, const std::string& format) {
-    const std::string normalized = lower(format.empty() ? "double64" : format);
+    const std::string normalized = preview_xdf_detail::lowerAscii(
+        format.empty() ? "double64" : format);
     if (normalized == "double64") return reader.readDouble();
     if (normalized == "float32") return reader.readFloat();
     if (normalized == "int8") return reader.readI8();
@@ -278,20 +167,10 @@ void parseSamplesChunk(BinaryReader& reader,
 
     for (std::uint64_t sample_index = 0; sample_index < count; ++sample_index) {
         const std::optional<double> encoded_timestamp = readTimestamp(reader);
-        double timestamp = 0.0;
-        if (encoded_timestamp) {
-            timestamp = *encoded_timestamp;
-        } else {
-            if (!previous_timestamp || !std::isfinite(stream.nominal_srate) ||
-                stream.nominal_srate <= 0.0) {
-                throw std::runtime_error(
-                    "Cannot reconstruct implicit XDF timestamp without a preceding timestamp and positive nominal_srate");
-            }
-            timestamp = *previous_timestamp + 1.0 / stream.nominal_srate;
-        }
-        if (!std::isfinite(timestamp)) {
-            throw std::runtime_error("XDF sample timestamp is not finite");
-        }
+        const double timestamp = preview_xdf_detail::resolveSampleTimestamp(
+            encoded_timestamp,
+            previous_timestamp,
+            stream.nominal_srate);
         previous_timestamp = timestamp;
         ++stream.sample_count;
         if (stream.numeric) {
@@ -322,119 +201,7 @@ void parseClockOffsetChunk(BinaryReader& reader,
     }
     const double collection_time = reader.readDouble();
     const double offset = reader.readDouble();
-    // XDF stores ClockOffset collection times in the source stream's clock
-    // domain. The offset itself maps that clock into recorder time.
-    const XdfClockOffset measurement{collection_time, offset};
-    if (!std::isfinite(collection_time) || !std::isfinite(measurement.stream_time) ||
-        !std::isfinite(measurement.offset)) {
-        throw std::runtime_error("XDF clock-offset measurement is not finite");
-    }
-    stream.clock_offsets.push_back(measurement);
-}
-
-struct ClockOffsetFit {
-    long double stream_center = 0.0L;
-    long double offset_center = 0.0L;
-    long double slope = 0.0L;
-};
-
-std::optional<ClockOffsetFit> fitClockOffsets(
-    const std::vector<XdfClockOffset>& offsets) {
-    if (offsets.empty()) {
-        return std::nullopt;
-    }
-
-    // Center both coordinates before accumulating covariance/variance. XDF
-    // timestamps are often large absolute values, and an uncentered fit loses
-    // the small drift term to floating-point cancellation.
-    long double stream_center = 0.0L;
-    long double offset_center = 0.0L;
-    for (std::size_t index = 0; index < offsets.size(); ++index) {
-        const long double weight = 1.0L / static_cast<long double>(index + 1);
-        stream_center +=
-            (static_cast<long double>(offsets[index].stream_time) - stream_center) * weight;
-        offset_center +=
-            (static_cast<long double>(offsets[index].offset) - offset_center) * weight;
-    }
-
-    long double covariance = 0.0L;
-    long double variance = 0.0L;
-    for (const auto& measurement : offsets) {
-        const long double stream_delta =
-            static_cast<long double>(measurement.stream_time) - stream_center;
-        const long double offset_delta =
-            static_cast<long double>(measurement.offset) - offset_center;
-        covariance += stream_delta * offset_delta;
-        variance += stream_delta * stream_delta;
-    }
-
-    if (!std::isfinite(covariance) || !std::isfinite(variance) || variance < 0.0L) {
-        throw std::runtime_error("XDF clock-offset fit is not finite");
-    }
-
-    long double slope = 0.0L;
-    if (variance > 0.0L) {
-        slope = covariance / variance;
-    }
-    if (!std::isfinite(stream_center) ||
-        !std::isfinite(offset_center) ||
-        !std::isfinite(slope)) {
-        throw std::runtime_error("XDF clock-offset fit is not finite");
-    }
-    return ClockOffsetFit{stream_center, offset_center, slope};
-}
-
-std::size_t correctAndRepairTimestamps(XdfStreamData& stream) {
-    std::stable_sort(stream.clock_offsets.begin(), stream.clock_offsets.end(),
-                     [](const XdfClockOffset& left, const XdfClockOffset& right) {
-                         return left.stream_time < right.stream_time;
-                     });
-    if (std::adjacent_find(
-            stream.clock_offsets.begin(), stream.clock_offsets.end(),
-            [](const XdfClockOffset& left, const XdfClockOffset& right) {
-                return left.stream_time == right.stream_time;
-            }) != stream.clock_offsets.end()) {
-        throw std::runtime_error("XDF clock-offset measurement times are not unique");
-    }
-
-    const auto fit = fitClockOffsets(stream.clock_offsets);
-    if (fit) {
-        for (double& timestamp : stream.timestamps) {
-            const long double centered_timestamp =
-                static_cast<long double>(timestamp) - fit->stream_center;
-            const long double correction =
-                fit->offset_center + fit->slope * centered_timestamp;
-            const long double corrected = static_cast<long double>(timestamp) + correction;
-            timestamp = static_cast<double>(corrected);
-            if (!std::isfinite(timestamp)) {
-                throw std::runtime_error("Corrected XDF timestamp is not finite");
-            }
-        }
-    }
-    std::size_t repaired_count = 0;
-    long double accumulated_shift = 0.0L;
-    std::optional<double> previous;
-    for (double& timestamp : stream.timestamps) {
-        const long double shifted = static_cast<long double>(timestamp) + accumulated_shift;
-        if (!std::isfinite(shifted)) {
-            throw std::runtime_error("Corrected XDF timestamp is not finite");
-        }
-        double repaired = static_cast<double>(shifted);
-        if (!std::isfinite(repaired)) {
-            throw std::runtime_error("Corrected XDF timestamp is not finite");
-        }
-        if (previous && repaired <= *previous) {
-            repaired = std::nextafter(*previous, std::numeric_limits<double>::infinity());
-            if (!std::isfinite(repaired)) {
-                throw std::runtime_error("Unable to repair non-monotonic XDF timestamp");
-            }
-            accumulated_shift += static_cast<long double>(repaired) - shifted;
-            ++repaired_count;
-        }
-        timestamp = repaired;
-        previous = repaired;
-    }
-    return repaired_count;
+    preview_xdf_detail::appendClockOffset(stream, collection_time, offset);
 }
 
 } // namespace
@@ -477,7 +244,9 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path) {
             stream.stream_id = stream_id;
 
             if (tag == XdfChunkTag::StreamHeader) {
-                parseStreamHeader(stream, reader.readString(chunk_end - reader.position()));
+                preview_xdf_detail::parseStreamHeaderMetadata(
+                    stream,
+                    reader.readString(chunk_end - reader.position()));
             } else if (tag == XdfChunkTag::Samples) {
                 parseSamplesChunk(reader, chunk_end, stream, previous_timestamps[stream_id]);
             } else if (tag == XdfChunkTag::ClockOffset) {
@@ -492,16 +261,9 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path) {
     result.truncated_tail_ignored = truncated_tail_ignored;
     for (auto& item : streams_by_id) {
         XdfStreamData& stream = item.second;
-        if (stream.channel_count <= 0 && !stream.samples.empty()) {
-            stream.channel_count = static_cast<int>(stream.samples.front().size());
-        }
-        if (stream.channel_labels.empty()) {
-            for (int index = 0; index < stream.channel_count; ++index) {
-                stream.channel_labels.push_back("ch_" + std::to_string(index));
-            }
-        }
-        stream.role = inferRole(stream);
-        stream.repaired_timestamp_count = correctAndRepairTimestamps(stream);
+        preview_xdf_detail::finalizeStreamMetadata(stream);
+        stream.repaired_timestamp_count =
+            preview_xdf_detail::correctAndRepairTimestamps(stream);
         result.streams.push_back(std::move(stream));
     }
     return result;

@@ -20,58 +20,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$packagingSafetyModule = (Resolve-Path -LiteralPath (
+    Join-Path $PSScriptRoot "PackagingSafety.psm1") -ErrorAction Stop).Path
+# This script is invoked from package_gui_single_exe.ps1 in the same process.
+# Reuse its module instance so the child scope cannot invalidate the parent's
+# exported commands by force-reloading the module.
+Import-Module -Name $packagingSafetyModule -Scope Local `
+    -DisableNameChecking -ErrorAction Stop
+
 $expectedRevisions = @{
     Vicon = "a5096f283f484acca98b434c08810cd922551701"
     LabRecorder = "6d65fa96b94d049478ef4f7188c39202fe14977d"
     liblsl = "6ca188c266c21f7228dc67077303fa6abaf2e8be"
-}
-
-function Assert-NoReparseAncestors {
-    param([string]$Path, [string]$Description = "path")
-
-    try {
-        $current = [System.IO.Path]::GetFullPath($Path)
-    } catch {
-        throw "$Description is not a valid filesystem path: $Path"
-    }
-    while ($current) {
-        if (Test-Path -LiteralPath $current) {
-            $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
-            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "$Description or an ancestor is a reparse point: $current"
-            }
-        }
-        $parentInfo = [System.IO.Directory]::GetParent($current)
-        $parent = if ($parentInfo) { $parentInfo.FullName } else { $null }
-        if (-not $parent -or $parent -eq $current) {
-            break
-        }
-        $current = $parent
-    }
-}
-
-function Assert-NoReparseTree {
-    param([string]$Root, [string]$Description = "tree")
-
-    Assert-NoReparseAncestors $Root $Description
-    $rootItem = Get-Item -LiteralPath $Root -Force -ErrorAction Stop
-    if (-not $rootItem.PSIsContainer -or
-        ($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "$Description is not a normal directory: $Root"
-    }
-    $pending = New-Object System.Collections.Generic.Stack[string]
-    $pending.Push($rootItem.FullName)
-    while ($pending.Count -gt 0) {
-        $directory = $pending.Pop()
-        foreach ($item in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)) {
-            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "$Description contains a reparse point: $($item.FullName)"
-            }
-            if ($item.PSIsContainer) {
-                $pending.Push($item.FullName)
-            }
-        }
-    }
 }
 
 function Assert-GitRevision {
@@ -101,20 +61,6 @@ function Assert-GitRevision {
     & $gitPath -C $resolved diff --cached --quiet -- 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "$Description checkout has staged working-tree changes; refusing to claim the pinned license text."
-    }
-}
-
-function Remove-TreeSafe {
-    param([string]$Path, [string]$Description = "tree")
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-    Assert-NoReparseAncestors $Path $Description
-    Assert-NoReparseTree $Path $Description
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-    if (Test-Path -LiteralPath $Path) {
-        throw "Unable to remove ${Description}: $Path"
     }
 }
 

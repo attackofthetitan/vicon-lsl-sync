@@ -21,26 +21,6 @@ namespace GazeLSL
             return Stopwatch.GetTimestamp();
         }
 
-        public static long QpcTicksToSystemRelativeTicks(
-            long qpcTicks,
-            long qpcFrequency)
-        {
-            if (qpcFrequency <= 0L)
-            {
-                throw new ArgumentOutOfRangeException(nameof(qpcFrequency));
-            }
-
-            double systemRelativeTicks =
-                qpcTicks * (double)Stopwatch.Frequency / qpcFrequency;
-            if (systemRelativeTicks > long.MaxValue ||
-                systemRelativeTicks < long.MinValue)
-            {
-                throw new OverflowException("The QPC timestamp does not fit in a 64-bit tick value.");
-            }
-
-            return (long)Math.Round(systemRelativeTicks, MidpointRounding.AwayFromZero);
-        }
-
         public static double SystemRelativeTicksToLslTimestamp(long systemRelativeTimeTicks)
         {
             return systemRelativeTimeTicks / (double)Stopwatch.Frequency;

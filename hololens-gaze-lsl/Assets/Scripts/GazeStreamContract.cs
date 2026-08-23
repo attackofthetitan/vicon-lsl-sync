@@ -3,6 +3,11 @@ namespace GazeLSL
 {
     internal static class GazeStreamContract
     {
+        public const string StreamName = "HoloLensGaze";
+        public const string StreamType = "Gaze";
+        public const string SourceId = "hololens2_gaze";
+        public const double NominalSrate = 90.0;
+        public const string ChannelFormat = "double64";
         public const int ChannelCount = 21;
         public static readonly string[] Labels =
         {

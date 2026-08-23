@@ -18,21 +18,14 @@ namespace GazeLSL
         private const int MaxQueuedSamples = 360;
 
 #if ENABLE_WINMD_SUPPORT
-        private struct RawTrackerRay
-        {
-            public bool IsValid;
-            public System.Numerics.Vector3 Origin;
-            public System.Numerics.Vector3 Direction;
-        }
-
         private struct RawGazeReading
         {
             public long Generation;
             public long SystemRelativeTimeTicks;
             public double Timestamp;
-            public RawTrackerRay Combined;
-            public RawTrackerRay Left;
-            public RawTrackerRay Right;
+            public TrackerSpaceRay Combined;
+            public TrackerSpaceRay Left;
+            public TrackerSpaceRay Right;
         }
 
         private struct QueuedGazeSample
@@ -243,19 +236,24 @@ namespace GazeLSL
                     node = trackerNode;
                 }
 
-                GazeSample sample = CreateEmptySample();
-                sample.Timestamp = raw.Timestamp;
+                GazeSample sample =
+                    GazeSampleProjection.CreateInvalidSample(raw.Timestamp);
 
                 try
                 {
                     if (node.TryLocate(raw.SystemRelativeTimeTicks, out Pose trackerPose))
                     {
                         consecutiveLocateFailures = 0;
-                        PopulateWorldSpaceRays(
-                            raw,
-                            trackerPose,
-                            mixedRealityPlayspace,
-                            ref sample);
+                        GazeProjectionContext projectionContext =
+                            CreateProjectionContext(
+                                trackerPose,
+                                mixedRealityPlayspace);
+                        sample = GazeSampleProjection.ProjectSample(
+                            raw.Timestamp,
+                            raw.Combined,
+                            raw.Left,
+                            raw.Right,
+                            projectionContext);
                     }
                     else
                     {
@@ -442,11 +440,8 @@ namespace GazeLSL
                         // Start the integer capture-time gate at the new tracker
                         // lifecycle; readings from the previous SDK session must
                         // never be compared with this session's clock.
-                        readingGate.Reset();
+                        ResetReadingPipelineLocked();
                         includeIndividualEyes = perEye;
-                        pendingRawReadings.Clear();
-                        pendingSamples.Clear();
-                        consecutiveLocateFailures = 0;
                         sessionGeneration++;
                     }
                     else
@@ -490,13 +485,7 @@ namespace GazeLSL
                 trackerLifecycleGeneration++;
                 if (ReferenceEquals(tracker, removedTracker))
                 {
-                    tracker = null;
-                    trackerNode = null;
-                    includeIndividualEyes = false;
-                    readingGate.Reset();
-                    pendingRawReadings.Clear();
-                    pendingSamples.Clear();
-                    consecutiveLocateFailures = 0;
+                    ClearActiveTrackerLocked();
                     wasActive = true;
                 }
             }
@@ -528,71 +517,52 @@ namespace GazeLSL
             return false;
         }
 
-        private static GazeSample CreateEmptySample()
+        private static TrackerSpaceRay ReadCombinedRay(
+            EyeGazeTrackerReading reading)
         {
-            return new GazeSample
-            {
-                CombinedOriginX = double.NaN,
-                CombinedOriginY = double.NaN,
-                CombinedOriginZ = double.NaN,
-                CombinedDirectionX = double.NaN,
-                CombinedDirectionY = double.NaN,
-                CombinedDirectionZ = double.NaN,
-                LeftEyeOriginX = double.NaN,
-                LeftEyeOriginY = double.NaN,
-                LeftEyeOriginZ = double.NaN,
-                LeftEyeDirectionX = double.NaN,
-                LeftEyeDirectionY = double.NaN,
-                LeftEyeDirectionZ = double.NaN,
-                RightEyeOriginX = double.NaN,
-                RightEyeOriginY = double.NaN,
-                RightEyeOriginZ = double.NaN,
-                RightEyeDirectionX = double.NaN,
-                RightEyeDirectionY = double.NaN,
-                RightEyeDirectionZ = double.NaN
-            };
+            System.Numerics.Vector3 origin;
+            System.Numerics.Vector3 direction;
+            bool sourceValid = reading.TryGetCombinedEyeGazeInTrackerSpace(
+                out origin,
+                out direction);
+            return GazeSampleProjection.CreateTrackerSpaceRay(
+                sourceValid,
+                origin,
+                direction);
         }
 
-        private static RawTrackerRay ReadCombinedRay(EyeGazeTrackerReading reading)
+        private static TrackerSpaceRay ReadLeftRay(
+            EyeGazeTrackerReading reading)
         {
-            RawTrackerRay ray = default(RawTrackerRay);
-            ray.IsValid = reading.TryGetCombinedEyeGazeInTrackerSpace(
-                    out ray.Origin,
-                    out ray.Direction) &&
-                IsUsableRay(ray.Origin, ray.Direction);
-            return ray;
+            System.Numerics.Vector3 origin;
+            System.Numerics.Vector3 direction;
+            bool sourceValid = reading.TryGetLeftEyeGazeInTrackerSpace(
+                out origin,
+                out direction);
+            return GazeSampleProjection.CreateTrackerSpaceRay(
+                sourceValid,
+                origin,
+                direction);
         }
 
-        private static RawTrackerRay ReadLeftRay(EyeGazeTrackerReading reading)
+        private static TrackerSpaceRay ReadRightRay(
+            EyeGazeTrackerReading reading)
         {
-            RawTrackerRay ray = default(RawTrackerRay);
-            ray.IsValid = reading.TryGetLeftEyeGazeInTrackerSpace(
-                    out ray.Origin,
-                    out ray.Direction) &&
-                IsUsableRay(ray.Origin, ray.Direction);
-            return ray;
+            System.Numerics.Vector3 origin;
+            System.Numerics.Vector3 direction;
+            bool sourceValid = reading.TryGetRightEyeGazeInTrackerSpace(
+                out origin,
+                out direction);
+            return GazeSampleProjection.CreateTrackerSpaceRay(
+                sourceValid,
+                origin,
+                direction);
         }
 
-        private static RawTrackerRay ReadRightRay(EyeGazeTrackerReading reading)
-        {
-            RawTrackerRay ray = default(RawTrackerRay);
-            ray.IsValid = reading.TryGetRightEyeGazeInTrackerSpace(
-                    out ray.Origin,
-                    out ray.Direction) &&
-                IsUsableRay(ray.Origin, ray.Direction);
-            return ray;
-        }
-
-        private static void PopulateWorldSpaceRays(
-            RawGazeReading reading,
+        private static GazeProjectionContext CreateProjectionContext(
             Pose trackerPose,
-            Transform playspace,
-            ref GazeSample sample)
+            Transform playspace)
         {
-            System.Numerics.Vector3 playspaceFromTrackerPosition =
-                ToNumerics(trackerPose.position);
-            System.Numerics.Quaternion playspaceFromTrackerRotation =
-                ToNumerics(trackerPose.rotation);
             System.Numerics.Vector3 worldFromPlayspacePosition =
                 playspace != null
                     ? ToNumerics(playspace.position)
@@ -606,120 +576,12 @@ namespace GazeLSL
                     ? ToNumerics(playspace.lossyScale)
                     : System.Numerics.Vector3.One;
 
-            if (reading.Combined.IsValid)
-            {
-                sample.CombinedValid = WriteWorldSpaceRay(
-                    reading.Combined.Origin,
-                    reading.Combined.Direction,
-                    playspaceFromTrackerPosition,
-                    playspaceFromTrackerRotation,
-                    worldFromPlayspacePosition,
-                    worldFromPlayspaceRotation,
-                    worldFromPlayspaceScale,
-                    out sample.CombinedOriginX,
-                    out sample.CombinedOriginY,
-                    out sample.CombinedOriginZ,
-                    out sample.CombinedDirectionX,
-                    out sample.CombinedDirectionY,
-                    out sample.CombinedDirectionZ);
-            }
-
-            if (reading.Left.IsValid)
-            {
-                sample.LeftEyeValid = WriteWorldSpaceRay(
-                    reading.Left.Origin,
-                    reading.Left.Direction,
-                    playspaceFromTrackerPosition,
-                    playspaceFromTrackerRotation,
-                    worldFromPlayspacePosition,
-                    worldFromPlayspaceRotation,
-                    worldFromPlayspaceScale,
-                    out sample.LeftEyeOriginX,
-                    out sample.LeftEyeOriginY,
-                    out sample.LeftEyeOriginZ,
-                    out sample.LeftEyeDirectionX,
-                    out sample.LeftEyeDirectionY,
-                    out sample.LeftEyeDirectionZ);
-            }
-
-            if (reading.Right.IsValid)
-            {
-                sample.RightEyeValid = WriteWorldSpaceRay(
-                    reading.Right.Origin,
-                    reading.Right.Direction,
-                    playspaceFromTrackerPosition,
-                    playspaceFromTrackerRotation,
-                    worldFromPlayspacePosition,
-                    worldFromPlayspaceRotation,
-                    worldFromPlayspaceScale,
-                    out sample.RightEyeOriginX,
-                    out sample.RightEyeOriginY,
-                    out sample.RightEyeOriginZ,
-                    out sample.RightEyeDirectionX,
-                    out sample.RightEyeDirectionY,
-                    out sample.RightEyeDirectionZ);
-            }
-        }
-
-        private static bool IsUsableRay(
-            System.Numerics.Vector3 origin,
-            System.Numerics.Vector3 direction)
-        {
-            return IsFinite(origin.X) && IsFinite(origin.Y) && IsFinite(origin.Z) &&
-                   IsFinite(direction.X) && IsFinite(direction.Y) && IsFinite(direction.Z) &&
-                   DirectionMagnitudeSquared(direction) > 0.000001f;
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
-        }
-
-        private static float DirectionMagnitudeSquared(System.Numerics.Vector3 value)
-        {
-            return value.X * value.X + value.Y * value.Y + value.Z * value.Z;
-        }
-
-        private static bool WriteWorldSpaceRay(
-            System.Numerics.Vector3 origin,
-            System.Numerics.Vector3 direction,
-            System.Numerics.Vector3 playspaceFromTrackerPosition,
-            System.Numerics.Quaternion playspaceFromTrackerRotation,
-            System.Numerics.Vector3 worldFromPlayspacePosition,
-            System.Numerics.Quaternion worldFromPlayspaceRotation,
-            System.Numerics.Vector3 worldFromPlayspaceScale,
-            out double originX,
-            out double originY,
-            out double originZ,
-            out double directionX,
-            out double directionY,
-            out double directionZ)
-        {
-            System.Numerics.Vector3 worldOrigin;
-            System.Numerics.Vector3 worldDirection;
-            if (!GazeCoordinateTransform.TryTransformTrackerRayToSharedWorld(
-                    origin,
-                    direction,
-                    playspaceFromTrackerPosition,
-                    playspaceFromTrackerRotation,
-                    worldFromPlayspacePosition,
-                    worldFromPlayspaceRotation,
-                    worldFromPlayspaceScale,
-                    out worldOrigin,
-                    out worldDirection))
-            {
-                originX = originY = originZ = double.NaN;
-                directionX = directionY = directionZ = double.NaN;
-                return false;
-            }
-
-            originX = worldOrigin.X;
-            originY = worldOrigin.Y;
-            originZ = worldOrigin.Z;
-            directionX = worldDirection.X;
-            directionY = worldDirection.Y;
-            directionZ = worldDirection.Z;
-            return true;
+            return GazeSampleProjection.CreateProjectionContext(
+                ToNumerics(trackerPose.position),
+                ToNumerics(trackerPose.rotation),
+                worldFromPlayspacePosition,
+                worldFromPlayspaceRotation,
+                worldFromPlayspaceScale);
         }
 
         private static System.Numerics.Vector3 ToNumerics(Vector3 value)
@@ -736,6 +598,26 @@ namespace GazeLSL
                 value.w);
         }
 
+        // The caller must hold trackerGate so no acquisition can observe a
+        // partially reset capture pipeline.
+        private void ResetReadingPipelineLocked()
+        {
+            readingGate.Reset();
+            pendingRawReadings.Clear();
+            pendingSamples.Clear();
+            consecutiveLocateFailures = 0;
+        }
+
+        // The caller must hold trackerGate. Generation counters are deliberately
+        // advanced by each lifecycle operation at its existing call site.
+        private void ClearActiveTrackerLocked()
+        {
+            tracker = null;
+            trackerNode = null;
+            includeIndividualEyes = false;
+            ResetReadingPipelineLocked();
+        }
+
         private void StopWatcherAndTracker()
         {
             EyeGazeTrackerWatcher currentWatcher;
@@ -745,13 +627,7 @@ namespace GazeLSL
                 currentWatcher = watcher;
                 watcher = null;
                 currentTracker = tracker;
-                tracker = null;
-                trackerNode = null;
-                includeIndividualEyes = false;
-                readingGate.Reset();
-                pendingRawReadings.Clear();
-                pendingSamples.Clear();
-                consecutiveLocateFailures = 0;
+                ClearActiveTrackerLocked();
                 watcherGeneration++;
                 trackerLifecycleGeneration++;
             }

@@ -8,6 +8,8 @@
 #include <QTimer>
 #include <QTcpSocket>
 
+#include "gui/LabRecorderFilenamePolicy.h"
+
 enum class RecorderConnectionState {
     Disconnected,
     Connecting,
@@ -19,17 +21,6 @@ enum class RecorderRecordingState {
     Unknown,
     Stopped,
     Recording,
-};
-
-struct LabRecorderFilenameFields {
-    QString root;
-    QString templ;
-    QString participant;
-    QString session;
-    QString task;
-    QString run;
-    QString acquisition;
-    QString modality;
 };
 
 class LabRecorderClient : public QObject {

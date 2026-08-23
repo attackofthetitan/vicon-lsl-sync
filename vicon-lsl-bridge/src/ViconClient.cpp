@@ -1,4 +1,5 @@
 #include "ViconClient.h"
+#include "ViconTimestamp.h"
 
 #include <lsl_cpp.h>
 

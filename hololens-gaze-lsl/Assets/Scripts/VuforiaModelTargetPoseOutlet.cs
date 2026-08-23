@@ -12,21 +12,7 @@ namespace GazeLSL
     */
     public sealed class VuforiaModelTargetPoseOutlet : MonoBehaviour
     {
-        private const int ChannelCount = ModelTargetPoseEncoder.ChannelCount;
-
-        private static readonly string[] ChannelLabels =
-        {
-            "PositionX", "PositionY", "PositionZ",
-            "RotationX", "RotationY", "RotationZ", "RotationW",
-            "Tracked"
-        };
-
-        private static readonly string[] ChannelUnits =
-        {
-            "meters", "meters", "meters",
-            "normalized", "normalized", "normalized", "normalized",
-            "bool"
-        };
+        private const int ChannelCount = ModelTargetStreamContract.ChannelCount;
 
         [SerializeField] private GazeLSLConfig config;
         [SerializeField] private ObserverBehaviour modelTarget;
@@ -70,8 +56,8 @@ namespace GazeLSL
             for (int i = 0; i < ChannelCount; i++)
             {
                 XMLElement channel = channels.append_child("channel");
-                channel.append_child_value("label", ChannelLabels[i]);
-                channel.append_child_value("unit", ChannelUnits[i]);
+                channel.append_child_value("label", ModelTargetStreamContract.Labels[i]);
+                channel.append_child_value("unit", ModelTargetStreamContract.Units[i]);
             }
 
             XMLElement acquisition = streamInfo.desc().append_child("acquisition");

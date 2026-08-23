@@ -1,0 +1,18 @@
+{
+  "contract_id": "hololens-model-target",
+  "name": "HoloLensModelTargetPose",
+  "type": "Calibration",
+  "source_id": "hololens2_stair_model_target",
+  "nominal_srate": 0.0,
+  "channel_format": "double64",
+  "channels": [
+    {"label": "PositionX", "unit": "meters"},
+    {"label": "PositionY", "unit": "meters"},
+    {"label": "PositionZ", "unit": "meters"},
+    {"label": "RotationX", "unit": "normalized"},
+    {"label": "RotationY", "unit": "normalized"},
+    {"label": "RotationZ", "unit": "normalized"},
+    {"label": "RotationW", "unit": "normalized"},
+    {"label": "Tracked", "unit": "bool"}
+  ]
+}

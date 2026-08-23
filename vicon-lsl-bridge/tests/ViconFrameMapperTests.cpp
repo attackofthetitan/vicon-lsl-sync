@@ -1,4 +1,4 @@
-#include "ViconFrameMapper.h"
+#include "ViconFrameMapperCompatibility.h"
 #include "TestSupport.h"
 
 #include <cmath>

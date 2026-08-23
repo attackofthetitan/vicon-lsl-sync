@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.10.4 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.10.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,15 +43,20 @@ endif()
 
 add_library(vicon-lsl-bridge-logic STATIC
     src/HoloLensGazeSchema.cpp
+    src/HoloLensModelTargetSchema.cpp
     src/preview/ObjMesh.cpp
     src/preview/PreviewCalibration.cpp
     src/preview/PreviewCsv.cpp
+    src/preview/PreviewFrameAssembler.cpp
     src/preview/PreviewMath.cpp
     src/preview/PreviewRate.cpp
     src/preview/PreviewPlaybackClock.cpp
     src/preview/PreviewParsing.cpp
     src/preview/PreviewXdf.cpp
+    src/preview/PreviewXdfMetadata.cpp
     src/preview/PreviewXdfReader.cpp
+    src/preview/PreviewXdfRecording.cpp
+    src/preview/PreviewXdfTimestamps.cpp
     src/StreamSchema.cpp
     src/CommandLine.cpp
     src/ViconFrameMapper.cpp
@@ -63,6 +68,9 @@ target_compile_features(vicon-lsl-bridge-logic PUBLIC cxx_std_17)
 if(WIN32)
     add_executable(vicon-lsl-bridge-portable-launcher WIN32
         packaging/windows/portable_launcher.cpp
+        packaging/windows/portable_payload.cpp
+        packaging/windows/portable_process.cpp
+        packaging/windows/portable_safe_fs.cpp
     )
     target_compile_features(vicon-lsl-bridge-portable-launcher PRIVATE cxx_std_17)
     target_link_libraries(vicon-lsl-bridge-portable-launcher PRIVATE bcrypt)
@@ -107,6 +115,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     )
 
     add_library(vicon-lsl-bridge-runtime STATIC
+        src/detail/ViconNumericOutlet.cpp
         src/ViconClient.cpp
         src/MarkerStream.cpp
         src/SegmentStream.cpp
@@ -132,17 +141,19 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     if(VICON_LSL_BRIDGE_BUILD_GUI)
         find_package(Qt6 COMPONENTS Core Widgets Network OpenGLWidgets QUIET)
         if(Qt6_FOUND)
-            set(CMAKE_AUTOMOC ON)
-
             add_executable(vicon-lsl-bridge-gui
                 src/gui/main_gui.cpp
                 src/gui/BridgeWindow.cpp
+                src/gui/BridgeWindowSettings.cpp
+                src/gui/BridgeWindowUi.cpp
                 src/gui/LabRecorderClient.cpp
+                src/gui/LabRecorderFilenamePolicy.cpp
                 src/gui/LabRecorderRuntimePolicy.cpp
                 src/gui/PreviewPanel.cpp
                 src/gui/PreviewStreamWorker.cpp
                 src/gui/PreviewWidget.cpp
             )
+            set_target_properties(vicon-lsl-bridge-gui PROPERTIES AUTOMOC ON)
 
             target_link_libraries(vicon-lsl-bridge-gui PRIVATE
                 vicon-lsl-bridge-runtime
@@ -157,121 +168,9 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
             )
 
             if(WIN32)
-                target_link_libraries(vicon-lsl-bridge-gui PRIVATE ws2_32)
-                set_target_properties(vicon-lsl-bridge-gui PROPERTIES WIN32_EXECUTABLE TRUE)
-
-                find_program(VICON_LSL_POWERSHELL pwsh powershell)
-                find_program(VICON_LSL_WINDEPLOYQT windeployqt)
-
-                if(VICON_LSL_DEPLOY_QT_RUNTIME AND VICON_LSL_WINDEPLOYQT AND NOT VICON_LSL_POWERSHELL)
-                    message(FATAL_ERROR
-                        "PowerShell is required to deploy the x64 MSVC runtime after windeployqt")
-                endif()
-
-                if(VICON_LSL_DEPLOY_QT_RUNTIME AND VICON_LSL_WINDEPLOYQT AND VICON_LSL_POWERSHELL)
-                    add_custom_command(TARGET vicon-lsl-bridge-gui POST_BUILD
-                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                            "$<TARGET_FILE:${VICON_LSL_LIB_TARGET}>"
-                            "$<TARGET_FILE_DIR:vicon-lsl-bridge-gui>/$<TARGET_FILE_NAME:${VICON_LSL_LIB_TARGET}>"
-                        COMMAND "${VICON_LSL_WINDEPLOYQT}"
-                            --compiler-runtime
-                            --no-translations
-                            "$<TARGET_FILE:vicon-lsl-bridge-gui>"
-                        COMMAND "${VICON_LSL_POWERSHELL}"
-                            -NoProfile
-                            -ExecutionPolicy Bypass
-                            -File "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/ensure_msvc_runtime.ps1"
-                            -DeployDirectory "$<TARGET_FILE_DIR:vicon-lsl-bridge-gui>"
-                        COMMENT "Deploy Qt and liblsl runtime files next to vicon-lsl-bridge-gui"
-                        VERBATIM
-                    )
-                endif()
-
-                if(VICON_LSL_POWERSHELL AND VICON_LSL_WINDEPLOYQT)
-                    get_filename_component(VICON_LSL_QT_BIN_DIR
-                        "${VICON_LSL_WINDEPLOYQT}" DIRECTORY)
-                    get_filename_component(VICON_LSL_QT_ROOT
-                        "${VICON_LSL_QT_BIN_DIR}" DIRECTORY)
-                    set(VICON_LSL_PACKAGE_QT_LICENSE_ROOT "${VICON_LSL_QT_ROOT}")
-                    if(VICON_LSL_QT_LICENSE_ROOT)
-                        if(NOT EXISTS "${VICON_LSL_QT_LICENSE_ROOT}/LICENSES")
-                            message(FATAL_ERROR
-                                "VICON_LSL_QT_LICENSE_ROOT must contain a LICENSES directory")
-                        endif()
-                        set(VICON_LSL_PACKAGE_QT_LICENSE_ROOT
-                            "${VICON_LSL_QT_LICENSE_ROOT}")
-                    endif()
-                    set(VICON_LSL_PORTABLE_STAGE
-                        "${CMAKE_CURRENT_BINARY_DIR}/vicon-lsl-bridge-gui-portable-stage")
-                    set(VICON_LSL_PORTABLE_PACKAGE_ARGS
-                        -DeployDir "${VICON_LSL_PORTABLE_STAGE}"
-                        -OutputExe "${CMAKE_CURRENT_BINARY_DIR}/vicon-lsl-bridge-gui-portable.exe"
-                        -LauncherExe "$<TARGET_FILE:vicon-lsl-bridge-portable-launcher>"
-                        -StairModelDir "${CMAKE_CURRENT_LIST_DIR}/assets/stair_model"
-                        -ViconSdkDir "${CMAKE_CURRENT_LIST_DIR}/external/vicon-datastream-sdk"
-                        -LabRecorderSourceDir "${CMAKE_CURRENT_LIST_DIR}/../labrecorder"
-                        -QtRootDir "${VICON_LSL_PACKAGE_QT_LICENSE_ROOT}"
-                    )
-                    if(DEFINED liblsl_SOURCE_DIR AND EXISTS "${liblsl_SOURCE_DIR}")
-                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
-                            -LiblslSourceDir "${liblsl_SOURCE_DIR}")
-                    endif()
-                    if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET AND
-                       EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
-                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
-                            -BoostRootDir
-                            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
-                    endif()
-                    if(VICON_LSL_LABRECORDER_DEPLOY_DIR)
-                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
-                            -LabRecorderDeployDir "${VICON_LSL_LABRECORDER_DEPLOY_DIR}")
-                    endif()
-                    if(VICON_LSL_ENIGMA_PROJECT)
-                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
-                            -Mode Enigma
-                            -ProjectFile "${VICON_LSL_ENIGMA_PROJECT}")
-                    endif()
-                    if(VICON_LSL_ENIGMA_CONSOLE)
-                        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
-                            -EnigmaConsole "${VICON_LSL_ENIGMA_CONSOLE}")
-                    endif()
-
-                    add_custom_target(vicon-lsl-bridge-gui-portable
-                        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${VICON_LSL_PORTABLE_STAGE}"
-                        COMMAND "${CMAKE_COMMAND}" -E make_directory "${VICON_LSL_PORTABLE_STAGE}"
-                        COMMAND "${CMAKE_COMMAND}" -E touch
-                            "${VICON_LSL_PORTABLE_STAGE}/.vicon-lsl-bridge-package-stage"
-                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                            "$<TARGET_FILE:vicon-lsl-bridge-gui>"
-                            "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge-gui.exe"
-                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                            "$<TARGET_FILE:vicon-lsl-bridge>"
-                            "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge.exe"
-                        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                            "$<TARGET_FILE:${VICON_LSL_LIB_TARGET}>"
-                            "${VICON_LSL_PORTABLE_STAGE}/$<TARGET_FILE_NAME:${VICON_LSL_LIB_TARGET}>"
-                        COMMAND "${VICON_LSL_WINDEPLOYQT}"
-                            --compiler-runtime
-                            --no-translations
-                            --dir "${VICON_LSL_PORTABLE_STAGE}"
-                            "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge-gui.exe"
-                        COMMAND "${VICON_LSL_POWERSHELL}"
-                            -NoProfile
-                            -ExecutionPolicy Bypass
-                            -File "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/ensure_msvc_runtime.ps1"
-                            -DeployDirectory "${VICON_LSL_PORTABLE_STAGE}"
-                        COMMAND "${VICON_LSL_POWERSHELL}"
-                            -ExecutionPolicy Bypass
-                            -File "${CMAKE_CURRENT_LIST_DIR}/packaging/windows/package_gui_single_exe.ps1"
-                            ${VICON_LSL_PORTABLE_PACKAGE_ARGS}
-                        DEPENDS vicon-lsl-bridge vicon-lsl-bridge-gui vicon-lsl-bridge-portable-launcher
-                        COMMENT "Package vicon-lsl-bridge-gui as a single portable Windows executable"
-                        VERBATIM
-                    )
-                else()
-                    message(STATUS
-                        "pwsh/powershell or windeployqt not found - portable GUI target unavailable")
-                endif()
+                include(cmake/WindowsPackaging.cmake)
+                vicon_lsl_configure_windows_gui_packaging(
+                    "${CMAKE_CURRENT_LIST_DIR}" "${VICON_LSL_LIB_TARGET}")
             endif()
 
             message(STATUS "Qt6 found - building vicon-lsl-bridge-gui")
@@ -285,92 +184,4 @@ else()
     message(STATUS "Vicon/LSL runtime targets disabled - building dependency-light targets only")
 endif()
 
-include(CTest)
-if(BUILD_TESTING)
-    set(VICON_LSL_BRIDGE_TEST_SOURCES
-        tests/StreamSchemaTests.cpp
-        tests/CommandLineTests.cpp
-        tests/PreviewCoreTests.cpp
-        tests/PreviewRateTests.cpp
-        tests/ViconFrameMapperTests.cpp
-    )
-
-    find_package(Catch2 3 QUIET)
-    if(NOT TARGET Catch2::Catch2WithMain AND VICON_LSL_BRIDGE_FETCH_CATCH2)
-        include(FetchContent)
-        FetchContent_Declare(Catch2
-            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG        6ee0826dcae55ed1e06b2c5701981221e979e1e6 # v3.15.0
-            GIT_SHALLOW    TRUE
-        )
-        FetchContent_MakeAvailable(Catch2)
-    endif()
-
-    if(TARGET Catch2::Catch2WithMain)
-        add_executable(vicon-lsl-bridge-logic-tests ${VICON_LSL_BRIDGE_TEST_SOURCES})
-        target_compile_definitions(vicon-lsl-bridge-logic-tests PRIVATE VICON_LSL_USE_CATCH2)
-        target_link_libraries(vicon-lsl-bridge-logic-tests PRIVATE
-            vicon-lsl-bridge-logic
-            Catch2::Catch2WithMain
-        )
-        set_target_properties(vicon-lsl-bridge-logic-tests PROPERTIES AUTOMOC OFF)
-        include(Catch)
-        catch_discover_tests(vicon-lsl-bridge-logic-tests)
-    else()
-        message(STATUS "Catch2 not found - using bundled dependency-light test harness")
-        add_executable(vicon-lsl-bridge-logic-tests
-            tests/TestMain.cpp
-            ${VICON_LSL_BRIDGE_TEST_SOURCES}
-        )
-        target_link_libraries(vicon-lsl-bridge-logic-tests PRIVATE vicon-lsl-bridge-logic)
-        set_target_properties(vicon-lsl-bridge-logic-tests PROPERTIES AUTOMOC OFF)
-        add_test(NAME vicon-lsl-bridge-logic-tests COMMAND vicon-lsl-bridge-logic-tests)
-    endif()
-
-    if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
-        set(VICON_LSL_QT_TEST_ENV
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-        if(NOT WIN32)
-            list(APPEND VICON_LSL_QT_TEST_ENV
-                "QT_QPA_PLATFORM=set:offscreen")
-        endif()
-
-        add_executable(vicon-lsl-labrecorder-tests
-            tests/test_labrecorder_client.cpp
-            src/gui/LabRecorderClient.cpp
-            src/gui/LabRecorderRuntimePolicy.cpp
-        )
-        target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
-        target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE Qt6::Core Qt6::Network)
-        add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)
-        set_tests_properties(vicon-lsl-labrecorder-tests PROPERTIES
-            TIMEOUT 30
-            ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
-        )
-
-        if(TARGET vicon-lsl-bridge-gui)
-            set(VICON_LSL_GUI_TEST_ENV
-                ${VICON_LSL_QT_TEST_ENV}
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
-            add_test(NAME vicon-lsl-bridge-gui-test
-                COMMAND vicon-lsl-bridge-gui --test)
-            set_tests_properties(vicon-lsl-bridge-gui-test PROPERTIES
-                TIMEOUT 30
-                ENVIRONMENT_MODIFICATION "${VICON_LSL_GUI_TEST_ENV}"
-            )
-        endif()
-    endif()
-
-    if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
-        add_executable(vicon-lsl-stream-recovery-tests
-            tests/test_stream_recovery.cpp
-        )
-        target_include_directories(vicon-lsl-stream-recovery-tests PRIVATE src)
-        target_link_libraries(vicon-lsl-stream-recovery-tests PRIVATE
-            vicon-lsl-bridge-runtime
-        )
-        add_test(NAME vicon-lsl-stream-recovery-tests
-            COMMAND vicon-lsl-stream-recovery-tests)
-        set_tests_properties(vicon-lsl-stream-recovery-tests PROPERTIES TIMEOUT 30)
-    endif()
-endif()
+include(cmake/Testing.cmake)

@@ -310,7 +310,7 @@ void PreviewPanel::startPreview() {
     config.gaze_transform = gazeTransform();
 
     worker_ = new PreviewStreamWorker(config, this);
-    worker_state_ = WorkerState::Running;
+    worker_stopping_ = false;
     PreviewStreamWorker* const started_worker = worker_;
     connect(worker_, &PreviewStreamWorker::frameReady, widget_, &PreviewWidget::setFrame);
     connect(worker_, &PreviewStreamWorker::targetPoseReady, this, &PreviewPanel::handleTargetPose);
@@ -321,7 +321,7 @@ void PreviewPanel::startPreview() {
             return;
         }
         worker_ = nullptr;
-        worker_state_ = WorkerState::Idle;
+        worker_stopping_ = false;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
         open_csv_button_->setEnabled(true);
@@ -341,16 +341,16 @@ void PreviewPanel::startPreview() {
 void PreviewPanel::stopPreview() {
     resetCalibrationSession();
     if (!worker_) {
-        worker_state_ = WorkerState::Idle;
+        worker_stopping_ = false;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
         return;
     }
-    if (worker_state_ == WorkerState::Stopping) {
+    if (worker_stopping_) {
         return;
     }
 
-    worker_state_ = WorkerState::Stopping;
+    worker_stopping_ = true;
     PreviewStreamWorker* const stopping_worker = worker_;
     stopping_worker->requestInterruption();
     start_button_->setEnabled(false);

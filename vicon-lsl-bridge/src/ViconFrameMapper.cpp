@@ -1,7 +1,12 @@
-#include "ViconFrameMapper.h"
+#include "ViconDiagnostics.h"
+#include "ViconFrameMapping.h"
+#include "ViconTimestamp.h"
 
 #include <cmath>
+#include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace vicon_lsl {
 DiagnosticAggregator::DiagnosticAggregator(unsigned int repeat_interval)

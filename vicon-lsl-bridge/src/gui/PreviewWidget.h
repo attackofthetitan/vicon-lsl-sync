@@ -36,7 +36,6 @@ protected:
 private:
     struct ProjectedPoint {
         QPointF point;
-        double depth = 0.0;
     };
 
     struct Bounds {
@@ -53,8 +52,6 @@ private:
     std::optional<PreviewVec3> gazeEndpoint(const PreviewGazeRay& ray, const Bounds& bounds) const;
 
     PreviewFrame frame_;
-    PreviewMesh stair_mesh_;
-    PreviewTransformProfile stair_transform_;
     std::vector<PreviewTriangle> stair_triangles_;
     Bounds view_bounds_;
     std::map<std::string, std::deque<PreviewVec3>> marker_trails_;

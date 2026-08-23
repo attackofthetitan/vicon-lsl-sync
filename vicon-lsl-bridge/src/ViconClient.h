@@ -1,5 +1,7 @@
 #pragma once
 
+// Preserve the historical transitive mapper surface for source consumers of
+// this public header. Runtime implementation files use the focused headers.
 #include "ViconFrameMapper.h"
 
 #include <DataStreamClient.h>

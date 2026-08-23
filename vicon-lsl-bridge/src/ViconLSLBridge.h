@@ -4,12 +4,28 @@
 #include "MarkerStream.h"
 #include "SegmentStream.h"
 #include "ViconClient.h"
-#include "ViconFrameMapper.h"
+#include "ViconDiagnostics.h"
 
 #include <atomic>
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace vicon_lsl {
+
+struct ViconTimestampState;
+
+namespace bridge_internal {
+
+class BridgeTestAccess;
+class ViconClient;
+struct Collaborators;
+enum class ConnectedSessionEnd;
+
+} // namespace bridge_internal
+} // namespace vicon_lsl
 
 enum class BridgeState {
     Disconnected,
@@ -36,8 +52,16 @@ public:
     void setStatusCallback(StatusCallback callback);
 
 private:
+    friend class vicon_lsl::bridge_internal::BridgeTestAccess;
+
+    ViconLSLBridge(const Config& config,
+                   vicon_lsl::bridge_internal::Collaborators collaborators);
     void connectWithRetry();
     void waitForRetry();
+    vicon_lsl::bridge_internal::ConnectedSessionEnd runConnectedSession(
+        vicon_lsl::ViconTimestampState& timestamp_state);
+    void resetConnectedSession(
+        vicon_lsl::bridge_internal::ConnectedSessionEnd end_reason);
     bool initializeStreams();
     bool checkLayoutChanged();
     bool streamFrame(double timestamp);
@@ -46,9 +70,11 @@ private:
                            BridgeState state = BridgeState::Streaming);
 
     Config config_;
-    ViconClient client_;
+    std::shared_ptr<vicon_lsl::bridge_internal::ViconClient> client_;
     MarkerStream marker_stream_;
     SegmentStream segment_stream_;
+    std::function<double()> clock_;
+    std::function<void(std::chrono::milliseconds)> wait_;
     std::atomic<bool> running_{true};
     StatusCallback status_callback_;
 

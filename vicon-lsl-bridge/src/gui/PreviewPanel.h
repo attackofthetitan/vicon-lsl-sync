@@ -43,12 +43,6 @@ private slots:
     void handleTargetPose(vicon_lsl::CalibrationTargetPose pose);
 
 private:
-    enum class WorkerState {
-        Idle,
-        Running,
-        Stopping,
-    };
-
     enum class PendingRecordingOpen {
         None,
         Csv,
@@ -95,7 +89,7 @@ private:
     QElapsedTimer playback_elapsed_;
     PreviewPlaybackClock playback_clock_;
     PreviewStreamWorker* worker_ = nullptr;
-    WorkerState worker_state_ = WorkerState::Idle;
+    bool worker_stopping_ = false;
     PendingRecordingOpen pending_recording_open_ = PendingRecordingOpen::None;
     QString pending_recording_path_;
     bool stair_model_loaded_ = false;

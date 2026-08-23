@@ -1,6 +1,7 @@
 #include "preview/PreviewParsing.h"
 
 #include "HoloLensGazeSchema.h"
+#include "HoloLensModelTargetSchema.h"
 #include "StreamDefaults.h"
 #include "preview/PreviewMath.h"
 
@@ -138,12 +139,14 @@ std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
         }
         return labels;
     }
-    if (role == PreviewStreamRole::HoloLensCalibrationTarget && channel_count == 8) {
-        return {
-            "PositionX", "PositionY", "PositionZ",
-            "RotationX", "RotationY", "RotationZ", "RotationW",
-            "Tracked",
-        };
+    if (role == PreviewStreamRole::HoloLensCalibrationTarget &&
+        channel_count == kHoloLensModelTargetChannelCount) {
+        std::vector<std::string> labels;
+        labels.reserve(kHoloLensModelTargetChannelCount);
+        for (const auto& channel : holoLensModelTargetChannels()) {
+            labels.emplace_back(channel.label);
+        }
+        return labels;
     }
     return {};
 }
