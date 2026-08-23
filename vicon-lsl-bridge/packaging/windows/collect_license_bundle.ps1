@@ -22,7 +22,10 @@ $ErrorActionPreference = "Stop"
 
 $packagingSafetyModule = (Resolve-Path -LiteralPath (
     Join-Path $PSScriptRoot "PackagingSafety.psm1") -ErrorAction Stop).Path
-Import-Module -Name $packagingSafetyModule -Scope Local -Force `
+# This script is invoked from package_gui_single_exe.ps1 in the same process.
+# Reuse its module instance so the child scope cannot invalidate the parent's
+# exported commands by force-reloading the module.
+Import-Module -Name $packagingSafetyModule -Scope Local `
     -DisableNameChecking -ErrorAction Stop
 
 $expectedRevisions = @{

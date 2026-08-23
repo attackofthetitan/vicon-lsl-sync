@@ -92,6 +92,14 @@ Assert-Equal 0 @($module.ExportedAliases.Keys).Count `
 Assert-Equal 0 @($module.ExportedVariables.Keys).Count `
     "PackagingSafety unexpectedly exported variables."
 
+& {
+    Import-Module -Name $modulePath -Scope Local `
+        -DisableNameChecking -ErrorAction Stop
+}
+Assert-True ($null -ne (Get-Command -Name Assert-NoReparseTree `
+        -CommandType Function -ErrorAction SilentlyContinue)) `
+    "A child-scope module import removed the parent packaging commands."
+
 $mandatoryDlls = @(Get-MandatoryMsvcRuntimeDllNames)
 Assert-Equal "msvcp140.dll|vcruntime140.dll|vcruntime140_1.dll" `
     ($mandatoryDlls -join "|") "Mandatory MSVC runtime list changed."
