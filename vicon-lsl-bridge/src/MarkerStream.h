@@ -1,8 +1,10 @@
 #pragma once
 
+// Keep the mapper umbrella transitively available as it was before the
+// implementation split; existing source consumers may include only this
+// facade.
 #include "ViconFrameMapper.h"
-#include "StreamPushResult.h"
-#include "StreamOutlet.h"
+#include "detail/ViconNumericOutlet.h"
 
 #include <lsl_cpp.h>
 #include <memory>
@@ -26,10 +28,5 @@ public:
     bool isInitialized() const;
 
 private:
-    StreamOutletFactory outlet_factory_;
-    std::unique_ptr<StreamOutlet> outlet_;
-    std::unique_ptr<lsl::stream_info> info_;
-    std::vector<std::pair<std::string, std::string>> marker_names_;
-    std::vector<double> sample_buffer_;
-    bool configured_ = false;
+    vicon_lsl::detail::ViconNumericOutlet outlet_;
 };

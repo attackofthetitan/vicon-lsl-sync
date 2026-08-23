@@ -1,14 +1,13 @@
 #include "gui/PreviewStreamWorker.h"
 
-#include "preview/PreviewMath.h"
 #include "preview/PreviewCalibration.h"
+#include "preview/PreviewFrameAssembler.h"
 #include "preview/PreviewParsing.h"
 
 #include <lsl_cpp.h>
 
 #include <QElapsedTimer>
 
-#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <utility>
@@ -145,10 +144,41 @@ void PreviewStreamWorker::run() {
                 emit targetPoseReady(*pose);
             }
         }
-        if (pollStream(*markers_, now)) {
-            emitFrameFromMarker(now);
-        } else if (segments_updated || gaze_updated) {
-            emitFallbackFrame(now, segments_updated, gaze_updated);
+        const bool markers_updated = pollStream(*markers_, now);
+        if (markers_updated || segments_updated || gaze_updated) {
+            const PreviewTransformProfile gaze_transform = currentGazeTransform();
+            const PreviewStreamSnapshot marker_snapshot{
+                markers_->labels,
+                markers_->latest_sample,
+                markers_->transform,
+                markers_->latest_timestamp,
+                markers_->connected(),
+                streamIsFresh(*markers_, now),
+                markers_updated};
+            const PreviewStreamSnapshot segment_snapshot{
+                segments_->labels,
+                segments_->latest_sample,
+                segments_->transform,
+                segments_->latest_timestamp,
+                segments_->connected(),
+                streamIsFresh(*segments_, now),
+                segments_updated};
+            const PreviewStreamSnapshot gaze_snapshot{
+                gaze_->labels,
+                gaze_->latest_sample,
+                gaze_transform,
+                gaze_->latest_timestamp,
+                gaze_->connected(),
+                streamIsFresh(*gaze_, now),
+                gaze_updated};
+            const PreviewFrameSnapshot frame_snapshot{
+                marker_snapshot,
+                segment_snapshot,
+                gaze_snapshot,
+                config_.match_tolerance_seconds};
+            if (auto frame = assemblePreviewFrame(frame_snapshot)) {
+                emit frameReady(std::move(*frame));
+            }
         }
 
         if (now - last_status_ms_ >= kStatusIntervalMs) {
@@ -256,81 +286,9 @@ bool PreviewStreamWorker::calibrationFramesCompatible() const {
                                                   calibration_target_->coordinate_frame);
 }
 
-void PreviewStreamWorker::emitFrameFromMarker(qint64 now_ms) {
-    PreviewFrame frame;
-    frame.timestamp = markers_->latest_timestamp;
-    frame.marker_stream_present = markers_->connected();
-    frame.segment_stream_present = segments_->connected();
-    frame.gaze_stream_present = gaze_->connected();
-    frame.markers = parseMarkerSample(markers_->labels,
-                                      markers_->latest_sample,
-                                      markers_->transform);
-    if (streamIsFresh(*segments_, now_ms) &&
-        timestampWithinTolerance(frame.timestamp,
-                                 segments_->latest_timestamp,
-                                 config_.match_tolerance_seconds)) {
-        frame.segments = parseSegmentSample(segments_->labels,
-                                            segments_->latest_sample,
-                                            segments_->transform);
-    }
-    if (streamIsFresh(*gaze_, now_ms) &&
-        timestampWithinTolerance(frame.timestamp,
-                                 gaze_->latest_timestamp,
-                                 config_.match_tolerance_seconds)) {
-        PreviewTransformProfile gaze_transform;
-        {
-            std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
-            gaze_transform = gazeTransformForCoordinateFrame(
-                gaze_->transform,
-                gaze_->coordinate_frame);
-        }
-        frame.gaze_rays = parseGazeSample(gaze_->labels, gaze_->latest_sample, gaze_transform);
-    }
-    emit frameReady(std::move(frame));
-}
-
-void PreviewStreamWorker::emitFallbackFrame(qint64 now_ms,
-                                            bool segments_updated,
-                                            bool gaze_updated) {
-    const bool segments_fresh = streamIsFresh(*segments_, now_ms);
-    const bool gaze_fresh = streamIsFresh(*gaze_, now_ms);
-    if ((!segments_updated || !segments_fresh) && (!gaze_updated || !gaze_fresh)) {
-        return;
-    }
-
-    PreviewFrame frame;
-    if (segments_updated && segments_fresh && gaze_updated && gaze_fresh) {
-        frame.timestamp = (std::max)(segments_->latest_timestamp, gaze_->latest_timestamp);
-    } else if (segments_updated && segments_fresh) {
-        frame.timestamp = segments_->latest_timestamp;
-    } else {
-        frame.timestamp = gaze_->latest_timestamp;
-    }
-    frame.marker_stream_present = markers_->connected();
-    frame.segment_stream_present = segments_->connected();
-    frame.gaze_stream_present = gaze_->connected();
-    if (segments_fresh &&
-        timestampWithinTolerance(frame.timestamp,
-                                 segments_->latest_timestamp,
-                                 config_.match_tolerance_seconds)) {
-        frame.segments = parseSegmentSample(segments_->labels,
-                                            segments_->latest_sample,
-                                            segments_->transform);
-    }
-    if (gaze_fresh &&
-        timestampWithinTolerance(frame.timestamp,
-                                 gaze_->latest_timestamp,
-                                 config_.match_tolerance_seconds)) {
-        PreviewTransformProfile gaze_transform;
-        {
-            std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
-            gaze_transform = gazeTransformForCoordinateFrame(
-                gaze_->transform,
-                gaze_->coordinate_frame);
-        }
-        frame.gaze_rays = parseGazeSample(gaze_->labels, gaze_->latest_sample, gaze_transform);
-    }
-    emit frameReady(std::move(frame));
+PreviewTransformProfile PreviewStreamWorker::currentGazeTransform() const {
+    std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
+    return gazeTransformForCoordinateFrame(gaze_->transform, gaze_->coordinate_frame);
 }
 
 void PreviewStreamWorker::updateStatus(qint64 now_ms) {

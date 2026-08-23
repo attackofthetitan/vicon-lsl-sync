@@ -1,4 +1,7 @@
 #include "StreamSchema.h"
+#include "HoloLensGazeSchema.h"
+#include "HoloLensModelTargetSchema.h"
+#include "StreamDefaults.h"
 #include "TestSupport.h"
 
 #include <string>
@@ -70,4 +73,29 @@ TEST_CASE("Sample flattening preserves marker and segment order") {
     REQUIRE_EQ(segment_sample[6], 1.0);
     REQUIRE_EQ(segment_sample[7], 4.0);
     REQUIRE_EQ(segment_sample[13], 0.9);
+}
+
+TEST_CASE("Generated HoloLens schemas preserve stream identity and channel metadata") {
+    REQUIRE_EQ(vicon_lsl::kHoloLensGazeStreamName, std::string_view("HoloLensGaze"));
+    REQUIRE_EQ(vicon_lsl::kHoloLensGazeStreamType, std::string_view("Gaze"));
+    REQUIRE_EQ(vicon_lsl::kHoloLensGazeSourceId, std::string_view("hololens2_gaze"));
+    REQUIRE_EQ(vicon_lsl::holoLensGazeChannels().size(),
+               vicon_lsl::kHoloLensGazeChannelCount);
+    REQUIRE_EQ(vicon_lsl::stream_defaults::HoloLensGaze,
+               std::string("HoloLensGaze"));
+
+    REQUIRE_EQ(vicon_lsl::kHoloLensModelTargetStreamName,
+               std::string_view("HoloLensModelTargetPose"));
+    REQUIRE_EQ(vicon_lsl::kHoloLensModelTargetStreamType,
+               std::string_view("Calibration"));
+    REQUIRE_EQ(vicon_lsl::kHoloLensModelTargetSourceId,
+               std::string_view("hololens2_stair_model_target"));
+    REQUIRE_EQ(vicon_lsl::holoLensModelTargetChannels().size(),
+               vicon_lsl::kHoloLensModelTargetChannelCount);
+    REQUIRE_EQ(vicon_lsl::holoLensModelTargetChannels().front().label,
+               std::string_view("PositionX"));
+    REQUIRE_EQ(vicon_lsl::holoLensModelTargetChannels().back().label,
+               std::string_view("Tracked"));
+    REQUIRE_EQ(vicon_lsl::stream_defaults::HoloLensModelTargetPose,
+               std::string("HoloLensModelTargetPose"));
 }

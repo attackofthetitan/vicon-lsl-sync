@@ -53,9 +53,7 @@ PreviewWidget::PreviewWidget(QWidget* parent) : QOpenGLWidget(parent) {
 }
 
 void PreviewWidget::setStairMesh(const PreviewMesh& mesh, const PreviewTransformProfile& transform) {
-    stair_mesh_ = mesh;
-    stair_transform_ = transform;
-    stair_triangles_ = triangulateMesh(stair_mesh_, stair_transform_);
+    stair_triangles_ = triangulateMesh(mesh, transform);
     resetViewFit();
     refit_on_next_frame_ = true;
     update();
@@ -257,7 +255,6 @@ PreviewWidget::ProjectedPoint PreviewWidget::project(const PreviewVec3& point, c
     return {
         QPointF(width() * 0.5 + dot(view, right) * scale,
                 height() * 0.56 - dot(view, up) * scale),
-        dot(view, camera_direction),
     };
 }
 

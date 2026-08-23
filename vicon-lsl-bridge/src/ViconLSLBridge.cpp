@@ -1,4 +1,7 @@
 #include "ViconLSLBridge.h"
+#include "ViconLSLBridgeInternal.h"
+#include "ViconClient.h"
+#include "ViconFrameMapper.h"
 
 #include <lsl_cpp.h>
 
@@ -7,6 +10,7 @@
 #include <chrono>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -20,11 +24,108 @@ namespace {
 
 constexpr const char* kSourceIdPrefix = "vicon_";
 
+class ProductionViconClient final : public vicon_lsl::bridge_internal::ViconClient {
+public:
+    explicit ProductionViconClient(const std::string& server_address)
+        : client_(server_address) {}
+
+    bool connect() override { return client_.connect(); }
+    void disconnect() override { client_.disconnect(); }
+    bool isConnected() const override { return client_.isConnected(); }
+    bool getFrame() override { return client_.getFrame(); }
+    unsigned int frameNumber() const override { return client_.frameNumber(); }
+    double frameTimestamp() const override { return client_.frameTimestamp(); }
+    double frameRate() const override { return client_.frameRate(); }
+
+    vicon_lsl::CountRead readSubjectCount() const override {
+        return client_.readSubjectCount();
+    }
+    vicon_lsl::NameRead readSubjectName(unsigned int index) const override {
+        return client_.readSubjectName(index);
+    }
+    vicon_lsl::CountRead readMarkerCount(const std::string& subject) const override {
+        return client_.readMarkerCount(subject);
+    }
+    vicon_lsl::NameRead readMarkerName(const std::string& subject,
+                                       unsigned int index) const override {
+        return client_.readMarkerName(subject, index);
+    }
+    vicon_lsl::MarkerTranslationRead readMarkerGlobalTranslation(
+        const std::string& subject,
+        const std::string& marker) override {
+        return client_.readMarkerGlobalTranslation(subject, marker);
+    }
+    vicon_lsl::CountRead readSegmentCount(const std::string& subject) const override {
+        return client_.readSegmentCount(subject);
+    }
+    vicon_lsl::NameRead readSegmentName(const std::string& subject,
+                                        unsigned int index) const override {
+        return client_.readSegmentName(subject, index);
+    }
+    vicon_lsl::SegmentTranslationRead readSegmentGlobalTranslation(
+        const std::string& subject,
+        const std::string& segment) override {
+        return client_.readSegmentGlobalTranslation(subject, segment);
+    }
+    vicon_lsl::SegmentRotationRead readSegmentGlobalRotationQuaternion(
+        const std::string& subject,
+        const std::string& segment) override {
+        return client_.readSegmentGlobalRotationQuaternion(subject, segment);
+    }
+
+private:
+    ::ViconClient client_;
+};
+
+vicon_lsl::bridge_internal::Collaborators makeProductionCollaborators(
+    const Config& config) {
+    vicon_lsl::bridge_internal::Collaborators collaborators;
+    collaborators.client = std::make_shared<ProductionViconClient>(config.vicon_server);
+    collaborators.outlet_factory = createLslStreamOutlet;
+    collaborators.clock = [] { return lsl::local_clock(); };
+    collaborators.wait = [](std::chrono::milliseconds duration) {
+        std::this_thread::sleep_for(duration);
+    };
+    return collaborators;
+}
+
+bool reachedStreaming(vicon_lsl::bridge_internal::ConnectedSessionEnd end_reason) {
+    using End = vicon_lsl::bridge_internal::ConnectedSessionEnd;
+    return end_reason != End::InitialFrameFailed &&
+           end_reason != End::InitialStreamInitializationFailed;
+}
+
 } // namespace
 
 ViconLSLBridge::ViconLSLBridge(const Config& config)
+    : ViconLSLBridge(config, makeProductionCollaborators(config)) {}
+
+ViconLSLBridge::ViconLSLBridge(
+    const Config& config,
+    vicon_lsl::bridge_internal::Collaborators collaborators)
     : config_(config),
-      client_(config.vicon_server) {}
+      client_(std::move(collaborators.client)),
+      marker_stream_(collaborators.outlet_factory),
+      segment_stream_(std::move(collaborators.outlet_factory)),
+      clock_(std::move(collaborators.clock)),
+      wait_(std::move(collaborators.wait)) {
+    if (!client_) {
+        throw std::invalid_argument("Vicon bridge client collaborator is required");
+    }
+    if (!clock_) {
+        throw std::invalid_argument("Vicon bridge clock collaborator is required");
+    }
+    if (!wait_) {
+        throw std::invalid_argument("Vicon bridge wait collaborator is required");
+    }
+}
+
+std::unique_ptr<ViconLSLBridge> vicon_lsl::bridge_internal::BridgeTestAccess::create(
+    const Config& config,
+    Collaborators collaborators) {
+    return std::unique_ptr<ViconLSLBridge>(
+        new ViconLSLBridge(config, std::move(collaborators)));
+}
 
 void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
     status_callback_ = std::move(callback);
@@ -57,77 +158,10 @@ void ViconLSLBridge::run() {
             break;
         }
 
-        if (!client_.getFrame()) {
-            std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
-            reportStatus(BridgeState::Connecting, "Failed to get initial frame, reconnecting");
-            client_.disconnect();
-            continue;
-        }
-        frame_count_ = client_.frameNumber();
-
-        if (!initializeStreams()) {
-            reportStatus(BridgeState::Connecting, last_diagnostic_message_);
-            client_.disconnect();
-            waitForRetry();
-            continue;
-        }
-
-        std::cout << "Streaming started" << std::endl;
-        reportStatus(BridgeState::Streaming, "Streaming started");
-        while (running_ && client_.isConnected()) {
-            if (!client_.getFrame()) {
-                std::cerr << "Lost connection, will reconnect" << std::endl;
-                reportStatus(BridgeState::Connecting, "Lost connection, will reconnect");
-                break;
-            }
-            frame_count_ = client_.frameNumber();
-
-            double timestamp = 0.0;
-            bool timestamp_adjusted = false;
-            if (!vicon_lsl::enforceViconTimestamp(
-                    client_.frameTimestamp(),
-                    lsl::local_clock(),
-                    timestamp_state,
-                    timestamp,
-                    &timestamp_adjusted)) {
-                std::cerr << "Unable to obtain a finite Vicon frame timestamp" << std::endl;
-                continue;
-            }
-            if (timestamp_adjusted) {
-                std::cerr << "Adjusted non-monotonic Vicon frame timestamp" << std::endl;
-            }
-            if (!streamFrame(timestamp)) {
-                reportStatus(BridgeState::Connecting,
-                             "LSL outlet failed; reconnecting and recreating streams");
-                break;
-            }
-
-            if (++frames_since_layout_check_ >= 100) {
-                frames_since_layout_check_ = 0;
-                reportStatus(BridgeState::Streaming);
-                if (checkLayoutChanged()) {
-                    std::cout << "Layout changed, reinitializing streams" << std::endl;
-                    marker_stream_.destroy();
-                    segment_stream_.destroy();
-                    if (!initializeStreams()) {
-                        reportStatus(BridgeState::Connecting, last_diagnostic_message_);
-                        break;
-                    }
-                    reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
-                }
-            }
-        }
-
-        marker_stream_.destroy();
-        segment_stream_.destroy();
-        client_.disconnect();
-        frame_count_ = 0;
-        frames_since_layout_check_ = 0;
-        known_layout_ = {};
-        diagnostic_aggregator_.clear();
-        last_diagnostic_message_.clear();
-        reportStatus(BridgeState::Disconnected, "Disconnected");
-        if (running_) {
+        const auto end_reason = runConnectedSession(timestamp_state);
+        resetConnectedSession(end_reason);
+        if (running_ &&
+            end_reason != vicon_lsl::bridge_internal::ConnectedSessionEnd::InitialFrameFailed) {
             waitForRetry();
         }
     }
@@ -136,9 +170,92 @@ void ViconLSLBridge::run() {
     std::cout << "Stopped" << std::endl;
 }
 
+vicon_lsl::bridge_internal::ConnectedSessionEnd
+ViconLSLBridge::runConnectedSession(vicon_lsl::ViconTimestampState& timestamp_state) {
+    using End = vicon_lsl::bridge_internal::ConnectedSessionEnd;
+
+    if (!client_->getFrame()) {
+        std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
+        reportStatus(BridgeState::Connecting, "Failed to get initial frame, reconnecting");
+        return End::InitialFrameFailed;
+    }
+    frame_count_ = client_->frameNumber();
+
+    if (!initializeStreams()) {
+        reportStatus(BridgeState::Connecting, last_diagnostic_message_);
+        return End::InitialStreamInitializationFailed;
+    }
+
+    std::cout << "Streaming started" << std::endl;
+    reportStatus(BridgeState::Streaming, "Streaming started");
+    while (running_ && client_->isConnected()) {
+        if (!client_->getFrame()) {
+            std::cerr << "Lost connection, will reconnect" << std::endl;
+            reportStatus(BridgeState::Connecting, "Lost connection, will reconnect");
+            return End::FrameReadFailed;
+        }
+        frame_count_ = client_->frameNumber();
+
+        double timestamp = 0.0;
+        bool timestamp_adjusted = false;
+        if (!vicon_lsl::enforceViconTimestamp(
+                client_->frameTimestamp(),
+                clock_(),
+                timestamp_state,
+                timestamp,
+                &timestamp_adjusted)) {
+            std::cerr << "Unable to obtain a finite Vicon frame timestamp" << std::endl;
+            continue;
+        }
+        if (timestamp_adjusted) {
+            std::cerr << "Adjusted non-monotonic Vicon frame timestamp" << std::endl;
+        }
+        if (!streamFrame(timestamp)) {
+            reportStatus(BridgeState::Connecting,
+                         "LSL outlet failed; reconnecting and recreating streams");
+            return End::OutletFailed;
+        }
+
+        if (++frames_since_layout_check_ >= 100) {
+            frames_since_layout_check_ = 0;
+            reportStatus(BridgeState::Streaming);
+            if (checkLayoutChanged()) {
+                std::cout << "Layout changed, reinitializing streams" << std::endl;
+                marker_stream_.destroy();
+                segment_stream_.destroy();
+                if (!initializeStreams()) {
+                    reportStatus(BridgeState::Connecting, last_diagnostic_message_);
+                    return End::LayoutStreamInitializationFailed;
+                }
+                reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
+            }
+        }
+    }
+
+    return running_ ? End::ClientDisconnected : End::StopRequested;
+}
+
+void ViconLSLBridge::resetConnectedSession(
+    vicon_lsl::bridge_internal::ConnectedSessionEnd end_reason) {
+    if (!reachedStreaming(end_reason)) {
+        client_->disconnect();
+        return;
+    }
+
+    marker_stream_.destroy();
+    segment_stream_.destroy();
+    client_->disconnect();
+    frame_count_ = 0;
+    frames_since_layout_check_ = 0;
+    known_layout_ = {};
+    diagnostic_aggregator_.clear();
+    last_diagnostic_message_.clear();
+    reportStatus(BridgeState::Disconnected, "Disconnected");
+}
+
 void ViconLSLBridge::connectWithRetry() {
     reportStatus(BridgeState::Connecting, "Connecting to " + config_.vicon_server);
-    while (running_ && !client_.connect()) {
+    while (running_ && !client_->connect()) {
         reportStatus(
             BridgeState::Connecting,
             "Retrying in " + std::to_string(config_.reconnect_interval_ms) + "ms");
@@ -150,13 +267,13 @@ void ViconLSLBridge::waitForRetry() {
     int remaining_ms = config_.reconnect_interval_ms;
     while (running_ && remaining_ms > 0) {
         const int sleep_ms = (std::min)(remaining_ms, 100);
-        std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
+        wait_(std::chrono::milliseconds(sleep_ms));
         remaining_ms -= sleep_ms;
     }
 }
 
 bool ViconLSLBridge::initializeStreams() {
-    const auto discovery = vicon_lsl::discoverLayout(client_, frame_count_);
+    const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
     if (!discovery.ok()) {
         handleDiagnostics(discovery.diagnostics, BridgeState::Connecting);
         return false;
@@ -169,7 +286,7 @@ bool ViconLSLBridge::initializeStreams() {
     std::cout << "Discovered " << known_layout_.markers.size() << " markers and "
               << known_layout_.segments.size() << " segments" << std::endl;
 
-    const double nominal_rate = client_.frameRate();
+    const double nominal_rate = client_->frameRate();
     if (std::isfinite(nominal_rate) && nominal_rate > 0.0) {
         std::cout << "Vicon frame rate: " << nominal_rate << " Hz" << std::endl;
     } else {
@@ -209,7 +326,7 @@ bool ViconLSLBridge::initializeStreams() {
 }
 
 bool ViconLSLBridge::checkLayoutChanged() {
-    const auto discovery = vicon_lsl::discoverLayout(client_, frame_count_);
+    const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
     if (!discovery.ok()) {
         handleDiagnostics(discovery.diagnostics);
         return false;
@@ -218,7 +335,7 @@ bool ViconLSLBridge::checkLayoutChanged() {
 }
 
 bool ViconLSLBridge::streamFrame(double timestamp) {
-    const auto frame = vicon_lsl::buildViconFrame(client_, known_layout_, frame_count_);
+    const auto frame = vicon_lsl::buildViconFrame(*client_, known_layout_, frame_count_);
     const StreamPushResult marker_result = marker_stream_.pushSample(frame.markers, timestamp);
     const StreamPushResult segment_result = segment_stream_.pushSample(frame.segments, timestamp);
     handleDiagnostics(frame.diagnostics);

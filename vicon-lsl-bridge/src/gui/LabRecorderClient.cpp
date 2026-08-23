@@ -1,34 +1,8 @@
 #include "gui/LabRecorderClient.h"
+#include "gui/LabRecorderFilenamePolicy.h"
 
 #include <algorithm>
 #include <utility>
-
-namespace {
-
-struct FilenameToken {
-    const char* placeholder;
-    QString LabRecorderFilenameFields::*field;
-};
-
-const FilenameToken kFilenameTokens[] = {
-    {"%p", &LabRecorderFilenameFields::participant},
-    {"%s", &LabRecorderFilenameFields::session},
-    {"%b", &LabRecorderFilenameFields::task},
-    {"%r", &LabRecorderFilenameFields::run},
-    {"%n", &LabRecorderFilenameFields::run},
-    {"%a", &LabRecorderFilenameFields::acquisition},
-    {"%m", &LabRecorderFilenameFields::modality},
-};
-
-void appendField(QString& command, const QString& key, const QString& value) {
-    const QString sanitized = LabRecorderClient::sanitizedValue(value);
-    if (sanitized.isEmpty()) {
-        return;
-    }
-    command += " {" + key + ":" + sanitized + "}";
-}
-
-} // namespace
 
 LabRecorderClient::LabRecorderClient(QObject* parent) : QObject(parent) {
     qRegisterMetaType<RecorderConnectionState>("RecorderConnectionState");
@@ -285,56 +259,22 @@ void LabRecorderClient::onCommandTimeout() {
 }
 
 QString LabRecorderClient::filenameCommand(const LabRecorderFilenameFields& fields) {
-    QString command = "filename";
-    appendField(command, "root", fields.root);
-    appendField(command, "template", fields.templ);
-    appendField(command, "participant", fields.participant);
-    appendField(command, "session", fields.session);
-    appendField(command, "task", fields.task);
-    appendField(command, "run", fields.run);
-    appendField(command, "acquisition", fields.acquisition);
-    appendField(command, "modality", fields.modality);
-    return command;
+    return LabRecorderFilenamePolicy::filenameCommand(fields);
 }
 
 QString LabRecorderClient::renderedFilename(const LabRecorderFilenameFields& fields) {
-    QString rendered = sanitizedValue(fields.templ);
-    for (const FilenameToken& token : kFilenameTokens) {
-        rendered.replace(QLatin1String(token.placeholder), sanitizedValue(fields.*(token.field)));
-    }
-    return rendered;
+    return LabRecorderFilenamePolicy::renderedFilename(fields);
 }
 
 bool LabRecorderClient::hasUnresolvedFilenamePlaceholders(const LabRecorderFilenameFields& fields) {
-    const QString templ = sanitizedValue(fields.templ);
-    for (const FilenameToken& token : kFilenameTokens) {
-        if (templ.contains(QLatin1String(token.placeholder)) &&
-            sanitizedValue(fields.*(token.field)).isEmpty()) {
-            return true;
-        }
-    }
-    return renderedFilename(fields).contains('%');
+    return LabRecorderFilenamePolicy::hasUnresolvedFilenamePlaceholders(fields);
 }
 
 QStringList LabRecorderClient::startRecordingCommands(const LabRecorderFilenameFields& fields,
                                                       bool select_all_first) {
-    QStringList commands;
-    if (select_all_first) {
-        // Discover streams that appeared since LabRecorder's last refresh
-        // before selecting them. LabRecorder's start handler refreshes again,
-        // but that is too late to select newly discovered streams.
-        commands.append("update");
-        commands.append("select all");
-    }
-    commands.append(filenameCommand(fields));
-    commands.append("start");
-    return commands;
+    return LabRecorderFilenamePolicy::startRecordingCommands(fields, select_all_first);
 }
 
 QString LabRecorderClient::sanitizedValue(QString value) {
-    value.replace('{', '_');
-    value.replace('}', '_');
-    value.replace('\n', ' ');
-    value.replace('\r', ' ');
-    return value.trimmed();
+    return LabRecorderFilenamePolicy::sanitizedValue(std::move(value));
 }
