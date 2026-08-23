@@ -27,7 +27,7 @@ Pre-built binaries are available on the [Releases](../../releases) page for:
 - Windows x64
 
 Each release also includes [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) builds for convenient recording.
-There is also a seperate GUI app for windows.
+Both platform packages include the CLI and the Qt GUI when the release build's Qt dependency is available.
 
 ## GUI Application
 
@@ -118,7 +118,7 @@ cmake --build build --config Release
 
 ### Windows
 
-```bash
+```bat
 vcpkg install boost-thread:x64-windows-static-md boost-chrono:x64-windows-static-md boost-asio:x64-windows-static-md boost-filesystem:x64-windows-static-md boost-format:x64-windows-static-md boost-algorithm:x64-windows-static-md boost-date-time:x64-windows-static-md boost-math:x64-windows-static-md boost-range:x64-windows-static-md boost-lexical-cast:x64-windows-static-md
 
 cd vicon-lsl-bridge
@@ -152,3 +152,9 @@ python tools/generate_stream_contracts.py --check
 ```
 
 Device-specific WinRT, Unity, Vuforia, and spatial-frame behavior must also be validated in the real Unity project and on HoloLens hardware. The pinned LabRecorder submodule currently builds its XDF writer test executable without registering it with CTest; that upstream limitation is intentionally not patched in this repository.
+
+## Release process
+
+Release-facing changes are summarized in [CHANGELOG.md](CHANGELOG.md). The current candidate gate and remaining manual checks are recorded in [docs/release-checklist.md](docs/release-checklist.md).
+
+Release tags use the exact `vN.N.N` form and must point to a commit already merged into `main`. The tag version must match the CMake project version and have a dated changelog section; the release workflow then assembles the versioned Windows and Linux assets and publishes their SHA-256 manifest.
