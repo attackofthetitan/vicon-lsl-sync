@@ -38,16 +38,22 @@ namespace GazeLSL
                 return;
             }
 
-            sample[0] = positionX;
-            sample[1] = positionY;
-            sample[2] = -positionZ;
-
-            // Change basis with F = diag(1, 1, -1), matching GazeDataProvider.
-            // Quaternion vector components are axial under this reflection.
-            sample[3] = -rotationX;
-            sample[4] = -rotationY;
-            sample[5] = rotationZ;
-            sample[6] = rotationW;
+            SharedWorldBasis.ReflectPolarVector(
+                positionX,
+                positionY,
+                positionZ,
+                out sample[0],
+                out sample[1],
+                out sample[2]);
+            SharedWorldBasis.ReflectRotation(
+                rotationX,
+                rotationY,
+                rotationZ,
+                rotationW,
+                out sample[3],
+                out sample[4],
+                out sample[5],
+                out sample[6]);
             sample[7] = 1.0;
         }
     }

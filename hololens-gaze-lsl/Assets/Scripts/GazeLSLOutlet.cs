@@ -24,7 +24,6 @@ namespace GazeLSL
         private long sessionGeneration;
         private bool failureReported;
         private bool providerRecoveryReported;
-        private bool startRequested;
         private bool stopWarningReported;
         private int reportedProviderExceptionCount;
 
@@ -35,8 +34,6 @@ namespace GazeLSL
                 enabled = false;
                 return;
             }
-
-            startRequested = true;
         }
 
         private bool ValidateReferences()
@@ -193,7 +190,7 @@ namespace GazeLSL
                 }
             }
 
-            if (startRequested && worker == null && rateReady)
+            if (worker == null && rateReady)
             {
                 StartPublishing(effectiveRate, currentSessionGeneration);
             }
@@ -306,7 +303,6 @@ namespace GazeLSL
 
         private void OnDestroy()
         {
-            startRequested = false;
             StopPublishing();
         }
     }

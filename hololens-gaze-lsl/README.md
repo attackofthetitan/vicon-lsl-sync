@@ -19,8 +19,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\hololens-gaze-lsl\buil
 Artifacts:
 
 ```text
-build/liblsl-uwp-arm64-install/bin/lsl.dll
-build/liblsl-uwp-arm64-install/lib/lsl.lib
+hololens-gaze-lsl/build/liblsl-uwp-arm64-install/bin/lsl.dll
+hololens-gaze-lsl/build/liblsl-uwp-arm64-install/lib/lsl.lib
 ```
 
 The DLL is a UWP ARM64 build of `liblsl` `v1.16.2`.

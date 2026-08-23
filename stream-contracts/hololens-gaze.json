@@ -1,5 +1,10 @@
 {
+  "contract_id": "hololens-gaze",
   "name": "HoloLensGaze",
+  "type": "Gaze",
+  "source_id": "hololens2_gaze",
+  "nominal_srate": 90.0,
+  "channel_format": "double64",
   "channels": [
     {"label": "CombinedOriginX", "unit": "meters"},
     {"label": "CombinedOriginY", "unit": "meters"},
