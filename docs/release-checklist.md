@@ -21,11 +21,19 @@
 
 ## Required before tagging
 
-- [ ] Review the complete refactor diff as small logical commits or an equivalently reviewable pull request.
+- [x] Review the complete refactor diff as four logical commits covering generated HoloLens contracts, native responsibilities, packaging safety, and release documentation.
 - [ ] Run the hosted Windows and Linux matrix from the final commit.
-- [ ] Complete the applicable HoloLens/Vuforia checks in [device-parity-runbook.md](device-parity-runbook.md), or explicitly record why hardware qualification is not required for this patch.
-- [ ] Confirm `1.10.5` remains the intended semantic version and that no additional user-facing change needs release notes.
+- [x] Record the physical-device qualification decision for the applicable HoloLens/Vuforia checks in [device-parity-runbook.md](device-parity-runbook.md).
+- [x] Confirm `1.10.5` remains the intended semantic version and that no additional user-facing change needs release notes.
 - [ ] Merge the approved commit into `main` and confirm the candidate commit is an ancestor of `origin/main`.
+
+## Physical-device qualification waiver
+
+- Decision date: 2026-08-23
+- Decision: Physical HoloLens 2, Vuforia, and Vicon/LabRecorder integration qualification is waived for `v1.10.5` because the required hardware path is unavailable for this release run.
+- Evidence used instead: generated schema parity, managed timing/projection/encoding/recovery checks, native frame-mapping/lifecycle/recovery checks, recorder protocol checks, and Windows packaging/portable integrity checks.
+- Scope boundary: the release introduces no intended SDK, dependency, public API, serialized field, stream schema, timestamp policy, coordinate convention, settings key, or artifact-name change.
+- Residual risk: Unity/WinRT/Vuforia and physical Vicon behavior cannot be proven by automation. Roll back to `v1.10.4` if an integration regression appears and execute the full device runbook before a corrective release.
 
 ## Tag and publication
 

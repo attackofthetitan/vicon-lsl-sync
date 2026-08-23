@@ -27,6 +27,7 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 ### Compatibility
 
 - No intentional runtime behavior, public source API, serialized Unity field, CLI, LSL stream schema, settings key, build target, or release artifact name change.
+- Physical HoloLens 2, Vuforia, and Vicon/LabRecorder qualification was waived because the hardware path was unavailable; automated contract, timing, lifecycle, recovery, recorder, and packaging parity completed successfully, with `v1.10.4` retained as the rollback point.
 
 [Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.5...HEAD
 [1.10.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.4...v1.10.5
