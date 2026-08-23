@@ -1,79 +1,79 @@
-# HoloLens and integrated-system parity runbook
+# Hardware test guide
 
-## Purpose
+## Why this guide exists
 
-The repository's automated managed tests do not compile or execute Unity, WinRT, Microsoft Extended Eye Tracking, Mixed Reality OpenXR, Vuforia, UWP ARM64 liblsl, or physical Vicon hardware behavior. This runbook defines the evidence required when a refactor touches those boundaries.
+The automated checks do not run Unity, Windows device APIs, or real Vicon hardware. They also do not run Extended Eye Tracking, OpenXR, Vuforia, or the ARM64 UWP liblsl build.
 
-It is a parity procedure, not a feature acceptance plan. The expected result is the behavior documented in:
+Use this guide to compare a changed build with a known-good build on real equipment. It proves that a code-only cleanup kept the same behavior. It does not approve a dependency update, stream-layout change, coordinate change, or new timing rule. Those changes need a separate plan and new expected results.
 
-- [behavior-contract.md](behavior-contract.md)
-- [runtime-state-machines.md](runtime-state-machines.md)
-- [time-and-coordinate-semantics.md](time-and-coordinate-semantics.md)
+The expected behavior comes from:
 
-Do not use this runbook to approve a dependency upgrade, stream schema change, coordinate change, or revised timing policy. Those require a separate migration plan and new expected results.
+- [Behavior that must stay the same](behavior-contract.md)
+- [How services start, stop, and recover](runtime-state-machines.md)
+- [How time and coordinates work](time-and-coordinate-semantics.md)
 
-## When this runbook is required
+## When to use this guide
 
-Complete all applicable sections when changing any of the following:
+Complete the parts that apply when changing:
 
 - `GazeDataProvider`, `GazePublisherWorker`, `GazeLSLOutlet`, `GazeTiming`, or `GazeCoordinateTransform`.
-- `VuforiaModelTargetPoseOutlet`, `ModelTargetPoseEncoder`, target-pose metadata, or stair calibration.
-- Public/serialized Unity component or configuration fields.
-- UWP ARM64 liblsl build, managed LSL binding, Unity version, Mixed Reality OpenXR, Extended Eye Tracking SDK, or Vuforia version.
-- HoloLens source IDs, stream names, channel schema, nominal rate, clock metadata, or coordinate-frame metadata.
-- Desktop live preview resolution, clock synchronization, rate diagnostics, or calibration compatibility.
-- XDF offset processing or automatic offline calibration.
-- Integrated LabRecorder startup, selection, recording, or outlet recovery.
+- `VuforiaModelTargetPoseOutlet`, `ModelTargetPoseEncoder`, target metadata, or stair alignment.
+- A public or saved Unity component field.
+- The ARM64 UWP liblsl build, managed LSL binding, Unity version, Mixed Reality OpenXR, Extended Eye Tracking SDK, or Vuforia version.
+- HoloLens source IDs, stream names, value layout, expected rate, clock metadata, or coordinate-frame metadata.
+- Live preview stream discovery, clock correction, rate display, or alignment support.
+- XDF clock correction or automatic recorded-data alignment.
+- LabRecorder startup, stream selection, recording, or stream recovery.
 
-Pure desktop changes may mark device-only sections not applicable, but must state why.
+For a desktop-only change, mark device-only parts as not needed and write down why.
 
-## Required equipment and environment
+## What you need
 
-- HoloLens 2 with working Extended Eye Tracking hardware and permission available to the application.
-- The actual Unity application/project that integrates the scripts in this repository. The repository contains scripts and tests, not a complete serialized Unity scene.
-- Microsoft Mixed Reality OpenXR 1.5.1 or later, matching the repository README requirement.
-- Microsoft Extended Eye Tracking SDK integration used by the application.
-- Vuforia Model Target setup for the physical stair target when testing calibration.
-- A `GazeLSLConfig` asset assigned to both producers.
-- Desktop machine on the same LSL-visible network.
-- Vicon DataStream server and tracked subjects/objects for integrated tests.
-- Desktop GUI and LabRecorder build produced from the revision under test.
-- Physical stair model in the surveyed/expected location for calibration checks.
-- A way to retain Unity device logs, desktop logs, `.xdf` recordings, stream metadata, and screenshots/video of the preview.
+- A HoloLens 2 with working Extended Eye Tracking and permission available to the app.
+- The real Unity project that uses these scripts. This repository does not contain a complete saved Unity scene.
+- Microsoft Mixed Reality OpenXR 1.5.1 or later.
+- The Microsoft Extended Eye Tracking SDK used by the app.
+- A Vuforia Model Target for the physical stairs when checking alignment.
+- One `GazeLSLConfig` asset used by both HoloLens outputs.
+- A desktop computer on the same LSL-visible network.
+- A Vicon DataStream server with tracked subjects or objects.
+- The desktop app and LabRecorder built from the revision being checked.
+- The physical stairs in the expected measured position.
+- A place to save Unity logs, desktop logs, `.xdf` files, full stream metadata, and preview pictures or video.
 
-## Test record header
+## Record the setup
 
-Create one record per run and fill every field:
+Create one record for each run. Fill every field.
 
 | Field | Value |
 | --- | --- |
 | Repository revision | |
-| Comparison/baseline revision | |
-| Refactor pass under test | |
-| Date/time/time zone | |
-| Operator | |
-| HoloLens model/OS build | |
-| Unity editor/runtime version | |
-| Scripting backend/API compatibility level | |
+| Known-good revision | |
+| Code cleanup being checked | |
+| Date, time, and time zone | |
+| Person running the check | |
+| HoloLens model and OS build | |
+| Unity editor and runtime version | |
+| Scripting backend and API compatibility level | |
 | Mixed Reality OpenXR version | |
 | Extended Eye Tracking SDK version | |
 | Vuforia version | |
 | UWP liblsl revision | |
 | Desktop liblsl revision | |
-| LabRecorder revision/liblsl revision | |
-| Vicon server/software/SDK version | |
-| `Stopwatch.Frequency` observed on device | |
-| Gaze stream name/type/source ID | |
-| Target stream name/type/source ID | |
-| Vicon marker/segment stream names | |
-| Physical stair pose/reference notes | |
-| Recording filenames and log locations | |
+| LabRecorder revision and liblsl revision | |
+| Vicon server, software, and SDK version | |
+| `Stopwatch.Frequency` shown on the device | |
+| Gaze stream name, type, and source ID | |
+| Target stream name, type, and source ID | |
+| Vicon marker and segment stream names | |
+| Physical stair position and notes | |
+| Recording filenames and log folders | |
 
-If the baseline and test runs do not use the same environment, list every difference. Do not attribute an observed difference to refactoring until environment drift has been ruled out.
+Use the same equipment and software for the known-good and changed builds. If anything differs, list it. First rule out that setup difference before blaming the code change.
 
-## Pre-device automated baseline
+## Run automated checks first
 
-Run from repository root before device deployment:
+From the repository root:
 
 ```powershell
 python tools/generate_stream_contracts.py --check
@@ -89,354 +89,358 @@ ctest --test-dir build-logic --build-config Release --output-on-failure
 dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
 ```
 
-For the full desktop environment, also configure/build with the initialized Vicon SDK submodule, liblsl, and Qt6, then run all registered CTest tests from that build.
+When the full desktop setup is available, initialize the Vicon SDK submodule and provide liblsl and Qt 6. Then build every target and run all registered CTest checks.
 
-Record:
+Record the result:
 
-- [ ] Generated contracts are current.
-- [ ] Dependency-light C++ suite passes.
-- [ ] Platform-neutral managed suite passes.
-- [ ] Full desktop runtime/Qt suite passes when applicable.
-- [ ] Working tree contains no unexpected source, vendor, or generated changes.
+- [ ] Generated stream files are current.
+- [ ] C++ checks that need no desktop dependencies pass.
+- [ ] Device-independent C# checks pass.
+- [ ] Full desktop and Qt checks pass when needed.
+- [ ] The working tree has no unexpected source, third-party, or generated changes.
 
-## Deployment preflight
+## Check the setup before using the device
 
-1. Confirm the Unity scene has one active `GazeDataProvider` and `GazeLSLOutlet` wired to the intended `GazeLSLConfig`.
-2. For calibration, confirm one `VuforiaModelTargetPoseOutlet` uses the same configuration asset and the intended `ObserverBehaviour`/model target.
-3. Confirm the gaze provider and target outlet share the same Unity/XR world.
-4. Confirm gaze permission is granted on the device.
-5. Confirm the eye tracker advertises an exact 90 Hz target frame rate.
-6. Confirm the desktop and HoloLens can discover each other's LSL traffic through the current network/firewall configuration.
-7. Confirm the desktop GUI points to the intended Vicon server and stream names.
-8. Confirm LabRecorder RCS is enabled on the configured host/port.
-9. Confirm the study root exists and filename fields render the expected `.xdf` path.
-10. Capture the actual configuration values and Unity inspector wiring as evidence.
+1. Confirm the Unity scene has one active `GazeDataProvider` and one `GazeLSLOutlet` using the intended `GazeLSLConfig`.
+2. For stair alignment, confirm one `VuforiaModelTargetPoseOutlet` uses the same config and the intended `ObserverBehaviour` or model target.
+3. Confirm gaze and target components use the same Unity/XR world.
+4. Confirm the user granted gaze permission.
+5. Confirm the eye tracker offers exactly 90 Hz.
+6. Confirm the desktop and HoloLens can discover each other's LSL streams through the current network and firewall.
+7. Confirm the desktop app uses the intended Vicon server and stream names.
+8. Confirm LabRecorder remote control is enabled at the chosen host and port.
+9. Confirm the study folder exists and the filename fields show the intended `.xdf` path.
+10. Save the actual values and a picture of the Unity Inspector wiring.
 
-Do not continue to calibration if the HoloLens producers are in different scene frames or the target-pose component is attached to a different world origin.
+Do not test stair alignment when the gaze and target components use different Unity worlds.
 
-## Scenario 1: permission, tracker selection, and startup
+## Test 1: permission and startup
 
-### Procedure
+### Steps
 
-1. Start the Unity application from a clean launch.
-2. Observe permission handling and device logs.
-3. Keep the device and application active until tracker enumeration completes.
-4. Discover the gaze stream on the desktop.
-5. Repeat once after fully stopping and relaunching the application.
+1. Start the Unity app from a full stop.
+2. Watch permission handling and the device log.
+3. Keep the app active until tracker discovery finishes.
+4. Find the gaze stream from the desktop.
+5. Stop the app fully and repeat once.
 
-### Expected behavior
+### Expected result
 
-- Permission denial or unavailable device support logs an error and produces no partial gaze outlet.
-- A tracker without exact 90 Hz support logs an error and does not start the outlet.
-- A valid tracker opens, selects 90 Hz, creates a spatial graph node, increments session generation, and logs readiness.
-- The outlet appears only after `TryGetEffectiveFrameRate` reports the active 90 Hz session.
-- There is one gaze outlet with the configured identity, not a desktop-relayed duplicate.
+- Denied permission or missing device support logs an error and creates no partial gaze stream.
+- A tracker without exact 90 Hz support logs an error and creates no gaze stream.
+- A good tracker opens, selects 90 Hz, creates a spatial graph node, starts a new session number, and logs that it is ready.
+- The LSL stream appears only after `TryGetEffectiveFrameRate` confirms the active 90 Hz session.
+- Only one gaze stream uses the configured identity. There is no desktop relay copy.
 
-### Evidence
+### Save
 
-- [ ] Unity log from launch through readiness or expected failure.
-- [ ] Stream-discovery screenshot/metadata export.
-- [ ] Repeat-launch result matches the first launch.
-- [ ] No stale outlet remains after the application exits.
+- [ ] Unity log from launch through success or the expected failure.
+- [ ] Stream list picture and full metadata export.
+- [ ] Second launch result that matches the first.
+- [ ] Proof that no old stream remains after the app exits.
 
-## Scenario 2: exact stream schemas and metadata
+## Test 2: stream layouts and metadata
 
-Inspect full LSL metadata for all available streams and compare with [behavior-contract.md](behavior-contract.md).
-
-### Gaze acceptance
-
-- [ ] Configured name, type, and source ID match.
-- [ ] Channel format is `double64` and nominal rate is `90`.
-- [ ] Exactly 21 channels appear in generated-contract order.
-- [ ] Labels and units exactly match `stream-contracts/hololens-gaze.json`.
-- [ ] `coordinate_frame` is `hololens_stationary_shared_with_gaze`.
-- [ ] Timestamp, QPC-frequency, clock-domain, and backlog metadata match the documented values.
-
-### Target acceptance
-
-- [ ] Configured name, type, and source ID match.
-- [ ] Channel format is `double64`, nominal rate is irregular/zero, and there are exactly eight channels.
-- [ ] Labels and units match the target-pose contract.
-- [ ] Coordinate frame matches gaze exactly.
-- [ ] Timestamp metadata identifies local clock at transform read.
-
-### Vicon acceptance
-
-- [ ] Marker/segment names and `MoCap` type match configuration.
-- [ ] Channel order follows current Vicon discovery order.
-- [ ] Units, nominal frame rate/fallback, source IDs, and timestamp metadata match the contract.
-- [ ] Marker and segment source IDs retain their hostname suffix across reconnect.
-
-Retain the raw metadata export, not only screenshots.
-
-## Scenario 3: steady gaze timing and rate
-
-### Procedure
-
-1. Start HoloLens gaze in a stable, low-load scene.
-2. Start desktop live preview and wait at least ten seconds.
-3. Record at least 60 seconds in LabRecorder.
-4. Move gaze naturally so changing samples are observable.
-5. Save Unity logs, preview status, and XDF.
-
-### Expected behavior
-
-- Gaze nominal rate is 90 Hz.
-- After the two-second measurement window fills, live preview reports an effective rate based on corrected timestamps.
-- Under the approved baseline conditions, the refactored run has the same low-rate/no-low-rate classification as the baseline. The current UI threshold is less than 80% of nominal, or 72 Hz for a 90 Hz stream.
-- Published gaze timestamps are finite, positive, and strictly increasing.
-- The encoded timestamp follows the SDK reading's system-relative time and is not equal to a repeating Unity render timestamp.
-- Normal batching does not cause old readings to replay behind current Vicon motion.
-- XDF contains clock-offset chunks appropriate to normal LSL synchronization.
-
-### Analysis record
-
-For the gaze stream, calculate and retain:
-
-- Sample count and duration.
-- Minimum, median, 95th percentile, and maximum timestamp interval.
-- Effective rate over the complete recording and representative two-second windows.
-- Count of duplicate or regressing timestamps; expected zero.
-- Count and duration of gaps greater than 25 ms.
-- Recorded `Stopwatch.Frequency` and a sample of raw reading tick-to-seconds calculations when instrumentation is available.
-
-Do not set a new allowable drop-rate threshold during a refactor. Compare with the approved baseline under the same scene and device conditions, and report any material difference.
-
-## Scenario 4: overload and backlog policy
-
-### Procedure
-
-Use a controlled, reversible load that delays the Unity main-thread transformation consumer or otherwise creates a processing backlog without modifying the timestamp/queue implementation under test. Record the exact load method.
-
-1. Record a stable pre-load interval.
-2. Apply the load long enough to exceed a 25 ms capture-time span.
-3. Remove the load and allow recovery.
-4. Inspect published timestamps and gaze/Vicon visual alignment.
-
-### Expected behavior
-
-- When either queue exceeds the capture-span budget, older entries are discarded and the newest is retained.
-- The recording contains an explicit timestamp gap.
-- Recovery resumes near current motion; it does not rapidly replay a burst of old captures.
-- Timestamps remain strictly increasing.
-- Queue overload does not change the fixed 21-channel schema.
-- Preview may report a reduced effective rate but must not display an old completed rate after the stream becomes stale.
-
-### Evidence
-
-- [ ] Exact load procedure and time interval.
-- [ ] Before/during/after timestamp plot or interval table.
-- [ ] No duplicate/regression count.
-- [ ] Video or synchronized plot demonstrating no delayed replay.
-- [ ] Baseline and refactored results use the same load.
-
-## Scenario 5: transient and persistent tracker failure
-
-Use available application focus/suspend, tracker-session, or controlled fault mechanisms appropriate to the actual Unity project. Do not physically or programmatically alter device state in a way that cannot be reproduced safely.
-
-### Transient case
-
-- Cause a brief projected WinRT read failure shorter than the persistent recovery threshold.
-- Expected: warning count increases, publishing remains active or briefly gaps, and the tracker is not immediately replaced.
-
-### Persistent case
-
-- Cause continued provider failure for approximately one nominal second.
-- Expected: worker exposes provider failure, outlet stops only after the worker exits, provider restarts watcher/tracker enumeration, and publishing later resumes with a new session generation.
-
-### Removal/re-enumeration case
-
-- Trigger a supported tracker removal/re-enumeration or application lifecycle equivalent.
-- Expected: old queues and reading gate are cleared; late asynchronous completion from the old lifecycle cannot become active; no old-generation sample appears in the new session.
-
-### Acceptance
-
-- [ ] Transient failures do not cause rapid outlet churn.
-- [ ] Persistent failure produces one controlled recovery sequence.
-- [ ] Outlet resources are not disposed while the old worker can still push.
-- [ ] Recreated outlet retains configured name/type/source ID.
-- [ ] Recorded timestamps do not move backwards across recovery.
-- [ ] LabRecorder behavior across outlet recreation matches the approved baseline.
-- [ ] Unity logs show no unhandled exception or repeated overlapping restart.
-
-## Scenario 6: ray validity and target tracking validity
+Save the full LSL metadata for every available stream and compare it with [Behavior that must stay the same](behavior-contract.md).
 
 ### Gaze
 
-Exercise combined gaze and, where supported, left/right gaze across valid and invalid tracking conditions.
-
-- [ ] Valid ray origin/direction values are finite and direction magnitude is approximately one.
-- [ ] Valid flags are numeric `1.0` only when the corresponding transformed ray is usable.
-- [ ] Unsupported or invalid individual eyes retain their fixed channels with invalid flag, rather than changing schema.
-- [ ] Failed spatial location produces invalid ray values for that capture rather than a retimestamped pose.
+- [ ] Name, type, and source ID match the config.
+- [ ] Format is `double64` and expected rate is `90`.
+- [ ] There are exactly 21 values in generated-file order.
+- [ ] Labels and units exactly match `stream-contracts/hololens-gaze.json`.
+- [ ] `coordinate_frame` is `hololens_stationary_shared_with_gaze`.
+- [ ] Capture time, device timer rate, clock, and queue-limit metadata match the guide.
 
 ### Target
 
-Acquire and then lose Vuforia target tracking.
+- [ ] Name, type, and source ID match the config.
+- [ ] Format is `double64`, expected rate is irregular or zero, and there are eight values.
+- [ ] Labels and units match the target definition.
+- [ ] Coordinate frame exactly matches gaze.
+- [ ] Metadata says the time comes from the local clock when the transform is read.
 
-- [ ] `TRACKED` and `EXTENDED_TRACKED` produce finite reflected position/quaternion and `Tracked = 1.0`.
-- [ ] Other statuses produce seven `NaN` values and `Tracked = 0.0`.
-- [ ] Losing target clears live calibration collection.
-- [ ] Regaining target starts a fresh stable collection.
+### Vicon
 
-Retain representative raw samples for both valid and invalid cases.
+- [ ] Marker and segment names and `MoCap` type match the config.
+- [ ] Value order matches current Vicon discovery order.
+- [ ] Units, expected rate or fallback, source IDs, and time metadata match the guide.
+- [ ] Marker and segment source IDs keep the same computer-name ending after reconnect.
 
-## Scenario 7: coordinate-frame and stair calibration parity
+Keep the raw metadata files, not only pictures.
 
-### Preparation
+## Test 3: steady gaze timing and rate
 
-1. Place the physical stair target at the baseline location/orientation.
-2. Confirm the fixed profile still represents the expected Vicon target pose. The current code uses profile `stair-model-v1` and the fixed translation documented in [time-and-coordinate-semantics.md](time-and-coordinate-semantics.md).
-3. Restart the HoloLens application so the stationary world is newly established.
-4. Ensure gaze and target metadata both name `hololens_stationary_shared_with_gaze`.
+### Steps
 
-### Live procedure
+1. Start gaze in a simple, low-load Unity scene.
+2. Start the live preview and wait at least ten seconds.
+3. Record at least 60 seconds with LabRecorder.
+4. Move your gaze naturally so samples change.
+5. Save the Unity log, preview status, and XDF file.
 
-1. Start Vicon streaming and desktop preview.
-2. Acquire the Vuforia stair target and keep it stationary.
-3. Start or allow automatic calibration.
-4. Hold stable until 20 accepted poses complete.
-5. Inspect the reported translation and rotation RMS.
-6. Look along known stair edges/steps and compare the combined gaze ray with the physical/Vicon-aligned model.
-7. Switch to Manual Transform and then recalibrate.
+### Expected result
 
-### Expected behavior
+- Expected gaze rate is 90 Hz.
+- After the two-second rate window fills, the preview shows a rate based on clock-corrected sample times.
+- Under the same setup, the changed build has the same normal-rate or low-rate result as the known-good build. The current warning starts below 80% of the expected rate, which is 72 Hz for a 90 Hz stream.
+- Published gaze times are finite, positive, and always increase.
+- The sent time follows the SDK reading time. It does not repeat a Unity render time.
+- Small normal batches do not replay old gaze behind current Vicon movement.
+- The XDF file contains the normal LSL clock-correction records.
 
-- Target loss or motion beyond 20 mm / 3 degrees restarts collection.
-- A stable 20-sample set within both RMS limits creates one automatic session transform.
-- Automatic transform is not written to persistent settings.
-- `Use Manual Transform` immediately restores persistent manual controls.
-- The rendered stair ascent direction and calibrated gaze agree with the approved baseline; there is no X/Z mirror, 180-degree reversal, or metre/millimetre error.
-- Recalibration after HoloLens world restart restores alignment.
+### Calculate and save
 
-### Offline procedure
+- Sample count and recording length.
+- Smallest, middle, 95th-percentile, and largest gap between sample times.
+- Rate for the whole recording and for useful two-second windows.
+- Count of duplicate or earlier times; expected count is zero.
+- Count and length of gaps over 25 ms.
+- Device `Stopwatch.Frequency` and examples that divide raw reading counts by that value, when logging is available.
 
-1. Record gaze, target, marker, and segment streams during a stable target window.
-2. Load the XDF in the built-in preview.
-3. Confirm the stable-window solver applies calibration and reports it in the summary.
-4. Compare representative live and offline geometry at corresponding corrected times.
+Do not invent a new allowed drop rate during code cleanup. Compare with the known-good build under the same conditions and report any clear difference.
 
-### Evidence
+## Test 4: overload and queue limits
 
-- [ ] Photo/diagram of physical target placement.
-- [ ] Live preview screenshot/video before and after calibration.
-- [ ] Reported sample count and RMS values.
-- [ ] XDF and offline summary.
-- [ ] Synthetic basis-vector tests remain passing.
-- [ ] Baseline/refactored overlay or side-by-side comparison.
+Use a controlled load that you can repeat and undo. It should delay Unity's main-thread conversion work or create a queue without changing the code being checked. Write down the exact load.
 
-## Scenario 8: legacy and missing coordinate metadata
+1. Record a stable period before the load.
+2. Apply the load long enough to build more than 25 ms of captured data.
+3. Remove the load and let the app recover.
+4. Review timestamps and gaze/Vicon visual alignment.
 
-Use retained fixtures; do not relabel a new recording as legacy.
+Expected result:
 
-- Load a recording labeled `eye_tracker_space`.
-  - [ ] Gaze is available for acquisition inspection.
-  - [ ] Stair-target automatic calibration is not applied.
-  - [ ] Summary identifies legacy tracker-local gaze when a target exists.
-- Load a fixture with empty gaze or target frame metadata.
-  - [ ] Current backward-compatible rule allows calibration when the other requirements pass.
-- Load a fixture with two different nonempty frame strings.
-  - [ ] Calibration is rejected and live status identifies the mismatch.
+- When either queue spans too much time, old entries are dropped and the newest remains.
+- The recording has a clear time gap.
+- After recovery, gaze returns near current motion. It does not send a fast burst of old data.
+- Timestamps keep increasing.
+- The stream still has 21 values.
+- The preview may show a lower rate, but it must not show an old completed rate after the stream becomes stale.
 
-Changing the empty-metadata compatibility rule requires a migration and a corpus-based impact analysis.
+Save:
 
-## Scenario 9: Vicon reconnect and layout recreation
+- [ ] Exact load and time range.
+- [ ] Before, during, and after timestamp plot or table.
+- [ ] Duplicate and earlier-time count.
+- [ ] Video or plot showing no delayed replay.
+- [ ] Results from the same load on both builds.
 
-### Procedure
+## Test 5: tracker errors and restart
 
-1. Start Vicon marker/segment streaming and LabRecorder capture.
-2. Interrupt and restore the Vicon connection.
-3. During a separate run, add/remove/reorder a subject or object so discovery changes.
-4. Continue recording through recovery.
+Use app focus, suspend, tracker-session tools, or safe repeatable fault controls that fit the real Unity project.
 
-### Expected behavior
+### Brief error
 
-- Connection loss destroys both Vicon outlets, disconnects, waits, and reconnects.
-- Source IDs remain stable across recreation.
-- Timestamps remain strictly increasing within a recovered logical stream.
-- Layout is detected on the current 100-frame check cadence.
-- Both streams are recreated when either layout changes.
-- New channel order follows new SDK discovery order.
-- Empty layouts remain healthy and create no outlet.
-- LabRecorder includes recreated streams according to its source-ID recovery behavior and the approved baseline.
+Create a projected Windows gaze-read error shorter than the lasting-error limit.
 
-### Evidence
+Expected: the warning count rises, publishing continues or has a short gap, and the tracker is not replaced at once.
 
-- [ ] Bridge status/log transition sequence.
-- [ ] Pre/post full stream metadata.
+### Lasting error
+
+Keep the provider failing for about one expected second.
+
+Expected: the worker reports provider failure, the output closes only after the worker exits, tracker discovery restarts, and a new session later publishes again.
+
+### Removal and discovery
+
+Use a supported tracker-removal event or a repeatable app start, stop, or suspend event.
+
+Expected: old queues and the reading guard clear. A late result from the old tracker cannot become active. No old-session sample appears in the new session.
+
+Pass when:
+
+- [ ] A brief error does not cause repeated stream replacement.
+- [ ] A lasting error creates one controlled recovery.
+- [ ] Output resources stay open until the old worker can no longer send.
+- [ ] The recreated stream keeps its name, type, and source ID.
+- [ ] Recorded time never moves backward during recovery.
+- [ ] LabRecorder handles stream recreation the same way as the known-good build.
+- [ ] Unity logs show no unhandled error or overlapping restart loops.
+
+## Test 6: valid and invalid rays and targets
+
+### Gaze
+
+Check combined gaze and, when available, separate left and right gaze in both good and bad tracking conditions.
+
+- [ ] A valid origin and direction are finite, and direction length is close to one.
+- [ ] A valid flag is `1.0` only when the converted ray can be used.
+- [ ] An unsupported or invalid eye keeps its values in the fixed layout and marks them invalid.
+- [ ] A failed spatial pose gives that capture invalid ray values. It does not give the ray a new time.
+
+### Target
+
+Acquire the stair target, then lose it.
+
+- [ ] `TRACKED` and `EXTENDED_TRACKED` send a finite reflected pose and `Tracked = 1.0`.
+- [ ] Other states send seven `NaN` values and `Tracked = 0.0`.
+- [ ] Losing the target clears the live alignment sample set.
+- [ ] Finding it again starts a new stable set.
+
+Save example values for good and bad cases.
+
+## Test 7: stair alignment and coordinate direction
+
+### Prepare
+
+1. Put the physical stair target in the same position and direction used by the known-good run.
+2. Confirm the fixed settings still describe the expected Vicon target pose. The current ID is `stair-model-v1`; [How time and coordinates work](time-and-coordinate-semantics.md) lists its fixed position.
+3. Restart the HoloLens app to create a fresh stationary Unity world.
+4. Confirm that both gaze and target metadata use `hololens_stationary_shared_with_gaze`.
+
+### Live steps
+
+1. Start Vicon streaming and the desktop preview.
+2. Find the Vuforia stair target and keep it still.
+3. Start automatic alignment if it has not started already.
+4. Hold still until 20 samples pass.
+5. Read the reported position and rotation RMS values.
+6. Look along known stair edges and compare the gaze ray with the physical and Vicon-aligned model.
+7. Select **Use Manual Transform**, then align again.
+
+### Expected result
+
+- Target loss, more than 20 mm of movement, or more than 3 degrees of rotation restarts collection.
+- A stable set of 20 samples within both RMS limits creates one session-only transform.
+- Automatic values are not saved.
+- **Use Manual Transform** restores the saved manual controls at once.
+- Stair direction and gaze match the known-good build. There is no X/Z mirror, 180-degree reversal, or metre/millimetre mistake.
+- Running alignment again after a HoloLens world restart restores the match.
+
+### Recorded-data steps
+
+1. Record gaze, target, marker, and segment streams while the target stays still.
+2. Open the XDF file in the built-in preview.
+3. Confirm that the stable-window calculation applies alignment and reports it in the summary.
+4. Compare live and recorded geometry at matching corrected times.
+
+### Save
+
+- [ ] Picture or diagram of target placement.
+- [ ] Preview picture or video before and after alignment.
+- [ ] Sample count and both RMS values.
+- [ ] XDF file and its preview summary.
+- [ ] Passing simple axis-direction checks.
+- [ ] Overlay or side-by-side view of known-good and changed builds.
+
+## Test 8: old or missing coordinate names
+
+Use saved example files. Do not label a new file as old data.
+
+For a file marked `eye_tracker_space`:
+
+- [ ] Gaze appears for a data-quality check.
+- [ ] Automatic stair alignment does not run.
+- [ ] The summary says the gaze uses old tracker-local coordinates when a target is present.
+
+For a file with an empty gaze or target frame name:
+
+- [ ] The current old-data rule allows alignment when every other requirement passes.
+
+For a file with two different nonempty frame names:
+
+- [ ] Alignment is blocked, and live status shows the mismatch.
+
+Changing the empty-name rule needs a separate compatibility plan and a review of real saved files.
+
+## Test 9: Vicon reconnect and layout change
+
+### Steps
+
+1. Start Vicon marker and segment streams and begin LabRecorder capture.
+2. Break and restore the Vicon connection.
+3. In another run, add, remove, or reorder a subject or object so the discovered layout changes.
+4. Keep recording through recovery.
+
+### Expected result
+
+- Connection loss closes both Vicon streams, disconnects, waits, and reconnects.
+- Source IDs stay the same after recreation.
+- Timestamps always increase within the recovered logical stream.
+- The bridge finds layout changes on its 100-frame check.
+- A change in either layout recreates both streams.
+- The new value order follows the new Vicon discovery order.
+- Empty layouts stay healthy and create no LSL stream.
+- LabRecorder handles the recreated stream by source ID the same way as the known-good run.
+
+### Save
+
+- [ ] Bridge state and log order.
+- [ ] Full stream metadata before and after.
 - [ ] Source-ID comparison.
-- [ ] Timestamp monotonicity analysis.
-- [ ] XDF stream/layout inspection.
+- [ ] Timestamp order analysis.
+- [ ] XDF stream and layout review.
 
-## Scenario 10: integrated recording control and shutdown
+## Test 10: recording controls and shutdown
 
-### Procedure
+### Steps
 
-1. Launch the desktop GUI with the packaged LabRecorder payload when applicable.
-2. Confirm automatic process ownership and RCS connection.
-3. Start Vicon and HoloLens producers after LabRecorder is already open.
-4. Enter valid filename fields and wait for the debounced filename update.
-5. Start recording from the GUI.
-6. Verify newly visible streams were refreshed and selected.
-7. Stop normally; repeat once by closing the GUI while recording.
+1. Start the packaged desktop app and its included LabRecorder when that package is being checked.
+2. Confirm that the desktop app owns the process and connects to remote control.
+3. Start Vicon and HoloLens streams after LabRecorder is already open.
+4. Enter valid filename fields and wait for the delayed filename update.
+5. Start recording from the desktop app.
+6. Confirm that it refreshed and selected the new streams.
+7. Stop normally. Repeat once by closing the desktop app while recording.
 
-### Expected behavior
+### Expected result
 
-- Start batch order is `update`, `select all`, `filename`, `start`.
+- Start sends `update`, `select all`, `filename`, and `start` in that order.
 - Visible Vicon, gaze, and target streams are selected.
-- Filename matches the preview and sanitized fields.
-- Normal Stop is acknowledged before recording state becomes `Stopped`.
-- Close requests bridge stop and, only when state is `Recording`, recording Stop.
-- Close waits according to the documented 4-second bridge and 15-second recording limits.
-- Only a GUI-owned LabRecorder process is terminated on final close.
+- The saved filename matches the preview and cleaned field values.
+- A normal Stop reply arrives before state becomes `Stopped`.
+- Closing asks the bridge to stop and asks LabRecorder to stop only when state is `Recording`.
+- Closing keeps the four-second bridge and 15-second recorder limits.
+- Final close ends only a LabRecorder process started by the desktop app.
 
-### Evidence
+### Save
 
-- [ ] RCS transcript or test server log.
-- [ ] Final XDF path and stream inventory.
-- [ ] GUI readiness/status screenshots.
-- [ ] Normal-stop and close-while-recording results.
-- [ ] External-recorder case proves the GUI does not terminate an unowned process.
+- [ ] Remote-command transcript or test-server log.
+- [ ] Final XDF path and stream list.
+- [ ] Readiness and status pictures.
+- [ ] Normal Stop and close-while-recording results.
+- [ ] Outside-process result proving the desktop app does not close a LabRecorder it did not start.
 
-## Final parity checklist
+## Final checklist
 
-- [ ] Test record header is complete.
-- [ ] Baseline and refactored runs use comparable environments.
-- [ ] Automated pre-device baseline passes.
-- [ ] Gaze and target schemas/metadata are exact.
-- [ ] Vicon schemas/source IDs/timestamps remain compatible.
-- [ ] Gaze startup requires exact 90 Hz and correct permission/node state.
-- [ ] Steady timestamp/rate evidence is retained.
-- [ ] Overload produces gaps, not stale replay.
-- [ ] Tracker failure/restart preserves ownership and session isolation.
-- [ ] Invalid gaze/target states preserve fixed schemas and invalid encodings.
-- [ ] Live and offline stair calibration match the baseline orientation and scale.
-- [ ] Legacy/missing/mismatched coordinate-frame cases follow current rules.
-- [ ] Vicon reconnect/layout recreation remains recordable.
-- [ ] LabRecorder command order, selection, filename, and shutdown remain compatible.
+- [ ] Setup record is complete.
+- [ ] Known-good and changed runs use comparable setups.
+- [ ] Automated checks pass first.
+- [ ] Gaze and target layouts and metadata match exactly.
+- [ ] Vicon layouts, source IDs, and timestamps remain compatible.
+- [ ] Gaze starts only with permission, a spatial node, and exact 90 Hz.
+- [ ] Steady timing and rate calculations are saved.
+- [ ] Overload creates gaps instead of delayed replay.
+- [ ] Tracker restart keeps resources and sessions separate.
+- [ ] Invalid gaze and target states keep fixed layouts and invalid values.
+- [ ] Live and recorded stair alignment match the known-good direction and scale.
+- [ ] Old, missing, and different coordinate names follow current rules.
+- [ ] Vicon reconnect and layout changes remain recordable.
+- [ ] LabRecorder command order, selection, filename, and closing behavior stay the same.
 - [ ] Unity, desktop, and recorder logs contain no new unhandled errors.
-- [ ] XDF, metadata exports, logs, calculations, and visual evidence are archived with the change.
-- [ ] No vendor submodule content or revision changed as part of the refactor.
+- [ ] XDF files, metadata, logs, calculations, and visual records are saved with the change.
+- [ ] No third-party submodule file or revision changed.
 
-## Stop conditions and unresolved baseline inputs
+## Stop and ask for a decision when
 
-Stop the review and request a separate decision if any of these is missing or disputed:
+Stop the review when one of these items is missing or disputed:
 
-- The actual Unity scene/prefab wiring and serialized-asset ownership. It is not stored completely in this repository.
-- An approved physical/surveyed Vicon pose for the stair target. The README describes the current value as the best fixed estimate, not a universally surveyed truth.
-- An approved device/drop-rate tolerance beyond the existing 80%-of-nominal preview warning. This repository does not define a release-grade maximum drop percentage.
-- Evidence that the device SDK's `SystemRelativeTime.Ticks` remains a raw QPC count for the exact runtime/SDK version under test.
-- Expected LabRecorder behavior when a HoloLens or Vicon outlet is recreated with the same source ID in the bundled recorder revision.
-- A baseline `eye_tracker_space` fixture for legacy compatibility.
+- The real Unity scene, prefab wiring, or saved-asset owner. This repository does not store the whole scene.
+- An approved measured Vicon pose for the stair target. The current value is the best fixed estimate, not a universal measurement.
+- An approved device drop-rate limit beyond the current preview warning below 80% of the expected rate. This repository does not define a release-grade maximum drop rate.
+- Proof that `SystemRelativeTime.Ticks` is still a raw QPC count for the exact device runtime and SDK version.
+- Expected LabRecorder behavior when a HoloLens or Vicon stream returns with the same source ID in the included LabRecorder revision.
+- A saved `eye_tracker_space` file for old-data checks.
 
-Do not resolve these ambiguities by silently changing code or expected results inside a structural pass.
+Do not settle these questions by quietly changing code or expected results during cleanup.
 
-## Evidence sources
+## Main source files
 
 - `README.md`
 - `hololens-gaze-lsl/README.md`
-- Current HoloLens scripts under `hololens-gaze-lsl/Assets/Scripts`
-- Platform-neutral managed tests under `hololens-gaze-lsl/Tests`
-- Desktop producer, preview, GUI, and tests under `vicon-lsl-bridge`
-- Current stream contract under `stream-contracts`
-- Current build and package validation in `.github/workflows/build-bridge.yml`
+- HoloLens scripts under `hololens-gaze-lsl/Assets/Scripts`
+- Device-independent C# checks under `hololens-gaze-lsl/Tests`
+- Desktop bridge, preview, GUI, and checks under `vicon-lsl-bridge`
+- Stream definitions under `stream-contracts`
+- `.github/workflows/build-bridge.yml`

@@ -1,81 +1,103 @@
 # Vicon LSL Bridge
 
-Stream Vicon motion capture data into [Lab Streaming Layer (LSL)](https://labstreaminglayer.org) for time-synchronized recording alongside other data sources.
+Use this project to send Vicon motion data over [Lab Streaming Layer (LSL)](https://labstreaminglayer.org). LSL keeps data from different devices on a shared time base. [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) can then save those streams in one `.xdf` file.
 
-## Quick Start
+The project also includes Unity scripts that send HoloLens 2 eye-gaze data directly to LSL.
 
-1. Download the latest release for your platform from the [Releases](../../releases) page
-2. Run **vicon-lsl-bridge-gui** — enter your Vicon server address and click **Start Streaming**
-3. Open **LabRecorder** (also included in releases) to record all LSL streams into a single `.xdf` file
+## Get started
 
-## Overview
+1. Download the latest package from the [Releases page](https://github.com/attackofthetitan/vicon-lsl-sync/releases/latest).
+2. Start your Vicon DataStream server.
+3. Run `vicon-lsl-bridge-gui`.
+4. Enter the Vicon server address and select **Start Streaming**.
+5. Open the included LabRecorder app to record the streams.
 
-The bridge connects to a Vicon DataStream server and creates marker/segment LSL outlets. HoloLens gaze is published by the Unity app as its own native LSL stream:
+The default Vicon server address is `localhost:801`.
 
-- **ViconMarkers** — 4 channels per marker (X, Y, Z in mm, Valid flag). Occluded markers are sent as NaN with Valid=0.
-- **ViconSegments** — 7 channels per segment (X, Y, Z in mm, QX, QY, QZ, QW quaternion rotation).
-- **HoloLensGaze** — native LSL stream from the HoloLens Unity app. The 90 Hz sample has 21 channels containing combined, left-eye, and right-eye Unity-world rays plus valid flags.
-- **HoloLensModelTargetPose** — optional native LSL stream from the Vuforia stair model target. It contains the target position, quaternion, and tracked flag in the Unity world frame.
+## Streams
 
-If the marker/segment layout changes mid-session (e.g., subjects added or removed), streams are automatically destroyed and recreated.
+| Stream | What it contains |
+| --- | --- |
+| `ViconMarkers` | Four values for each marker: X, Y, Z in millimetres, and a valid flag. A hidden or unreadable marker uses `NaN, NaN, NaN, 0`. |
+| `ViconSegments` | Seven values for each segment: X, Y, Z in millimetres, followed by the four parts of its rotation. An unreadable segment uses seven `NaN` values. |
+| `HoloLensGaze` | A 90 Hz stream sent by the Unity app. Its 21 values describe combined, left-eye, and right-eye rays in the Unity world, with a valid flag for each ray. |
+| `HoloLensModelTargetPose` | An optional stream sent by the Unity app. Its eight values describe the Vuforia stair target position, rotation, and tracking state. |
 
-## Download
+You can change the two Vicon stream names. The HoloLens names come from the Unity configuration.
 
-Pre-built binaries are available on the [Releases](../../releases) page for:
+If Vicon subjects, markers, or segments change during a session, the bridge closes the old Vicon streams and creates new ones with the new layout.
 
-- Linux x64
-- Windows x64
+## Use the desktop app
 
-Each release also includes [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) builds for convenient recording.
-Both platform packages include the CLI and the Qt GUI when the release build's Qt dependency is available.
+The desktop app lets you:
 
-## GUI Application
+- Start and stop the Vicon bridge.
+- View live marker, segment, gaze, and stair-target data.
+- Open merged CSV or XDF recordings for a visual check.
+- Align HoloLens gaze with the Vicon world.
+- Start, control, and stop LabRecorder.
 
-The GUI app (`vicon-lsl-bridge-gui`) provides a simple interface to configure and start streaming without using the command line. Enter the Vicon server address, optionally change stream names, and click Start.
+The preview reads the same LSL streams that LabRecorder records. By default, it looks for `ViconMarkers`, `ViconSegments`, `HoloLensGaze`, and `HoloLensModelTargetPose`.
 
-The GUI also includes an embedded native OpenGL preview. The preview subscribes to the same LSL streams that LabRecorder records (`ViconMarkers`, `ViconSegments`, and `HoloLensGaze` by default) and applies saved per-stream transforms. The HoloLens gaze and model-target streams share the same stationary Unity/OpenXR world frame, so stair-target calibration can place gaze in the Vicon world.
+The built-in XDF reader is for visual checks. Use [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) for scientific analysis.
 
-The built-in XDF loader is intended for visual preview. It preserves absolute stream time and applies the recorded clock-offset history once; use the official [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) importer for scientific offline analysis.
+Old recordings marked `eye_tracker_space` contain gaze in the eye tracker's local space. The preview can show those rays, but it cannot align them from the stair target because the recording does not contain the changing tracker-to-world pose.
 
-Recordings labeled `eye_tracker_space` predate the world-space publisher fix. The preview shows those rays for acquisition checks but does not apply stair calibration, because the time-varying tracker-to-world pose is not present in those files.
+## Align gaze from the stair target
 
-### Automatic stair-target alignment
+Automatic alignment needs gaze and target poses from the same Unity/OpenXR world.
 
-Automatic stair-target alignment requires world-space gaze. With Microsoft Mixed Reality OpenXR 1.5.1 or later, `GazeDataProvider` acquires raw readings on its 90 Hz worker, then locates the eye tracker's dynamic spatial-graph node on Unity's main thread at each reading's system-relative timestamp before publishing the ray in the current Unity/OpenXR scene coordinate system.
+In Unity:
 
-The gaze stream preserves each SDK reading's QPC-derived `SystemRelativeTime` as its LSL capture timestamp. The raw QPC count is converted to seconds with the device's runtime QPC frequency, keeping it in the QPC-backed steady-clock domain even on devices whose QPC frequency is not 10 MHz. Duplicate, regressing, invalid, or individually stale readings are rejected. Raw and transformed queues may batch normal 90 Hz samples, but once either capture-time span exceeds 25 ms the older backlog is dropped and only the newest sample is retained, creating an explicit gap instead of replaying stale gaze behind the Vicon markers.
+1. Use Microsoft Mixed Reality OpenXR 1.5.1 or later.
+2. Add `GazeDataProvider` and `GazeLSLOutlet` to the scene.
+3. Add `VuforiaModelTargetPoseOutlet` to the same Unity/XR world.
+4. Assign the stair `ModelTargetBehaviour` and the same `GazeLSLConfig` asset to the gaze and target components.
 
-Attach `VuforiaModelTargetPoseOutlet` to the same Unity/XR scene as `GazeDataProvider` and assign the existing Vuforia stair `ModelTargetBehaviour` plus the `GazeLSLConfig` asset. The component publishes `HoloLensModelTargetPose` in the same right-handed world convention as gaze.
+In the desktop preview:
 
-In the desktop preview, leave the default **Stair target** stream name or enter the configured name, start the preview, acquire the physical stair model target in Vuforia, then select **Calibrate from Stair Target**. The preview averages 20 tracked samples and applies the resulting HoloLens-to-Vicon rigid transform for the current preview session only; automatic alignment is not saved. **Use Manual Transform** returns to the persistent translation/Euler controls.
+1. Keep the default **Stair target** stream name, or enter the name from `GazeLSLConfig`.
+2. Start the preview.
+3. Point the HoloLens at the physical stair target until Vuforia tracks it.
+4. Select **Calibrate from Stair Target**.
+5. Hold the target still while the app collects 20 good samples.
 
-The Vicon-side stair pose is currently the best fixed estimate used by the preview. Repeat calibration after restarting the HoloLens world frame; if the physical stairs are relocated, update that fixed estimate until an editable stair-pose workflow is added.
+The result lasts only for the current preview session. Select **Use Manual Transform** to return to the saved translation and rotation controls.
 
-The GUI can also prepare and control a LabRecorder session over LabRecorder's remote-control socket:
+Restarting the HoloLens app can create a new Unity world, so run the alignment again after a restart. If the physical stairs move, update the fixed Vicon stair pose before relying on the result.
 
-1. Start streaming from the bridge.
-2. In **Recording**, set the study root, filename template, participant/session/task/run fields, and LabRecorder RCS host/port. The default RCS host is `localhost` and the default port is `22345`.
-3. Launch LabRecorder from the GUI, or connect to an already-running LabRecorder with RCS enabled. LabRecorder must have RCS enabled and the GUI must be connected before recording controls become active.
-4. Use **Refresh Streams**, **Start Recording**, and **Stop Recording** from the bridge GUI.
+The gaze publisher keeps the original device capture time. It drops duplicate, old, invalid, or out-of-order readings. If processing falls more than 25 ms behind, it drops the older queued readings and keeps the newest one. This leaves a visible time gap instead of replaying old gaze data. See [How time and coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
 
-The filename preview shows the `.xdf` path produced after applying the template and operator fields. Once connected, valid filename changes are synchronized to LabRecorder after a short typing delay; **Start Recording** sends the latest filename again in the ordered start sequence. Validation is intended to catch empty or unsafe path components before recording starts, so operators can correct participant/session/task/run values instead of discovering the problem after a failed start.
+## Record with LabRecorder
 
-Before starting a recording, the GUI refreshes LabRecorder's stream discovery and selects every visible stream. This ensures newly started bridge streams are included in bridge-controlled recordings without a separate manual refresh or selection step.
+The desktop app talks to LabRecorder through its remote-control connection. The default address is `localhost:22345`.
 
-Before recording, confirm the operator preflight:
+1. Start the Vicon bridge.
+2. In **Recording**, choose the study folder and filename pattern.
+3. Fill in the participant, session, task, run, acquisition, and modality fields.
+4. Start the included LabRecorder, or connect to one that already has remote control enabled.
+5. Select **Refresh Streams** and check that the expected streams appear.
+6. Select **Start Recording**.
+7. Select **Stop Recording** when finished.
 
-- Bridge streaming is running and LabRecorder RCS is enabled, connected, and listening on the configured host/port.
-- **ViconMarkers** is visible in LabRecorder when marker data is expected.
-- **ViconSegments** is visible in LabRecorder when segment data is expected.
-- **HoloLensGaze** is visible when the HoloLens Unity app is publishing native LSL gaze.
+Before each start, the app asks LabRecorder to refresh its stream list and select every visible stream. This includes streams that started after LabRecorder opened.
 
-The recording controls send LabRecorder commands and show command/connection errors without affecting bridge streaming.
+Check these items before recording:
 
-## CLI Usage
+- The bridge is streaming.
+- LabRecorder remote control is enabled and connected.
+- `ViconMarkers` is visible when you expect marker data.
+- `ViconSegments` is visible when you expect segment data.
+- `HoloLensGaze` is visible when the Unity app is running.
+- The filename preview points to the intended `.xdf` file.
 
-A command-line version is also included for headless or scripted use:
+An invalid folder, empty field, or unresolved filename token blocks recording until you fix it. A LabRecorder error does not stop the Vicon bridge.
 
-```
+## Use the command line
+
+The package also includes a command-line app for scripts and computers without a desktop display:
+
+```text
 vicon-lsl-bridge [options]
 
 Options:
@@ -86,26 +108,25 @@ Options:
   --help                      Show this help message
 ```
 
-### Example
+Example:
 
 ```bash
 ./vicon-lsl-bridge --server 192.168.1.100:801
 ```
 
-## Recording
+The HoloLens Unity app sends gaze directly to LSL. The desktop command does not relay gaze.
 
-Use [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) (included in releases) to record all LSL streams on the network into a single `.xdf` file. LabRecorder stores the producers' timestamps together with clock-offset chunks for offline synchronization; it does not apply the live preview's inlet post-processing. The bridge records Vicon streams; the HoloLens Unity app publishes gaze directly as native LSL.
+## Build from source
 
-## Building from source
+You need:
 
-### Requirements
+- CMake 3.23 or later.
+- A C++17 compiler.
+- Boost thread and chrono libraries, plus the Boost headers.
+- The Vicon DataStream SDK linked repository (Git submodule).
+- Qt 6 Core, Widgets, Network, and OpenGLWidgets if you want the desktop app.
 
-- CMake 3.23+
-- C++17 compiler
-- Boost (thread, chrono, and header-only components)
-- liblsl (fetched automatically via CMake)
-- Vicon DataStream SDK (included as a submodule)
-- Qt6 (Core, Widgets, Network, OpenGLWidgets) — optional, for the GUI app
+CMake downloads liblsl when an installed copy is not available.
 
 ### Linux
 
@@ -126,11 +147,11 @@ cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/
 cmake --build build --config Release
 ```
 
-If Qt6 is installed, both `vicon-lsl-bridge` (CLI) and `vicon-lsl-bridge-gui` (GUI) will be built. Without Qt6, only the CLI is built.
+With Qt 6, the build creates both `vicon-lsl-bridge` and `vicon-lsl-bridge-gui`. Without Qt 6, it creates only the command-line app.
 
-## Testing
+## Run the checks
 
-Run the dependency-light C++ suite without downloading Catch2:
+Run the C++ checks without the Vicon SDK, Qt, or a downloaded test library:
 
 ```bash
 cmake -S vicon-lsl-bridge -B build-logic \
@@ -142,19 +163,29 @@ cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests
 ctest --test-dir build-logic --build-config Release --output-on-failure
 ```
 
-For the complete bridge suite, configure with the Vicon SDK submodule, liblsl, and Qt6 available, build all targets, then run CTest from that build directory. Both Catch2 and the bundled dependency-light harness are exercised in CI.
-
-The platform-neutral HoloLens publisher, tracker-lifetime, and pose-encoding checks run with:
+Run the HoloLens checks that do not need Unity or a device:
 
 ```bash
 dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
 python tools/generate_stream_contracts.py --check
 ```
 
-Device-specific WinRT, Unity, Vuforia, and spatial-frame behavior must also be validated in the real Unity project and on HoloLens hardware. The pinned LabRecorder submodule currently builds its XDF writer test executable without registering it with CTest; that upstream limitation is intentionally not patched in this repository.
+For the full desktop checks, download the linked Vicon SDK repository and provide liblsl and Qt 6. Build every target, then run CTest from that build folder.
 
-## Release process
+Unity, Windows device APIs, Vuforia, and physical Vicon behavior still need real hardware checks. Follow the [hardware test guide](docs/device-parity-runbook.md).
 
-Release-facing changes are summarized in [CHANGELOG.md](CHANGELOG.md). The current candidate gate and remaining manual checks are recorded in [docs/release-checklist.md](docs/release-checklist.md).
+## More detail
 
-Release tags use the exact `vN.N.N` form and must point to a commit already merged into `main`. The tag version must match the CMake project version and have a dated changelog section; the release workflow then assembles the versioned Windows and Linux assets and publishes their SHA-256 manifest.
+- [How the code is organized](docs/architecture.md)
+- [Behavior that must stay the same](docs/behavior-contract.md)
+- [How services start, stop, and recover](docs/runtime-state-machines.md)
+- [How time and coordinates work](docs/time-and-coordinate-semantics.md)
+- [Hardware test guide](docs/device-parity-runbook.md)
+- [Release checklist](docs/release-checklist.md)
+- [Change history](CHANGELOG.md)
+
+## Make a release
+
+Release tags use the exact form `vN.N.N`. The tagged commit must already be in `main`. The tag version must match the CMake project version and a dated entry in [CHANGELOG.md](CHANGELOG.md).
+
+The release workflow builds the Windows ZIP, Windows portable app, Linux archive, and `SHA256SUMS.txt`. Follow the [release checklist](docs/release-checklist.md) before and after publishing.

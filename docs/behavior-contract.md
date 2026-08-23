@@ -1,80 +1,97 @@
-# Observable behavior contract
+# Behavior that must stay the same
 
-## Purpose and change policy
+## How to use this guide
 
-This document records behavior that a structural refactor must preserve. It covers executable interfaces, LSL streams, recording control, preview inputs, settings, and build interfaces. Timing and coordinate details are expanded in [time-and-coordinate-semantics.md](time-and-coordinate-semantics.md).
+This guide lists behavior that a code-only cleanup must not change. It covers the command-line app, LSL streams, recording controls, preview files, saved settings, and build names.
 
-A proposed change to any item labeled **contract** below is not ordinary cleanup. It must be isolated as a migration or functional-change task with explicit compatibility and rollout validation.
+If a proposed change affects an item in this guide, review it separately from code cleanup. State what users will see, how old data or settings will work, and how the new behavior will be checked.
 
-## Command-line executable
+For exact clock and coordinate rules, see [How time and coordinates work](time-and-coordinate-semantics.md).
 
-The `vicon-lsl-bridge` executable accepts:
+Terms used below:
 
-| Option | Default | Current behavior |
+- **Metadata** means the labels and settings attached to an LSL stream.
+- **Source ID** means the stable stream identity that helps LSL and LabRecorder recognize a stream after reconnect.
+- **Finite** means a real number that is not `NaN` or positive or negative infinity.
+- **Irregular rate** means the stream does not promise a fixed number of samples per second.
+- **Normalized** means a direction or rotation has been scaled to its standard length. Some stream unit fields use the exact word `normalized`.
+
+## Command-line app
+
+`vicon-lsl-bridge` accepts these options:
+
+| Option | Default | Rule |
 | --- | --- | --- |
-| `--server <ip:port>` | `localhost:801` | Sets the Vicon DataStream endpoint |
-| `--marker-stream <name>` | `ViconMarkers` | Sets the marker LSL stream name |
-| `--segment-stream <name>` | `ViconSegments` | Sets the segment LSL stream name |
-| `--reconnect-interval <ms>` | `3000` | Requires an integer from 1 through `INT_MAX` |
-| `--help` | n/a | Prints usage and exits 0 |
+| `--server <ip:port>` | `localhost:801` | Sets the Vicon DataStream address. |
+| `--marker-stream <name>` | `ViconMarkers` | Sets the marker stream name. |
+| `--segment-stream <name>` | `ViconSegments` | Sets the segment stream name. |
+| `--reconnect-interval <ms>` | `3000` | Accepts a whole number from 1 through `INT_MAX`. |
+| `--help` | None | Prints help and exits with code 0. |
 
-Unknown options, missing values, and invalid reconnect intervals print an error plus usage and exit 1. The removed relay-style options `--no-hololens-gaze`, `--gaze-port`, and `--gaze-stream` remain errors; HoloLens gaze is produced natively by the Unity application.
+An unknown option, missing value, or invalid reconnect interval prints an error and the help text, then exits with code 1.
 
-The startup diagnostics identify the configured server, marker stream, and segment stream and do not advertise a desktop gaze relay.
+The old relay options `--no-hololens-gaze`, `--gaze-port`, and `--gaze-stream` remain invalid. The Unity app sends HoloLens gaze directly to LSL.
 
-**Contract:** option spellings, defaults, accepted value domain, action/exit behavior, and native-HoloLens ownership remain stable.
+At startup, the app reports the chosen server, marker stream, and segment stream. It does not claim to relay gaze.
 
-## Desktop bridge session
+Keep all option names, defaults, accepted values, exit codes, and HoloLens ownership unchanged.
 
-### Connection and retry
+## Desktop bridge
 
-- The client connects in Vicon `ServerPush` mode and enables segment and marker data.
-- A failed connect retries after the configured interval until stopped.
-- Retry sleep is divided into at most 100 ms intervals so `stop()` is observed promptly.
-- A successful connection must yield an initial frame before streams are initialized.
-- Setup, initial-frame, or discovery failure disconnects and retries; a failed layout is not partially published.
-- `stop()` changes the atomic run flag. A stopped `ViconLSLBridge` instance does not reset that flag in `run()` and is therefore not currently reusable as a fresh session.
+### Connect and retry
 
-### Discovery and layout
+- Connect in Vicon `ServerPush` mode.
+- Enable marker and segment data.
+- After a failed connection, wait for the chosen reconnect interval and try again until stopped.
+- Split the wait into pieces no longer than 100 ms so Stop responds quickly.
+- Read one Vicon frame before creating any LSL stream.
+- If setup, the first frame, or layout discovery fails, disconnect and try again. Do not publish part of a layout.
+- `stop()` only changes the run flag.
+- Calling `run()` on a stopped `ViconLSLBridge` does not reset that flag. A stopped object is not reusable as a new session.
 
-- Subject, marker, and segment order follows Vicon SDK enumeration order.
-- Any failed subject count/name, marker count/name, or segment count/name aborts discovery and discards the partial layout.
-- Empty marker and/or segment layouts are healthy. The corresponding stream object is configured but creates no LSL outlet, and empty pushes report success.
-- Layout is rediscovered after each 100 successfully processed frame iterations.
-- A changed marker or segment layout destroys and recreates both Vicon outlets.
-- A layout-discovery error during a periodic check reports diagnostics but does not by itself claim a layout change.
+### Discover the layout
 
-### Frame and failure handling
+- Keep the subject, marker, and segment order returned by the Vicon SDK.
+- If any count or name read fails, stop discovery and discard the partial result.
+- An empty marker or segment layout is valid. No LSL stream is created for that empty group, and an empty send reports success.
+- Check the layout after every 100 successfully handled frame loops.
+- If either marker or segment layout changes, close and recreate both Vicon streams.
+- If a repeating layout check fails, report the error but do not claim that the layout changed.
 
-- Marker and segment reads retain frame number, subject/object name, operation name, status, SDK result text, and diagnostic message until conversion at the outlet boundary.
-- Both outlets receive the same selected frame timestamp.
-- A failure to push either outlet ends the current streaming session. Both outlets are destroyed, the Vicon client is disconnected, and reconnect/recreation follows.
-- Stream source IDs remain stable across reconnect/recreation, and the timestamp monotonicity state remains alive across those reconnects.
-- Session cleanup clears layout, frame counters, diagnostic aggregation, and last diagnostic status before reporting disconnected.
+### Read and send frames
 
-### Diagnostics and status
+- Keep the Vicon frame number, subject or object name, operation name, SDK result, and readable error message until values reach the LSL stream boundary.
+- Use the same timestamp for marker and segment samples from one frame.
+- If either LSL send fails, end the current session. Close both streams, disconnect from Vicon, and reconnect.
+- Keep source IDs stable when streams reconnect or are recreated.
+- Keep the timestamp guard alive across reconnects so time cannot move backward.
+- During session cleanup, clear the layout, frame counters, grouped errors, and last error status before reporting `Disconnected`.
 
-- Read failures are grouped by operation, subject, object, SDK result, and message.
-- A diagnostic is logged on its first occurrence and every 100th repeat by default.
-- The reported summary states the diagnostic count and includes the first formatted diagnostic.
-- The first clean frame after a reported diagnostic clears aggregation and reports recovery.
-- `BridgeStatus` reports state, current marker/segment counts, the current Vicon frame number, and a message.
+### Report errors and status
 
-## LSL stream contracts
+- Group read errors by operation, subject, object, SDK result, and message.
+- Log the first copy of an error and every 100th repeat by default.
+- The summary shows the repeat count and the first formatted error.
+- The first clean frame after a reported error clears the group and reports recovery.
+- `BridgeStatus` includes the state, marker count, segment count, Vicon frame number, and a message.
 
-### Shared Vicon rules
+## LSL streams
 
-| Property | Marker and segment behavior |
+### Rules shared by Vicon streams
+
+| Item | Current value |
 | --- | --- |
-| Stream type | `MoCap` |
-| Channel format | `double64` |
-| Nominal rate | Positive finite Vicon frame rate, otherwise LSL irregular rate |
-| Source ID | `vicon_markers_<hostname>` or `vicon_segments_<hostname>`; hostname falls back to `default` |
-| Timestamp | Estimated acquisition time in the local LSL clock domain |
-| Layout change | Outlet is destroyed and recreated with the new schema |
-| Empty layout | No outlet is created; the configured stream remains healthy |
+| Type | `MoCap` |
+| Value format | `double64` |
+| Expected rate | The positive, finite Vicon frame rate; otherwise LSL irregular rate |
+| Marker source ID | `vicon_markers_<hostname>` |
+| Segment source ID | `vicon_segments_<hostname>` |
+| Missing hostname | Use `default` |
+| Timestamp | Estimated acquisition time in the local LSL clock |
+| Layout change | Close the old stream and create a new one |
+| Empty layout | Create no LSL stream and report success |
 
-The following metadata values are observable contracts for both streams:
+Both Vicon streams include these exact metadata values:
 
 - `acquisition/device = Vicon`
 - `acquisition/sdk = ViconDataStreamSDK`
@@ -89,37 +106,45 @@ The following metadata values are observable contracts for both streams:
 - `synchronization/offset_mean = 0`
 - `synchronization/can_drop_samples = true`
 
-#### `ViconMarkers`
+### `ViconMarkers`
 
-- The stream name is configurable; the default is `ViconMarkers`.
-- Each discovered `(subject, marker)` contributes four channels in discovery order:
-  - `<subject>:<marker>:X`, `Y`, `Z`, units `mm`
-  - `<subject>:<marker>:Valid`, unit `bool`
-- A valid marker emits XYZ and numeric valid flag `1.0`.
-- An occluded, SDK-error, or disconnected marker emits `NaN, NaN, NaN, 0.0`.
+- The default name is `ViconMarkers`, and users may change it.
+- Each `(subject, marker)` pair adds four values in Vicon discovery order.
+- The labels are `<subject>:<marker>:X`, `<subject>:<marker>:Y`, `<subject>:<marker>:Z`, and `<subject>:<marker>:Valid`.
+- X, Y, and Z use `mm`. `Valid` uses `bool`.
+- A good marker sends XYZ and `1.0`.
+- A hidden marker, SDK error, or disconnected marker sends `NaN, NaN, NaN, 0.0`.
 
-#### `ViconSegments`
+### `ViconSegments`
 
-- The stream name is configurable; the default is `ViconSegments`.
-- Each discovered `(subject, segment)` contributes seven channels in discovery order:
-  - `<subject>:<segment>:X`, `Y`, `Z`, units `mm`
-  - `<subject>:<segment>:QX`, `QY`, `QZ`, `QW`, units `quaternion`
-- A segment is valid only when both translation and quaternion reads are valid.
-- If either read is invalid or occluded, all seven values are `NaN`.
-- There is no segment valid-flag channel.
+- The default name is `ViconSegments`, and users may change it.
+- Each `(subject, segment)` pair adds seven values in Vicon discovery order.
+- The labels are `<subject>:<segment>:X`, `<subject>:<segment>:Y`, `<subject>:<segment>:Z`, `<subject>:<segment>:QX`, `<subject>:<segment>:QY`, `<subject>:<segment>:QZ`, and `<subject>:<segment>:QW`.
+- X, Y, and Z use `mm`. The four-number rotation values use the exact unit name `quaternion`.
+- A segment is good only when both its position and rotation reads are good.
+- If either read fails or is hidden, send seven `NaN` values.
+- The segment stream has no separate valid value.
 
 ### `HoloLensGaze`
 
-- The Unity configuration defaults are name `HoloLensGaze`, type `Gaze`, and source ID `hololens2_gaze`.
-- The outlet is `double64`, nominally 90 Hz, and has exactly 21 channels.
-- Stream identity plus channel order, labels, and units are defined by `stream-contracts/hololens-gaze.json` and generated into both languages. The order is combined origin/direction/valid, left-eye origin/direction/valid, then right-eye origin/direction/valid.
-- Origins use `meters`, directions use `normalized`, and valid flags use `bool`.
-- The outlet is created only when the tracker exposes the exact required 90 Hz mode and the spatial graph node is available.
-- The original positive finite capture timestamp is passed to LSL. Samples with invalid timestamps are dropped rather than retimestamped.
-- Individual-eye fields remain invalid when the tracker does not support them; the fixed 21-channel schema does not change.
-- A persistent provider failure causes worker shutdown, tracker re-enumeration, and later outlet recreation. An outlet/worker failure that is not a recoverable provider failure disables publishing after logging the error.
+- Default name: `HoloLensGaze`.
+- Default type: `Gaze`.
+- Default source ID: `hololens2_gaze`.
+- Value format: `double64`.
+- Expected rate: exactly 90 Hz.
+- Value count: exactly 21.
 
-Observable gaze acquisition metadata includes:
+`stream-contracts/hololens-gaze.json` defines the stream name defaults, labels, order, and units for both C++ and C#. Values appear in this order: combined origin, direction, and valid flag; left-eye origin, direction, and valid flag; right-eye origin, direction, and valid flag.
+
+Origins use `meters`, directions use `normalized`, and valid values use `bool`.
+
+The app creates the stream only after the tracker reports an active 90 Hz mode and supplies a spatial graph node. It sends the original positive, finite capture timestamp. It drops a sample with a bad timestamp instead of giving it a new time.
+
+If the tracker does not support data for one eye, that eye stays in the 21-value layout and is marked invalid.
+
+A lasting provider error stops the worker, restarts tracker discovery, and later recreates the stream. A fatal worker or stream error that is not a recoverable provider error disables publishing after it logs the error.
+
+The gaze stream includes these values:
 
 - `device = HoloLens2`
 - `sdk = Microsoft.MixedReality.EyeTracking`
@@ -130,127 +155,147 @@ Observable gaze acquisition metadata includes:
 - `clock_domain = lsl_local_clock`
 - `coordinate_frame = hololens_stationary_shared_with_gaze`
 - `coordinate_units = meters`
-- synchronization backlog policy `drop_when_capture_span_exceeds_25ms_retain_latest`
+- Backlog rule: `drop_when_capture_span_exceeds_25ms_retain_latest`
 
 ### `HoloLensModelTargetPose`
 
-- The Unity configuration defaults are name `HoloLensModelTargetPose`, type `Calibration`, and source ID `hololens2_stair_model_target`; these values and the channel schema are generated from `stream-contracts/hololens-model-target.json`.
-- The stream is `double64` with LSL irregular rate and eight channels:
-  - `PositionX`, `PositionY`, `PositionZ` in `meters`
-  - `RotationX`, `RotationY`, `RotationZ`, `RotationW` in `normalized`
-  - `Tracked` in `bool`
-- A tracked Unity pose is reflected into the published right-handed basis: position `(x, y, -z)` and quaternion `(-x, -y, z, w)`.
-- An untracked pose emits seven `NaN` values and `Tracked = 0.0`.
-- The sample timestamp is `LSL.local_clock()` read in `LateUpdate` immediately before encoding/pushing.
-- The coordinate-frame metadata is `hololens_stationary_shared_with_gaze`.
+`stream-contracts/hololens-model-target.json` defines these defaults and the value layout:
 
-**Contract:** Any change to a stream name default, type, source ID policy, channel order/count/units, metadata, rate, invalid encoding, timestamp, coordinate frame, or recreation behavior is a stream migration.
+- Name: `HoloLensModelTargetPose`.
+- Type: `Calibration`.
+- Source ID: `hololens2_stair_model_target`.
+- Value format: `double64`.
+- Rate: LSL irregular rate.
+- Value count: eight.
 
-## LabRecorder remote-control behavior
+The values are `PositionX`, `PositionY`, and `PositionZ` in `meters`; `RotationX`, `RotationY`, `RotationZ`, and `RotationW` in `normalized`; and `Tracked` in `bool`.
 
-### Connection and command protocol
+A tracked Unity pose is converted to the published right-handed coordinates:
 
-- The default RCS host is `localhost`; the default port is `22345`.
-- A connection attempt resets queued/active work, aborts the previous socket, sets recording state to unknown, and starts the connection timeout.
-- Commands are newline terminated and processed one at a time in queued batches.
-- The next command is sent only after the current response begins with `OK`. Leading whitespace and line breaks are ignored, and fragmented replies are accumulated.
-- An unexpected reply, socket error, command timeout, or mid-command disconnect fails active work, clears queued work, sets recording state unknown, and closes the connection.
-- Connection and command timeouts are independent.
+- Position `(x, y, z)` becomes `(x, y, -z)`.
+- Rotation `(x, y, z, w)` becomes `(-x, -y, z, w)`.
 
-### Command ordering
+When the target is not tracked, send seven `NaN` values and `Tracked = 0.0`.
+
+Read `LSL.local_clock()` in `LateUpdate` just before encoding and sending the sample. Use `hololens_stationary_shared_with_gaze` as the coordinate-frame metadata.
+
+Treat any of these as a stream change that needs its own move plan:
+
+- A new stream name default, type, or source ID.
+- A new value count, order, label, unit, or invalid value.
+- A new metadata value, rate, timestamp, coordinate frame, or recreation rule.
+
+## LabRecorder remote control
+
+### Connection and replies
+
+- Default host: `localhost`.
+- Default port: `22345`.
+- A new connection request stops both timers, clears queued work, and fails active work.
+- It then closes the old socket, sets recording state to unknown, and starts the new connection timeout.
+- End each command with a newline.
+- Run commands one at a time in queued groups.
+- Send the next command only after the current reply begins with `OK`.
+- Ignore spaces, tabs, and line breaks before `OK`.
+- Keep partial replies until enough text arrives.
+- An unexpected reply, socket error, command timeout, or disconnect during a command fails active work and clears later work.
+- It also sets recording state to unknown and closes the connection.
+- Connection and command timeouts stay separate.
+
+### Command order
 
 - Refresh: `update`
-- Filename update: one `filename` command
-- Start without selection: `filename`, `start`
-- GUI-controlled start with selection: `update`, `select all`, `filename`, `start`
+- Change filename: `filename`
+- Start without stream selection: `filename`, `start`
+- Start from the desktop app: `update`, `select all`, `filename`, `start`
 - Stop: `stop`
 
-The pre-start `update` followed by `select all` is required so streams that appeared after LabRecorder's previous discovery are included.
+The `update` and `select all` steps must run before Start so LabRecorder includes streams that appeared after its last refresh.
 
 ### Filename fields
 
-Supported template tokens are:
-
-| Token | Field |
+| Token | Value |
 | --- | --- |
-| `%p` | participant |
-| `%s` | session |
-| `%b` | task/block |
-| `%r`, `%n` | run |
-| `%a` | acquisition |
-| `%m` | modality |
+| `%p` | Participant |
+| `%s` | Session |
+| `%b` | Task or block |
+| `%r`, `%n` | Run |
+| `%a` | Acquisition |
+| `%m` | Modality |
 
-Sanitization replaces `{` and `}` with `_`, replaces CR/LF with spaces, and trims surrounding whitespace. Empty fields are omitted from the RCS `filename` command.
+Replace `{` and `}` with `_`, replace line breaks with spaces, and remove spaces at the start and end. Leave empty fields out of the remote `filename` command.
 
-The GUI refuses recording start unless:
+Do not start recording unless:
 
-- The study root is nonempty, exists, and is a directory.
-- The template is nonempty.
-- Participant, session, task, acquisition, and modality are nonempty.
-- No known or unknown `%` placeholder remains unresolved.
-- The rendered path preview is nonempty.
+- The study folder is set, exists, and is a folder.
+- The filename pattern is not empty.
+- Participant, session, task, acquisition, and modality are not empty.
+- No known or unknown `%` token remains in the result.
+- The final path preview is not empty.
 
-The default template is:
+The default pattern is:
 
 `sub-%p/ses-%s/%m/sub-%p_ses-%s_task-%b_acq-%a_run-%r_%m.xdf`
 
-### Process ownership
+### LabRecorder process ownership
 
-- A valid configured executable is preferred; otherwise the bundled `labrecorder/LabRecorder.exe` beside the GUI is used when present.
-- An automatically or manually launched process is marked owned by the GUI.
-- RCS connection is retried every 250 ms for up to 15 seconds while it is neither connected nor already connecting.
-- Closing the GUI terminates, then if needed kills, only an owned LabRecorder process.
+- Use a valid user-selected program first. Otherwise, use `labrecorder/LabRecorder.exe` beside the desktop app when it exists.
+- A LabRecorder started by the desktop app is owned by the desktop app.
+- Retry the remote connection every 250 ms for up to 15 seconds, but only while it is neither connected nor already connecting.
+- When the desktop app closes, ask only an owned LabRecorder to exit. If needed, force-close only that owned process.
 
-## Desktop GUI behavior
+## Desktop app
 
-- Starting creates one `BridgeWorker` from the current server/marker/segment fields, persists settings, disables those fields, and enables Stop.
-- Status displays bridge state, counts, frame number, and a GUI-derived frame rate.
-- Streaming status is considered stale after three seconds without a status update; the displayed rate becomes `0.0 Hz` and readiness reports staleness.
-- Status updates normally arrive with the bridge's 100-frame layout-check cadence, not on every frame.
-- Closing requests bridge stop. If recording state is `Recording`, it also queues Stop.
-- Close readiness waits up to four seconds for the bridge and up to fifteen seconds for an acknowledged recording stop before finalizing and stopping an owned recorder process.
-- Recording buttons follow `LabRecorderRuntimePolicy`; bridge streaming is reported in readiness but is not itself a prerequisite in `canStartRecording`.
-- Valid filename edits are synchronized to a connected, non-recording LabRecorder after a 300 ms debounce.
+- Start takes the current server and stream names, saves them, disables those fields, starts one bridge worker, and enables Stop.
+- Status shows bridge state, marker and segment counts, frame number, and a rate calculated by the GUI.
+- A streaming status becomes stale after three seconds without an update. The displayed rate then becomes `0.0 Hz`, and readiness reports that status is stale.
+- Normal streaming updates follow the bridge's 100-frame layout-check timing, not every frame.
+- Closing asks the bridge to stop. If recording state is exactly `Recording`, closing also asks LabRecorder to stop.
+- Closing waits up to four seconds for the bridge and up to 15 seconds for LabRecorder to confirm Stop. It then finishes closing and stops an owned LabRecorder process.
+- Recording buttons follow `LabRecorderRuntimePolicy`. Bridge streaming appears in readiness text but is not a hard requirement inside `canStartRecording`.
+- A valid filename change is sent to a connected, non-recording LabRecorder 300 ms after typing stops.
 
-## Preview behavior
+## Preview
 
-### Live preview
+### Live data
 
-- Defaults resolve `ViconMarkers`, `ViconSegments`, `HoloLensGaze`, and `HoloLensModelTargetPose` by exact stream name.
-- Resolver results are retried once per second. Full inlet metadata is requested when possible; fixed HoloLens channel labels provide a fallback for incomplete metadata.
-- Inlets use live LSL clock synchronization.
-- A stream is fresh for 500 ms after its most recent sample.
-- At most 16 samples per inlet are pulled in one polling pass; the latest is retained.
-- A marker update anchors a frame. Fresh segment and gaze samples are included only when within the configured timestamp tolerance, default 50 ms.
-- If no marker updated, a segment or gaze update can emit a fallback frame. When both updated, the later timestamp anchors the fallback.
-- `*_stream_present` indicates inlet connection, not freshness or presence of parsed values.
-- Vicon positions are scaled from millimetres to metres for display. Gaze input remains metre based.
-- Automatic calibration collects 20 stable tracked target samples using the fixed stair profile and applies the result only for the current preview session. Manual controls remain persistent.
+- By default, find `ViconMarkers`, `ViconSegments`, `HoloLensGaze`, and `HoloLensModelTargetPose` by exact name.
+- Try again once per second when a stream is missing.
+- Read full LSL metadata when possible. Use the fixed HoloLens labels if that metadata is incomplete.
+- Ask LSL to correct clock differences for live data.
+- Treat a stream as fresh for 500 ms after its newest sample.
+- Read at most 16 samples from one stream in one pass and keep the newest.
+- A new marker sample sets the frame time. Include fresh segment and gaze data only when each is within the time limit, which is 50 ms by default.
+- Without a new marker, a new segment or gaze sample may make a frame. If both update, use the later time.
+- `*_stream_present` means the LSL input is connected. It does not mean the stream is fresh or contains parsed values.
+- Convert Vicon positions from millimetres to metres for display. Gaze is already in metres.
+- Automatic stair alignment uses 20 stable target samples and lasts only for the current preview session. Manual controls stay saved.
 
-### Merged CSV playback
+### Merged CSV files
 
-- The first row supplies labels.
-- `relative_time` is preferred as frame time.
-- Otherwise `lsl_time` is made relative to the first finite LSL time.
-- Otherwise the zero-based row index is used.
-- Marker, segment, and gaze columns are parsed into the shared `PreviewFrame` representation.
+- Use the first row as labels.
+- Prefer `relative_time` for frame time.
+- Otherwise, subtract the first finite `lsl_time` from each finite `lsl_time`.
+- Otherwise, use the row number starting at zero.
+- Turn marker, segment, and gaze columns into the shared `PreviewFrame` form.
 
-### XDF playback
+### XDF files
 
-- The custom reader loads previewable numeric streams; string streams are counted/skipped.
-- Incomplete final chunks are ignored only when the remaining variable-length header or declared chunk body is truncated. Other malformed input raises an error.
-- Implicit timestamps require a preceding timestamp and a positive nominal rate.
-- Recorded clock offsets are fitted and applied once; corrected regressions are repaired to strict monotonicity.
-- The master-stream preference is markers, segments, another stream whose name contains `Vicon`, gaze, then any numeric stream.
-- Other streams are nearest-matched by corrected absolute timestamp within tolerance.
-- Display time starts at zero relative to the corrected first master timestamp.
-- Shared-world gaze may be automatically calibrated from a stable target window. Legacy `eye_tracker_space` gaze is displayed without target calibration.
+- Read numeric streams that the preview understands. Count and skip string streams.
+- Ignore an incomplete final chunk only when its remaining length header or declared body is cut off. Report other malformed data as an error.
+- A missing timestamp may be rebuilt only when an earlier timestamp and a positive expected rate are available.
+- Fit and apply recorded clock offsets once.
+- Repair corrected timestamps so they always increase.
+- Choose the main stream in this order: markers, segments, another stream with `Vicon` in its name, gaze, then any numeric stream.
+- Match other streams to the nearest corrected full timestamp within the chosen time limit.
+- Show playback time from zero, based on the first corrected main-stream timestamp.
+- Shared-world gaze may use automatic stair alignment. Old `eye_tracker_space` gaze may be shown but never aligned from the target.
 
-## Persisted settings contract
+## Saved settings
 
-Organization is `ViconLSL`; application is `ViconLSLBridge`.
+Settings use organization `ViconLSL` and application `ViconLSLBridge`.
 
-Bridge/recording keys:
+Bridge and recording keys:
 
 - `server`, `markerStream`, `segmentStream`
 - `recordingRoot`, `recordingTemplate`
@@ -265,41 +310,45 @@ Preview keys:
 - `preview/gazeRx`, `preview/gazeRy`, `preview/gazeRz`
 - `preview/stairModel`
 
-Loading intentionally removes obsolete automatic-calibration keys `preview/gazeUseQuaternion`, `preview/gazeQTx`, `preview/gazeQTy`, `preview/gazeQTz`, `preview/gazeQx`, `preview/gazeQy`, `preview/gazeQz`, and `preview/gazeQw`.
+Loading removes these old automatic-alignment keys:
 
-Changing or removing a current key requires a settings migration that reads the old key and proves retained user configuration.
+- `preview/gazeUseQuaternion`
+- `preview/gazeQTx`, `preview/gazeQTy`, `preview/gazeQTz`
+- `preview/gazeQx`, `preview/gazeQy`, `preview/gazeQz`, `preview/gazeQw`
 
-## Build and packaging contract
+Changing a current key needs a plan that reads the old value and proves that saved user settings still work.
 
-Preserve:
+## Build and package names
 
-- CMake cache options beginning `VICON_LSL_` and `VICON_LSL_BRIDGE_`.
-- Targets `vicon-lsl-bridge-logic`, `vicon-lsl-bridge-runtime`, `vicon-lsl-bridge`, `vicon-lsl-bridge-gui`, and Windows portable/package targets.
-- The ability to run dependency-light tests with runtime, GUI, and test-framework fetching disabled.
-- CLI and GUI executable names and the packaged `labrecorder`, `stair_model`, runtime, and license directory layout.
-- The generated-contract check and platform-neutral managed test project.
+Keep:
 
-Dependency upgrades and packaging-layout changes must be separate from module cleanup.
+- CMake options that begin with `VICON_LSL_` or `VICON_LSL_BRIDGE_`.
+- Targets `vicon-lsl-bridge-logic`, `vicon-lsl-bridge-runtime`, `vicon-lsl-bridge`, `vicon-lsl-bridge-gui`, and the Windows package targets.
+- The C++ checks that run without the runtime, GUI, or a downloaded test library.
+- Program names and the packaged `labrecorder`, `stair_model`, runtime, and license folders.
+- The generated-stream check and the device-independent C# check project.
 
-## Validation checklist for behavior-preserving passes
+Handle dependency updates and package-layout changes separately from code cleanup.
 
-Before merge, select all rows affected by the pass:
+## Before merging a code cleanup
 
-- [ ] Public headers compile through their existing paths and signatures.
-- [ ] CLI defaults, help/error cases, output categories, and exit codes match the baseline.
-- [ ] Marker and segment schemas, order, units, invalid encoding, nominal rate, source IDs, timestamps, and normalized XML match golden expectations.
-- [ ] Empty layout, outlet failure, recreation, and timestamp propagation tests pass.
-- [ ] Vicon discovery, timestamp, invalid-read, and diagnostic aggregation tests pass.
-- [ ] Preview parsing, math, calibration, rate, playback, CSV, and XDF golden tests pass.
-- [ ] LabRecorder command order, fragmented acknowledgement, timeout, disconnect, and filename tests pass.
-- [ ] GUI settings keys, state transitions, readiness, source switching, and close behavior match the baseline.
-- [ ] Generated stream outputs are current and channel/sample parity holds across C++ and C#.
-- [ ] Platform-neutral managed timing, transform, backlog, publisher, cancellation, and recovery tests pass.
-- [ ] Device-dependent changes complete the checklist in [device-parity-runbook.md](device-parity-runbook.md).
-- [ ] CMake configuration combinations, target names, and package inventory remain unchanged.
-- [ ] No vendor submodule revision or content changed.
+Check every line that the change may affect:
 
-## Evidence sources
+- [ ] Existing public headers still compile from the same paths with the same names and signatures.
+- [ ] Command-line defaults, help, errors, output types, and exit codes match the earlier version.
+- [ ] Marker and segment order, units, invalid values, rates, source IDs, timestamps, and LSL metadata match saved expected results.
+- [ ] Empty layouts, send failures, stream recreation, and timestamp forwarding pass.
+- [ ] Vicon discovery, timing, invalid reads, and grouped error reporting pass.
+- [ ] Preview parsing, math, alignment, rate, playback, CSV, and XDF results match.
+- [ ] LabRecorder command order, partial replies, timeouts, disconnects, and filename checks pass.
+- [ ] GUI settings, state changes, readiness, source changes, and closing behavior match.
+- [ ] Generated C++ and C# streams are current and have the same value order.
+- [ ] Device-independent HoloLens timing, conversion, queue, publishing, cancellation, and recovery checks pass.
+- [ ] A device-related change completes the [hardware test guide](device-parity-runbook.md).
+- [ ] CMake combinations, target names, and package contents stay the same.
+- [ ] No third-party submodule content or revision changed.
+
+## Main source files
 
 - `README.md`
 - `vicon-lsl-bridge/src/CommandLine.*`
@@ -316,4 +365,4 @@ Before merge, select all rows affected by the pass:
 - `hololens-gaze-lsl/Assets/Scripts/*`
 - `stream-contracts/hololens-gaze.json`
 - `stream-contracts/hololens-model-target.json`
-- Current tests under `vicon-lsl-bridge/tests` and `hololens-gaze-lsl/Tests`
+- Checks under `vicon-lsl-bridge/tests` and `hololens-gaze-lsl/Tests`

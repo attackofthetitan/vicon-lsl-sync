@@ -1,214 +1,208 @@
-# Architecture and ownership boundaries
+# How the code is organized
 
-## Purpose
+## Why this guide exists
 
-This document records the current component boundaries and dependency direction so that structural refactors can be reviewed independently from behavior changes. It describes the code at the current repository revision; it is not a proposal to change protocols, schemas, threading, or dependencies.
+This guide shows which part of the project owns each job. Use it when moving or splitting code.
 
-The governing compatibility rule is:
+A code-only cleanup may move code, but it must not change public names, program behavior, stream layouts, settings, build targets, or third-party code. Review any such behavior change separately and plan how existing users and files move forward.
 
-> Refactors may move implementation details, but they must preserve existing public source interfaces, executable behavior, stream contracts, settings, build targets, and vendor boundaries unless a separately reviewed migration explicitly changes one of them.
+Related guides:
 
-The detailed observable behavior is recorded in [behavior-contract.md](behavior-contract.md). Runtime transitions are recorded in [runtime-state-machines.md](runtime-state-machines.md), and clock/coordinate assumptions are recorded in [time-and-coordinate-semantics.md](time-and-coordinate-semantics.md).
+- [Behavior that must stay the same](behavior-contract.md)
+- [How services start, stop, and recover](runtime-state-machines.md)
+- [How time and coordinates work](time-and-coordinate-semantics.md)
 
-## Repository ownership map
+## Code owned by this project
 
-### First-party code
-
-| Area | Owner and responsibility | May depend on |
+| Path | What it does | What it may use |
 | --- | --- | --- |
-| `vicon-lsl-bridge/src` | Desktop bridge domain and runtime: configuration, command-line parsing, Vicon SDK adapter, frame mapping, stream schemas, LSL outlets, reconnect/layout orchestration | C++17; runtime files may use the Vicon SDK and liblsl |
-| `vicon-lsl-bridge/src/preview` | Dependency-light preview domain: DTOs, parsing, math, calibration, playback timing, OBJ/CSV/XDF readers, rate tracking | C++17 standard library only |
-| `vicon-lsl-bridge/src/gui` | Qt presentation and adapters: window/panel state, live LSL preview, LabRecorder remote control, process ownership, settings, rendering | Bridge runtime, preview domain, liblsl, Qt6 |
-| `hololens-gaze-lsl/Assets/Scripts` | HoloLens/Unity producers: Extended Eye Tracking acquisition, world-space transformation, gaze publishing, Vuforia target-pose publishing | Unity, Microsoft Extended Eye Tracking, Mixed Reality OpenXR, Vuforia, managed liblsl binding |
-| `stream-contracts` | Language-neutral stream schema inputs | JSON |
-| `tools/generate_stream_contracts.py` | Generates the C++ and C# gaze and model-target stream contracts from their JSON inputs | Python standard library |
-| `vicon-lsl-bridge/packaging/windows` | Windows deployment, license collection, and portable launcher/package implementation | PowerShell, Windows runtime tools |
-| `.github/workflows/build-bridge.yml`, `.github/scripts` | Cross-platform build, validation, packaging, and release orchestration | Hosted build environments and pinned actions |
+| `vicon-lsl-bridge/src` | Reads settings and command-line options, talks to Vicon, turns frames into samples, creates LSL streams, and reconnects after errors | C++17; runtime files may use the Vicon SDK and liblsl |
+| `vicon-lsl-bridge/src/preview` | Reads preview files and samples, performs preview math and calibration, controls playback, and tracks rates | C++17 standard library only |
+| `vicon-lsl-bridge/src/gui` | Shows the Qt desktop app, runs the live preview, controls LabRecorder, saves settings, and draws data | Bridge and preview code, liblsl, and Qt 6 |
+| `hololens-gaze-lsl/Assets/Scripts` | Reads HoloLens gaze, converts it to the Unity world, sends it to LSL, and sends the Vuforia target pose | Unity, Extended Eye Tracking, Mixed Reality OpenXR, Vuforia, and the managed liblsl binding |
+| `stream-contracts` | Stores the HoloLens stream layouts in JSON | JSON |
+| `tools/generate_stream_contracts.py` | Creates matching C++ and C# stream definitions from the JSON files | Python standard library |
+| `vicon-lsl-bridge/packaging/windows` | Builds safe Windows packages and gathers required license files | PowerShell and Windows build tools |
+| `.github/workflows/build-bridge.yml` and `.github/scripts` | Build, check, package, and publish the project | Hosted build systems and pinned actions |
 
-### Vendor boundaries
+## Third-party code
 
-The following paths are Git submodules declared by `.gitmodules` and are not first-party refactor scope:
+These folders are Git submodules. This project pins them but does not own their source:
 
-- `labrecorder` — upstream LabRecorder. The desktop GUI controls it through its remote-control TCP protocol and packaging includes its executables.
-- `vicon-lsl-bridge/external/vicon-datastream-sdk` — Vicon DataStream SDK wrapper/source.
-- `hololens-gaze-lsl/external/liblsl` — the UWP ARM64 liblsl fork used by the Unity application.
+- `labrecorder` contains LabRecorder. The desktop app controls it through its remote-control TCP connection and includes its programs in release packages.
+- `vicon-lsl-bridge/external/vicon-datastream-sdk` contains the Vicon DataStream SDK wrapper and source.
+- `hololens-gaze-lsl/external/liblsl` contains the ARM64 UWP liblsl fork used by Unity.
 
-A behavior-preserving cleanup must not edit these submodules. Updating a submodule revision, carrying a downstream patch, changing the LabRecorder protocol, or reconciling liblsl revisions is a separate dependency migration with its own compatibility review.
+Do not edit these folders during a normal code cleanup. Treat any new submodule revision, local third-party patch, LabRecorder protocol change, or liblsl version change as a separate dependency update.
 
-The bridge can either use an installed liblsl package or fetch the pinned revision in `vicon-lsl-bridge/CMakeLists.txt`. Changing that selection policy or revision is also a dependency migration.
+The desktop bridge can use an installed liblsl package or download the revision named in `vicon-lsl-bridge/CMakeLists.txt`. Review a change to that rule as a separate dependency update.
 
-## Build-time component graph
-
-The CMake targets form an intentional dependency gradient:
+## Build layers
 
 ```text
 vicon-lsl-bridge-logic
-  command line + schemas + frame mapper + pure preview domain
+  command line, stream definitions, frame mapping, and preview code
                  |
                  v
 vicon-lsl-bridge-runtime
-  Vicon SDK adapter + LSL outlets + bridge orchestration
+  Vicon SDK access, LSL output, and reconnect control
           |                         |
           v                         v
 vicon-lsl-bridge             vicon-lsl-bridge-gui
-  CLI executable               Qt/LSL desktop application
+command-line program            Qt desktop program
 ```
 
-Important build contracts:
+Keep these rules:
 
-- `vicon-lsl-bridge-logic` must continue to configure and build without the Vicon SDK, liblsl, Qt, or a downloaded test framework.
-- `vicon-lsl-bridge-runtime` keeps the SDK/liblsl dependencies out of the logic target.
-- `vicon-lsl-bridge` and `vicon-lsl-bridge-gui` are distinct executable entry points.
-- Existing CMake target names, cache option names, test names, and packaged executable names are public build interfaces.
-- Windows packaging depends on the current portable launcher, stair-model asset paths, LabRecorder directory layout, runtime DLL inventory, and license manifest names.
+- `vicon-lsl-bridge-logic` must build without the Vicon SDK, liblsl, Qt, or a downloaded test library.
+- `vicon-lsl-bridge-runtime` keeps Vicon SDK and liblsl code out of the logic layer.
+- The command-line and desktop apps remain separate programs.
+- Existing CMake options, target names, test names, and program filenames stay the same.
+- Windows packages keep the current launcher, stair model, LabRecorder layout, runtime libraries, and license filenames.
 
-## Runtime component graph
-
-### Desktop producer path
+## How Vicon data moves
 
 ```text
 Vicon DataStream server
         |
         v
-ViconClient -- status-bearing reads --> ViconFrameMapper
+ViconClient ---- read results ----> ViconFrameMapper
         |                                  |
-        | frame time                       | fixed-shape samples + diagnostics
+        | frame time                       | fixed-size samples and errors
         v                                  v
 ViconLSLBridge -----------------> MarkerStream / SegmentStream
                                              |
                                              v
-                                      LSL network outlets
+                                         LSL streams
 ```
 
-Ownership is intentionally narrow:
+Each class has one main job:
 
-- `ViconClient` translates SDK results into repository-owned read types. SDK-specific result values do not propagate past this adapter except as diagnostic text.
-- `ViconFrameMapper` owns discovery order, validity rules, invalid-value encoding, diagnostics, and timestamp monotonicity helpers.
-- `MarkerStream` and `SegmentStream` retain the public facades and domain-specific sample conversion. Their shared private numeric-outlet core owns `lsl::stream_info`, outlet lifetime, common stream metadata, shape validation, and push-failure handling.
-- `ViconLSLBridge` owns the blocking connection/session loop, layout checks, stream recreation, retry timing, source-ID construction, status publication, and cleanup ordering.
+- `ViconClient` turns Vicon SDK results into types owned by this project. SDK result values do not pass beyond this class, except as text in error messages.
+- `ViconFrameMapper` keeps Vicon discovery order, decides whether values are valid, creates fixed-size invalid values, gathers errors, and keeps timestamps increasing.
+- `MarkerStream` and `SegmentStream` keep their existing public interfaces. A shared private helper creates the common LSL information, checks sample size, owns the output stream, and handles send errors.
+- `ViconLSLBridge` owns the connection loop, retries, layout checks, stream replacement, source IDs, status messages, and cleanup order.
 
-### Desktop GUI and recording path
+## Desktop app work
 
-The Qt GUI owns three independent activities:
+The desktop app runs three separate jobs:
 
-1. `BridgeWorker` runs one `ViconLSLBridge` on a worker thread and relays status to `BridgeWindow`.
-2. `PreviewStreamWorker` consumes LSL streams on another worker thread and emits `PreviewFrame` values to `PreviewWidget` on the GUI thread.
-3. `LabRecorderClient` and the optional owned `QProcess` stay on the GUI thread. They control, but do not implement, recording.
+1. `BridgeWorker` runs one `ViconLSLBridge` on a background thread and sends status back to `BridgeWindow`.
+2. `PreviewStreamWorker` reads LSL streams on another background thread. It sends complete `PreviewFrame` values to the drawing code on the main GUI thread.
+3. `LabRecorderClient` and the optional LabRecorder process stay on the main GUI thread. They control recording; they do not write XDF files themselves.
 
-The preview is a consumer. It must not change producer timestamps or schemas. The built-in XDF reader is a visualization path, not the authoritative scientific import path; the README directs scientific analysis to the official XDF importers.
+The preview only reads streams. It must not change the timestamps or layouts sent by producers.
 
-### HoloLens producer path
+The built-in XDF reader is for visual checks. The official XDF tools remain the right choice for scientific analysis.
+
+## How HoloLens data moves
 
 ```text
-EyeGazeTracker watcher/session
-        |
-        v
-GazeDataProvider raw reading (publisher thread)
-        |
-        v
-timestamped raw queue
-        |
-        v
-SpatialGraphNode locate + world transform (Unity main thread)
-        |
-        v
-transformed sample queue
-        |
-        v
-GazePublisherWorker -> GazeLSLOutlet -> LSL network
+Eye tracker
+    |
+    v
+GazeDataProvider reads a timestamped value on the publishing thread
+    |
+    v
+raw queue
+    |
+    v
+Unity main thread finds the device pose and converts the ray to world space
+    |
+    v
+converted queue
+    |
+    v
+GazePublisherWorker -> GazeLSLOutlet -> LSL
 
-Vuforia target transform (Unity LateUpdate)
-        |
-        v
-VuforiaModelTargetPoseOutlet -> independent LSL stream
+Vuforia target in LateUpdate
+    |
+    v
+VuforiaModelTargetPoseOutlet -> separate LSL stream
 ```
 
-The gaze and target producers are independent outlets but share a coordinate-frame contract. HoloLens gaze is not relayed through the desktop bridge.
+Gaze and target pose use separate LSL streams, but they share one coordinate system. Gaze never passes through the desktop bridge.
 
-## Thread and object ownership
+## Which thread owns what
 
-| Owner | Thread-sensitive resources | Invariant |
+| Owner | What it owns | Rule to keep |
 | --- | --- | --- |
-| CLI process | `ViconLSLBridge`, signal stop request | `stop()` only changes the atomic run flag; the bridge loop owns connection/outlet cleanup |
-| `BridgeWorker` | `ViconLSLBridge` run loop | GUI state is updated only through queued Qt signals |
-| GUI thread | Widgets, `LabRecorderClient`, timers, optional LabRecorder `QProcess` | Socket, process, settings, and widgets remain on the GUI thread |
-| `PreviewStreamWorker` | Four LSL inlets and latest-sample state | Inlet resolution/pulling stays on the worker; gaze-transform updates are mutex protected |
-| Unity main thread | `SpatialGraphNode.TryLocate`, Unity transforms, Vuforia transform access | World-space conversion and scene objects are not moved to the publishing thread |
-| `GazePublisherWorker` thread | Provider polling, cadence, sample encoding, outlet pushes | Uses the capture timestamp already attached to `GazeSample`; it does not replace it with retrieval time |
-| HoloLens tracker gate | Tracker, node, watcher generations, both queues | Session-generation checks prevent samples or asynchronous callbacks from an old tracker lifecycle from entering a new one |
+| Command-line process | `ViconLSLBridge` and the stop request | `stop()` only changes the run flag. The bridge loop cleans up connections and streams. |
+| `BridgeWorker` | The running bridge | It updates the GUI only through queued Qt signals. |
+| Main GUI thread | Widgets, settings, timers, `LabRecorderClient`, and an optional LabRecorder process | These objects stay on the main GUI thread. |
+| `PreviewStreamWorker` | Four LSL inputs and the latest samples | It resolves and reads streams. Transform updates use a lock. |
+| Unity main thread | Unity transforms, Vuforia objects, and `SpatialGraphNode.TryLocate` | It performs world conversion and reads scene objects. |
+| `GazePublisherWorker` | Gaze timing, encoding, and LSL sends | It uses the capture time already stored in each sample. |
+| HoloLens tracker guard | Tracker sessions, watcher versions, and both queues | Old callbacks and old samples cannot enter a new tracker session. |
 
-## Public compatibility surface
+## Names and interfaces that must stay stable
 
-### C++ source API
+### C++
 
-`vicon-lsl-bridge-logic` and `vicon-lsl-bridge-runtime` publish `src` as an include directory. There is no installed development package, but the headers are still a source-level compatibility surface for repository consumers and tests.
+Keep the existing header paths, names, and function signatures for:
 
-Refactors must retain facade headers and existing names/signatures for:
-
-- `Config`, command-line result/action types, and parsing/formatting functions.
-- `ViconLSLBridge`, `BridgeState`, `BridgeStatus`, and its status callback.
-- `ViconClient` and repository-owned read DTOs.
+- `Config`, command-line results, and command-line parsing and formatting.
+- `ViconLSLBridge`, `BridgeState`, `BridgeStatus`, and the status callback.
+- `ViconClient` and its project-owned read results.
 - `MarkerStream`, `SegmentStream`, `StreamOutlet`, `StreamOutletFactory`, and `StreamPushResult`.
-- `StreamSchema`, sample aliases, mapper/discovery/diagnostic types and functions.
-- Preview DTOs and functions declared under `src/preview`.
-- Qt classes and signals/slots declared under `src/gui`.
+- `StreamSchema`, sample types, frame mapping, discovery, and error-reporting types and functions.
+- Preview types and functions under `src/preview`.
+- Qt classes, signals, and slots under `src/gui`.
 
-Moving definitions to focused private headers is allowed if the current umbrella headers continue to compile unchanged for consumers.
+Private code may move to smaller files as long as existing headers still work.
 
-### Unity source and serialized API
+### Unity and C#
 
-The following are compatibility-sensitive because Unity scenes, prefabs, or configuration assets can refer to them by type or serialized field name:
+Unity scenes and assets store type and field names. Keep these names unless the change includes a plan to update existing Unity scenes and assets:
 
 - `GazeDataProvider`, `GazeLSLOutlet`, `VuforiaModelTargetPoseOutlet`, and `GazeLSLConfig`.
-- Serialized `config`, `gazeProvider`, and `modelTarget` fields.
+- The saved `config`, `gazeProvider`, and `modelTarget` fields.
 - Public fields on `GazeLSLConfig`.
-- `GazeSample` field names and channel mapping.
-- `IGazeSampleProvider`, `IGazeSampleOutlet`, `GazePublisherWorker`, `GazeCoordinateTransform`, and `ModelTargetPoseEncoder` signatures used by platform-neutral tests or integrations.
+- `GazeSample` field names and value order.
+- Interfaces and method signatures used by the device-independent checks: `IGazeSampleProvider`, `IGazeSampleOutlet`, `GazePublisherWorker`, `GazeCoordinateTransform`, and `ModelTargetPoseEncoder`.
 
-Renaming or changing these requires a Unity migration plan and serialized-asset verification.
+### Commands, streams, files, and settings
 
-### Protocol and persistence API
+The following are public behavior even though they are not source-code interfaces:
 
-The following are public even though they are not language-level APIs:
+- Command-line options, defaults, useful messages, and exit codes.
+- LSL stream names, layouts, metadata, timing, coordinates, and replacement behavior.
+- LabRecorder command order and reply handling.
+- Saved settings names and values.
+- CSV and XDF preview rules.
+- CMake options and targets.
+- Release filenames and package contents.
 
-- CLI flags, defaults, messages used operationally, and exit codes.
-- LSL stream identity, schemas, metadata, timestamp/coordinate semantics, and outlet recreation behavior.
-- LabRecorder RCS command order and acknowledgement handling.
-- QSettings organization/application names and keys.
-- Merged CSV and XDF preview interpretation.
-- CMake options/targets and release artifact inventory.
+## How to clean up code safely
 
-## Refactor sequencing rules
+1. Record the current behavior and expected outputs.
+2. Delete code only after searches and checks prove nothing uses it.
+3. Keep the old public header while moving private work into smaller files.
+4. Put stream names and channel layouts in one source before removing duplicate stream code.
+5. Move math and state decisions out of threaded code before changing thread control.
+6. Keep dependency updates, framework changes, stream changes, coordinate changes, and new features out of a code-only cleanup.
+7. Keep live and recorded time correction separate; they follow different rules.
+8. Do not change submodules during a first-party code cleanup.
 
-1. Capture contracts and golden outputs before moving implementation.
-2. Delete only code proven unreferenced in first-party production and test paths. A test seam is not dead code merely because production does not call it directly.
-3. Keep compatibility facades while splitting oversized modules.
-4. Centralize schema/metadata definitions in a separate pass before deduplicating outlet implementations.
-5. Extract pure state and transformation logic before changing threaded orchestration.
-6. Do not combine dependency revisions, framework migrations, schema changes, coordinate changes, or new features with structural cleanup.
-7. Do not collapse live and offline synchronization into one policy; their clock-correction paths are intentionally different.
-8. Keep submodules untouched during first-party refactors.
+## Checks available now
 
-## Current validation evidence
+The repository checks:
 
-The repository currently provides:
+- Command-line behavior, stream layouts, Vicon mapping and time handling, preview parsing and math, calibration, CSV/XDF loading, playback, and rate display.
+- Stream creation and send failure, empty layouts, expected rates, and timestamp forwarding.
+- LabRecorder command order, broken-up replies, timeouts, disconnects, filename rules, window state, and saved setting names.
+- Packaged GUI layout, local LSL discovery, optional LabRecorder startup, and stair assets.
+- HoloLens channel and pose encoding, coordinate conversion, time handling, queue rules, publishing, cancellation, and recovery without Unity or hardware.
+- Generated-file freshness, cross-platform builds, and Windows package contents.
 
-- Cross-platform dependency-light C++ tests for command-line behavior, stream schemas, Vicon mapping/timestamps/diagnostics, preview parsing/math/calibration, CSV/XDF loading, playback, and rate tracking.
-- Runtime tests with injected stream outlets for outlet failure/recreation, empty layouts, nominal rates, and timestamp propagation.
-- Qt tests for LabRecorder command sequencing, fragmented replies, timeouts, disconnects, filename policy, runtime policy, and exact window settings defaults/keys.
-- A packaged GUI integration entry point covering layout/tooltips, local LSL resolution, optional bundled LabRecorder startup, and stair assets.
-- Platform-neutral managed tests for channel/pose encoding, coordinate transformation, system-relative timing, backlog policy, publisher cadence, cancellation, and recovery.
-- Generated-contract freshness checking.
-- Cross-platform build and Windows package inventory checks.
+Important gaps remain:
 
-Known gaps that must be filled before deep orchestration refactors:
+- There is no saved, normalized XML example for every complete LSL stream description.
+- There is no single saved example that sends the same fake samples through both live and XDF preview paths while keeping their different clock rules.
+- Unity, Windows device APIs, Vuforia, and physical hardware still need the [hardware test guide](device-parity-runbook.md).
+- The bridge checks cover first-frame, send-failure, and stop paths. A single fake-client scenario does not yet cover every repeating layout check and discovery error from start to finish.
 
-- No exact normalized `stream_info` XML snapshot covers every producer.
-- No fixture proves live-preview and XDF-preview parity from the same synthetic source samples while preserving their different clock policies.
-- No automated Unity/WinRT/Vuforia device validation exists; use [device-parity-runbook.md](device-parity-runbook.md).
-- The bridge lifecycle fixture covers initial-frame, outlet-failure, and stop paths; periodic layout-change and discovery-error sequences remain covered at the mapper/outlet layers rather than by one end-to-end fake-client scenario.
-
-## Evidence sources
+## Main source files
 
 - `README.md`
 - `.gitmodules`
