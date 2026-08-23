@@ -1,150 +1,150 @@
-# Runtime state machines
+# How services start, stop, and recover
 
-## Purpose
+## Why this guide exists
 
-This document makes the current lifecycle and failure transitions explicit. Refactors may redistribute these transitions among helpers or controllers, but must not change their order, timing thresholds, resource ownership, or externally reported state without a separate functional-change review.
+This guide lists the current startup, failure, retry, and shutdown order. A code-only cleanup may move this work into smaller files, but it must not change the order, wait times, owners, or reported states.
 
-Related contracts:
+Related guides:
 
-- [architecture.md](architecture.md) — component and thread ownership
-- [behavior-contract.md](behavior-contract.md) — executable, stream, settings, and protocol behavior
-- [time-and-coordinate-semantics.md](time-and-coordinate-semantics.md) — clock and frame invariants
+- [How the code is organized](architecture.md)
+- [Behavior that must stay the same](behavior-contract.md)
+- [How time and coordinates work](time-and-coordinate-semantics.md)
 
-## Desktop bridge state machine
+## Desktop bridge
 
-### States visible to callers
+### States visible to other code
 
-`BridgeState` exposes:
+`BridgeState` has four values:
 
 - `Disconnected`
 - `Connecting`
 - `Streaming`
 - `Stopped`
 
-The implementation also has internal phases: connect retry, initial-frame acquisition, layout discovery/outlet initialization, frame streaming, layout reinitialization, and cleanup.
+The bridge also performs internal steps for connection retry, first-frame reading, layout discovery, stream creation, layout replacement, and cleanup.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Connecting: run()
-    Connecting --> Connecting: connect fails / wait retry
-    Connecting --> Stopped: stop requested before session
-    Connecting --> InitialFrame: connect + SDK setup succeed
-    InitialFrame --> Connecting: initial GetFrame fails / disconnect
-    InitialFrame --> Initializing: frame acquired
-    Initializing --> Connecting: discovery or outlet init fails / disconnect + wait
-    Initializing --> Streaming: outlets configured
-    Streaming --> Streaming: frame read + both pushes succeed
-    Streaming --> Reinitializing: 100-frame check finds layout change
-    Reinitializing --> Streaming: both outlets recreated
-    Reinitializing --> Disconnected: initialization fails
-    Streaming --> Disconnected: GetFrame or either outlet fails
-    Streaming --> Disconnected: stop requested
-    Disconnected --> Connecting: cleanup + wait while still running
-    Disconnected --> Stopped: cleanup after stop
+    Connecting --> Connecting: connection fails / wait and retry
+    Connecting --> Stopped: Stop before a session starts
+    Connecting --> InitialFrame: connection and setup work
+    InitialFrame --> Connecting: first GetFrame fails / disconnect
+    InitialFrame --> Initializing: first frame arrives
+    Initializing --> Connecting: discovery or stream setup fails / disconnect and wait
+    Initializing --> Streaming: streams are ready
+    Streaming --> Streaming: frame read and both sends work
+    Streaming --> Reinitializing: 100-frame check finds a new layout
+    Reinitializing --> Streaming: both streams are recreated
+    Reinitializing --> Disconnected: stream setup fails
+    Streaming --> Disconnected: GetFrame or either send fails
+    Streaming --> Disconnected: Stop
+    Disconnected --> Connecting: clean up and wait while still running
+    Disconnected --> Stopped: clean up after Stop
     Stopped --> [*]
 ```
 
-### Entry and connection rules
+### Connect
 
-1. `run()` creates one `ViconTimestampState` outside the reconnect loop.
-2. `connectWithRetry()` reports `Connecting` before its first attempt.
-3. A failed connect reports the retry interval and waits in slices of at most 100 ms.
-4. Connection success includes `SetStreamMode(ServerPush)`, `EnableSegmentData`, and `EnableMarkerData`. Failure in any setup operation disconnects the SDK client and counts as connection failure.
-5. If stop is requested during connect retry, the loop exits and the final reported state is `Stopped`.
+1. `run()` creates one `ViconTimestampState` before the reconnect loop.
+2. `connectWithRetry()` reports `Connecting` before the first attempt.
+3. After a failed attempt, report the wait time and sleep in pieces no longer than 100 ms.
+4. A complete connection sets `ServerPush` mode and enables segment and marker data.
+5. If any setup call fails, disconnect the SDK client and treat the connection as failed.
+6. If Stop arrives during retry, leave the loop and report `Stopped`.
 
-### Initial-frame and initialization rules
+### Read the first frame and create streams
 
-1. The bridge obtains an initial Vicon frame before discovery.
-2. An initial `GetFrame` failure reports `Connecting`, disconnects, and restarts the outer connection loop immediately. Unlike a discovery/outlet initialization failure, this path does not explicitly call `waitForRetry()` before the next connect attempt.
-3. Successful initial acquisition updates `frame_count_`.
-4. Discovery is fail-fast. Any status-bearing count/name error returns an empty layout with diagnostics.
-5. Initialization clears old diagnostic aggregation only after successful discovery.
-6. The Vicon frame rate becomes the LSL nominal rate when positive and finite; otherwise outlets use irregular rate.
-7. Hostname failure uses `default` for the source-ID suffix.
-8. Marker initialization runs before segment initialization. Any thrown exception destroys both and returns failure.
-9. Empty layouts are configured successfully without constructing an outlet.
+1. Read one Vicon frame before discovering names or creating streams.
+2. If this first `GetFrame` fails, report `Connecting`, disconnect, and start the outer connection loop again. This path does not call the normal retry wait first.
+3. On success, update `frame_count_`.
+4. Stop discovery at the first failed count or name read. Return no layout and include the errors.
+5. Clear errors from an earlier session only after discovery succeeds.
+6. Use the Vicon frame rate as the LSL expected rate only when it is positive and finite. Otherwise, use irregular rate.
+7. If the computer name cannot be read, use `default` in source IDs.
+8. Create the marker stream before the segment stream. If either throws, close both and report failure.
+9. An empty layout succeeds without creating an LSL stream.
 
-### Streaming rules
+### Send frames
 
-For every inner-loop iteration:
+For each pass through the streaming loop:
 
-1. `GetFrame` must succeed; otherwise the session exits to cleanup.
-2. Candidate frame time is made finite and strictly increasing by the session-wide timestamp state. If no finite time can be selected, that frame is skipped without pushing.
-3. `buildViconFrame` performs all marker and segment reads for the known layout and returns values plus diagnostics.
-4. Marker push occurs before segment push, using the same timestamp.
-5. Read errors or occlusions become fixed-shape invalid samples and do not stop streaming.
-6. Failure of either LSL push returns false, reports a reconnect/recreate message, and exits the session.
-7. Diagnostics are recorded after both push attempts.
-8. After 100 processed loop iterations, the bridge resets the layout-check counter, reports streaming status, and rediscovers layout.
+1. Read a frame. Leave the session if `GetFrame` fails.
+2. Choose a finite timestamp that is later than the previous one. If no finite time can be made, skip that frame without sending it.
+3. `buildViconFrame` reads every known marker and segment and returns fixed-size values plus any errors.
+4. Send markers first and segments second with the same timestamp.
+5. A hidden or failed item becomes an invalid fixed-size value. It does not stop the session.
+6. If either LSL send fails, report that streams will be recreated and leave the session.
+7. Group read errors after both send attempts.
+8. After 100 handled loop passes, reset the layout counter, report status, and discover the layout again.
 
-### Layout-check transitions
+### Handle a layout check
 
-- Discovery error: diagnostics are reported, `checkLayoutChanged()` returns false, and existing streams continue.
-- Same layout: streaming continues without outlet changes.
-- Changed layout: both outlets are destroyed before rediscovery/initialization creates replacements.
-- Reinitialization failure: streaming exits to full session cleanup.
-- Reinitialization success: streaming status reports that streams were reinitialized.
+- If discovery fails, report the error and keep the existing streams.
+- If the layout is unchanged, continue streaming.
+- If it changed, close both streams before creating replacements.
+- If replacement fails, leave streaming and perform full cleanup.
+- If replacement works, report that the streams were recreated.
 
-### Session cleanup and final state
+### Clean up
 
-Cleanup order is:
+Use this order:
 
-1. Destroy marker outlet.
-2. Destroy segment outlet.
-3. Disconnect Vicon client.
-4. Reset frame count, layout-check counter, known layout, diagnostics, and last diagnostic message.
+1. Close the marker stream.
+2. Close the segment stream.
+3. Disconnect the Vicon client.
+4. Reset frame count, layout counter, known layout, grouped errors, and the last error message.
 5. Report `Disconnected`.
-6. If still running, wait the retry interval and reconnect.
-7. Otherwise report `Stopped` and return.
+6. If still running, wait and reconnect.
+7. Otherwise, report `Stopped` and return.
 
-The timestamp monotonicity state is deliberately absent from this reset list. Stable source IDs plus a persistent timestamp guard allow a recorder to treat a recreated outlet as the same recovered stream without backwards sample time.
+Do not reset the timestamp state during reconnect. Stable source IDs and always-increasing timestamps let LabRecorder treat a recreated stream as the same recovered stream.
 
-The bridge run flag is initialized true in the object and is not reset by `run()`. Current callers create a new bridge per GUI start; refactors must not silently make instance reuse a new supported behavior inside a structural pass.
+The run flag starts as true when the object is created. `run()` does not set it back to true. The desktop app creates a new bridge after each Stop.
 
-### Bridge validation scenarios
+### Bridge checks
 
-- [ ] Stop before first connection reports `Stopped` and exits promptly.
-- [ ] Repeated connection failures report retries at the configured interval.
-- [ ] Setup failure disconnects before retry.
-- [ ] Initial-frame failure reconnects without publishing a partial layout.
-- [ ] Discovery failure discards partial names and waits before retry.
-- [ ] Empty marker, empty segment, and both-empty layouts enter `Streaming` without outlets.
-- [ ] Read occlusion/error publishes invalid fixed-shape data and keeps streaming.
-- [ ] Outlet creation exception destroys any already-created companion outlet.
-- [ ] Marker or segment push failure destroys both outlets and reconnects.
-- [ ] Layout is checked at the current 100-frame cadence.
-- [ ] Layout discovery error preserves existing outlets; a true change recreates both.
-- [ ] Marker and segment samples share one timestamp.
-- [ ] Reconnect preserves strict timestamp monotonicity for stable source IDs.
-- [ ] Cleanup reports `Disconnected` before `Stopped` when a live session is stopped.
+- [ ] Stop before the first connection reports `Stopped` and returns quickly.
+- [ ] Repeated connection failures wait for the chosen interval.
+- [ ] A setup failure disconnects before retry.
+- [ ] A first-frame failure reconnects without publishing part of a layout.
+- [ ] A discovery failure discards partial names and waits before retry.
+- [ ] Empty marker, segment, or both layouts reach `Streaming` without unwanted streams.
+- [ ] Hidden or failed reads send invalid fixed-size values and keep streaming.
+- [ ] A stream-creation exception closes any companion stream already created.
+- [ ] A marker or segment send failure closes both streams and reconnects.
+- [ ] Layout checks keep the 100-frame timing.
+- [ ] A layout read error keeps current streams; a real change replaces both.
+- [ ] Marker and segment samples from one frame have the same timestamp.
+- [ ] Timestamps keep increasing after reconnect when source IDs stay the same.
+- [ ] Stopping a live session reports `Disconnected` before `Stopped`.
 
-## GUI bridge worker and window state
-
-### Worker lifecycle
+## Desktop window and bridge worker
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
     Idle --> Running: Start Streaming
-    Running --> Stopping: Stop or window close
+    Running --> Stopping: Stop or close window
     Running --> Finished: bridge returns or throws
-    Stopping --> Finished: bridge observes atomic stop
-    Finished --> Idle: QThread finished cleanup
+    Stopping --> Finished: bridge sees Stop
+    Finished --> Idle: worker thread is cleaned up
 ```
 
-- `BridgeWindow::onStart()` snapshots the three bridge fields into `Config`, saves settings, disables those fields, constructs one `BridgeWorker`, wires signals, and starts it.
-- The worker installs the status callback inside `run()` and converts bridge exceptions into a `terminal(Failed, message)` signal.
-- `onStop()` disables the Stop button and requests bridge stop; it does not directly destroy the worker.
-- `onWorkerFinished()` restores inputs/buttons, clears frame-rate/staleness tracking, schedules thread deletion, nulls the pointer, and allows pending close finalization.
+- `BridgeWindow::onStart()` copies the server and two stream names into `Config`, saves them, disables the fields, creates one `BridgeWorker`, connects its signals, and starts it.
+- The worker adds the bridge status callback inside `run()`.
+- If the bridge throws, the worker sends `terminal(Failed, message)`.
+- `onStop()` disables the Stop button and requests Stop. It does not destroy the worker itself.
+- `onWorkerFinished()` restores the controls, clears rate and stale-state data, schedules thread deletion, clears the pointer, and lets a pending window close continue.
 
-### Status freshness
+### Status age
 
-- GUI rate is derived from frame-number delta divided by elapsed GUI status time.
-- The bridge normally emits periodic streaming status with the 100-frame layout-check cadence, plus transition/diagnostic statuses.
-- If a streaming status has not arrived for more than 3000 ms, the GUI marks it stale once and displays `0.0 Hz`.
-- A new status clears the stale flag.
+- The GUI rate is the change in frame number divided by the time between GUI status messages.
+- Normal status messages follow the 100-frame layout check, with extra messages for state changes and errors.
+- If no streaming status arrives for more than 3000 ms, mark it stale once and show `0.0 Hz`.
+- A new status clears the stale mark.
 
-## LabRecorder connection and command state machines
+## LabRecorder remote connection
 
 ### Connection state
 
@@ -153,261 +153,259 @@ stateDiagram-v2
     [*] --> Disconnected
     Disconnected --> Connecting: connectToServer
     Error --> Connecting: connectToServer
-    Connected --> Connecting: replacement connectToServer
-    Connecting --> Connected: socket connected
+    Connected --> Connecting: replace the connection
+    Connecting --> Connected: socket connects
     Connecting --> Error: socket error or connection timeout
-    Connected --> Error: protocol/write/command-timeout failure
-    Connected --> Disconnected: idle remote close
-    Error --> Error: remote-close callback after failure
+    Connected --> Error: protocol, write, or command timeout
+    Connected --> Disconnected: remote closes while idle
+    Error --> Error: close callback after a failure
 ```
 
-`connectToServer()` is a replacement operation, not an additive one:
+`connectToServer()` replaces the old connection:
 
 1. Stop both timers.
-2. Clear queued batches.
-3. Fail active work as replaced, without starting another batch.
-4. Clear pending write/reply buffers.
-5. Abort the old socket.
-6. Set connection and command timeout values independently.
-7. Set recording state `Unknown`.
-8. Set connection state `Connecting`, connect, and start the connection timeout if still connecting.
+2. Clear queued command groups.
+3. Fail active work as replaced without starting another group.
+4. Clear unsent command data and partial replies.
+5. Close the old socket now.
+6. Store separate connection and command timeouts.
+7. Set recording state to `Unknown`.
+8. Set connection state to `Connecting`, begin connecting, and start the connection timer if still needed.
 
-On a successful socket connection, state becomes `Connected` but recording remains `Unknown` until this client acknowledges Start or Stop.
+After the socket connects, connection state is `Connected`. Recording state stays `Unknown` until this client receives a good reply to Start or Stop.
 
 ### Recording state
 
 ```mermaid
 stateDiagram-v2
     [*] --> Unknown
-    Unknown --> Recording: start batch acknowledged
-    Stopped --> Recording: start batch acknowledged
-    Unknown --> Stopped: stop acknowledged
-    Recording --> Stopped: stop acknowledged
-    Recording --> Unknown: connection/protocol failure
+    Unknown --> Recording: Start group succeeds
+    Stopped --> Recording: Start group succeeds
+    Unknown --> Stopped: Stop succeeds
+    Recording --> Stopped: Stop succeeds
+    Recording --> Unknown: connection or protocol fails
     Stopped --> Unknown: reconnect or failure
 ```
 
-Button policy follows current enum state, not inferred recorder state:
+Buttons use the current state; they do not guess what LabRecorder is doing:
 
-- Refresh: connected and not `Recording`.
-- Start: connected and not `Recording`, plus valid filename in the window.
-- Stop: connected and not `Stopped`.
+- Refresh is available when connected and not `Recording`.
+- Start is available when connected, not `Recording`, and the filename is valid.
+- Stop is available when connected and not `Stopped`.
 
-Thus Start is available when state is `Unknown`, and Stop is also available when state is `Unknown`.
+Both Start and Stop may therefore be available while the state is `Unknown`.
 
-### Command-batch state
+### Command groups
 
 ```mermaid
 stateDiagram-v2
     [*] --> Queued
-    Queued --> Writing: no active batch + connected
-    Writing --> AwaitingAck: full command plus newline accepted
-    AwaitingAck --> Writing: reply begins OK + more commands
-    AwaitingAck --> Complete: reply begins OK + batch exhausted
+    Queued --> Writing: connected and no active group
+    Writing --> AwaitingReply: full command and newline accepted
+    AwaitingReply --> Writing: reply starts with OK and commands remain
+    AwaitingReply --> Complete: reply starts with OK and group is done
     Writing --> Failed: write error
-    AwaitingAck --> Failed: timeout, disconnect, or unexpected reply
-    Complete --> Writing: next queued batch
+    AwaitingReply --> Failed: timeout, disconnect, or bad reply
+    Complete --> Writing: next queued group
 ```
 
-Invariants:
+Keep these rules:
 
-- Only one batch is active.
-- Only one command in that batch awaits acknowledgement.
-- Partial socket writes remain in `pending_payload_`.
-- Reply fragments remain in `response_buffer_`.
-- Leading CR, LF, space, and tab are ignored before checking for `OK`.
-- Two reply bytes are sufficient to acknowledge; the protocol adapter does not wait for a full response line after `OK`.
-- Failure clears later queued work and aborts the connection.
-- A successful batch changes recording state only when its declared success state is not `Unknown`.
+- Only one group is active.
+- Only one command in that group waits for a reply.
+- Keep any part of a command that the socket has not accepted yet.
+- Keep reply pieces until `OK` can be checked.
+- Ignore leading carriage returns, line feeds, spaces, and tabs.
+- The two bytes `OK` are enough. Do not wait for the rest of the line.
+- A failure clears later queued work and closes the connection.
+- A good group changes recording state only when the group declares a state other than `Unknown`.
 
-### Automatic process startup and retry
+### Start the included LabRecorder
 
-1. After window construction, a zero-delay timer calls automatic startup.
-2. A valid configured executable wins; otherwise `labrecorder/LabRecorder.exe` under the application directory is selected.
-3. A successfully started process is GUI owned.
-4. The RCS retry timer runs every 250 ms.
-5. It attempts only while the client is neither connected nor connecting.
-6. At 15 seconds it stops and reports that RCS was not ready.
+1. After the window is ready, a zero-delay timer starts automatic setup.
+2. Use a valid user-selected program first. Otherwise, look for `labrecorder/LabRecorder.exe` beside the desktop app.
+3. Mark a successfully started process as owned by the desktop app.
+4. Retry the remote connection every 250 ms.
+5. Do not retry while connected or already connecting.
+6. Stop after 15 seconds and report that remote control was not ready.
 
-### LabRecorder validation scenarios
+### LabRecorder checks
 
-- [ ] A replacement connect fails active work and discards queued work.
-- [ ] Connection timeout does not shorten the independently configured command timeout.
-- [ ] Partial writes and fragmented `OK` replies advance exactly one command.
-- [ ] Unexpected reply text fails the connection and reports at most the first 80 bytes.
-- [ ] Start with selection sends `update`, `select all`, `filename`, `start` in order.
-- [ ] Timeout or disconnect during a batch prevents later queued commands from being sent.
-- [ ] Recording state becomes known only after acknowledged Start/Stop.
-- [ ] Bundled executable fallback and the 15-second retry limit remain unchanged.
+- [ ] Replacing a connection fails active work and clears queued work.
+- [ ] The connection timeout does not change the command timeout.
+- [ ] Partial writes and split `OK` replies move forward by exactly one command.
+- [ ] A bad reply closes the connection and reports no more than its first 80 bytes.
+- [ ] Start sends `update`, `select all`, `filename`, and `start` in that order.
+- [ ] A timeout or disconnect stops all later commands in the group.
+- [ ] Recording state changes only after a confirmed Start or Stop.
+- [ ] The included-program fallback and 15-second limit stay the same.
 
-## Window close state machine
+## Closing the desktop window
 
 ```mermaid
 stateDiagram-v2
     [*] --> Open
     Open --> ClosePending: closeEvent
-    ClosePending --> ClosePending: poll every 50 ms
-    ClosePending --> Finalizing: bridge done and recording done
-    ClosePending --> Finalizing: bridge 4 s / recording 15 s limits reached
-    Finalizing --> Closed: stop owned process + deferred QWidget close
+    ClosePending --> ClosePending: check every 50 ms
+    ClosePending --> Finalizing: bridge and recording are done
+    ClosePending --> Finalizing: 4 s or 15 s limit is reached
+    Finalizing --> Closed: stop owned LabRecorder and close later
 ```
 
 On the first close request:
 
-- Set close pending and restart the elapsed timer.
-- Request bridge stop when a worker exists.
-- Queue recording Stop only when the client's recording state is exactly `Recording`.
-- Start a 50 ms close poll timer.
-- Ignore the immediate close event.
+- Mark closing as pending and restart the elapsed timer.
+- Ask the bridge worker to stop when one exists.
+- Ask LabRecorder to stop only when recording state is exactly `Recording`.
+- Start a 50 ms timer that checks whether closing can finish.
+- Ignore the first immediate close event.
 
-Readiness conditions:
+The bridge is done when `worker_ == nullptr`, or its four-second wait has ended. Recording is done when no Stop was needed, LabRecorder reports `Stopped`, or its 15-second wait has ended.
 
-- Bridge done means `worker_ == nullptr`; otherwise bridge waiting ends after 4000 ms.
-- Recording done means no stop was requested or client state is `Stopped`; otherwise recording waiting ends after 15000 ms.
-- When ready or timed out, the GUI stops only its owned LabRecorder process and posts a deferred final close.
+When both sides are done or out of time, stop only an owned LabRecorder process and post a later final close.
 
-Validation must cover normal acknowledgement, bridge overrun, recorder overrun, unknown recorder state, an externally owned recorder process, and repeated close events.
+Check normal replies, bridge timeout, recorder timeout, unknown recorder state, an outside LabRecorder process, and repeated close requests.
 
-## Preview state machines
+## Preview
 
-### Panel source state
+### Change between live and recorded data
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
     Idle --> Running: Start Preview
     Running --> Stopping: Stop Preview
-    Running --> Stopping: Open CSV/XDF queues pending source
+    Running --> Stopping: Open CSV or XDF and remember it
     Stopping --> Idle: worker finishes
-    Idle --> OfflineLoaded: pending or direct CSV/XDF load succeeds
+    Idle --> OfflineLoaded: CSV or XDF loads
     OfflineLoaded --> Playing: Play Recording
     Playing --> OfflineLoaded: Pause Recording
     OfflineLoaded --> Running: Start Preview
 ```
 
-- Starting live preview stops playback, resets widget/source trails, discards session calibration, enters calibration collection, snapshots controls into `PreviewWorkerConfig`, and starts a new worker.
-- Stop resets calibration to manual before requesting interruption.
-- A worker that does not finish within one second remains in `Stopping`; restart and file-open buttons stay disabled until the thread actually finishes.
-- Opening CSV/XDF while live sets exactly one pending source/path, requests stop, and loads only after the old worker's `finished` signal.
-- CSV and XDF use the same playback storage and clock once loaded.
+- Starting live preview stops playback, clears old trails, discards the session-only alignment, starts a new alignment collection, copies controls into `PreviewWorkerConfig`, and starts a worker.
+- Stop restores the manual transform before asking the worker to stop.
+- If a worker takes longer than one second, the panel stays in `Stopping`. Restart and file-open buttons stay disabled until the worker truly ends.
+- Opening a CSV or XDF while live stores one pending file, asks the worker to stop, and loads the file only after `finished` arrives.
+- CSV and XDF use the same playback storage and clock after loading.
 
-### Per-stream live state
+### One live stream
 
 ```mermaid
 stateDiagram-v2
     [*] --> Resolving
-    Resolving --> ConnectedNoSample: stream resolved + inlet created
-    Resolving --> Resolving: no match or connect exception / retry after 1 s
-    ConnectedNoSample --> Fresh: sample pulled
-    Fresh --> Fresh: newer sample pulled
+    Resolving --> ConnectedNoSample: stream found and input opens
+    Resolving --> Resolving: missing or open error / retry after 1 s
+    ConnectedNoSample --> Fresh: sample arrives
+    Fresh --> Fresh: newer sample arrives
     Fresh --> Stale: no sample for more than 500 ms
-    Stale --> Fresh: sample pulled
-    ConnectedNoSample --> Resolving: inlet exception
-    Fresh --> Resolving: inlet exception
-    Stale --> Resolving: inlet exception
+    Stale --> Fresh: sample arrives
+    ConnectedNoSample --> Resolving: input error
+    Fresh --> Resolving: input error
+    Stale --> Resolving: input error
 ```
 
-Connection status and freshness are distinct. `PreviewFrame::*_stream_present` reflects a connected inlet even when it has no sample or is stale.
+Connection and freshness are different. `PreviewFrame::*_stream_present` means an input is connected even when it has no sample or its last sample is old.
 
-### Calibration state
+### Stair alignment
 
 ```mermaid
 stateDiagram-v2
     [*] --> Manual
-    Manual --> Collecting: preview start or Calibrate
-    Collecting --> Collecting: tracked stable pose appended
-    Collecting --> Collecting: target lost/moved / collection reset
-    Collecting --> Manual: solve or quality check fails
-    Collecting --> AutomaticSession: 20-sample solution passes
-    AutomaticSession --> Manual: Use Manual Transform or source stop
+    Manual --> Collecting: preview starts or user selects Calibrate
+    Collecting --> Collecting: add a stable tracked pose
+    Collecting --> Collecting: target is lost or moves / restart collection
+    Collecting --> Manual: math or quality check fails
+    Collecting --> AutomaticSession: 20 good samples solve alignment
+    AutomaticSession --> Manual: Use Manual Transform or stop source
 ```
 
-- An untracked target clears the collection.
-- A pose outside tolerance from the first collected pose restarts collection with that new pose.
-- The automatic transform is in-memory only and is not persisted.
-- The worker receives transform changes under a mutex; the widget requests a view refit.
+- Losing the target clears the collected poses.
+- A pose outside the allowed movement from the first pose restarts collection from that new pose.
+- Automatic alignment stays in memory and is not saved.
+- Transform changes reach the worker through a lock. The drawing area then asks to fit the view again.
 
-## HoloLens tracker/provider state machine
+## HoloLens tracker and provider
 
-### Watcher and tracker lifecycle
+### Tracker life
 
 ```mermaid
 stateDiagram-v2
     [*] --> PermissionRequest
-    PermissionRequest --> Watching: access allowed + watcher starts
-    PermissionRequest --> Unavailable: denied or start failure
-    Watching --> OpeningTracker: tracker added
-    OpeningTracker --> Active90Hz: open + exact 90 Hz + spatial node
-    OpeningTracker --> Watching: unsupported rate, missing node, or open failure
-    Active90Hz --> Watching: active tracker removed
-    Active90Hz --> Restarting: persistent read/locate failure
-    Restarting --> PermissionRequest: old watcher/tracker stopped
-    Active90Hz --> Destroyed: component destroyed
-    Watching --> Destroyed: component destroyed
+    PermissionRequest --> Watching: access allowed and watcher starts
+    PermissionRequest --> Unavailable: denied or startup fails
+    Watching --> OpeningTracker: tracker appears
+    OpeningTracker --> Active90Hz: open, exact 90 Hz, and spatial node work
+    OpeningTracker --> Watching: wrong rate, no node, or open failure
+    Active90Hz --> Watching: active tracker is removed
+    Active90Hz --> Restarting: repeated read or pose failure
+    Restarting --> PermissionRequest: old tracker and watcher stop
+    Active90Hz --> Destroyed: Unity component is destroyed
+    Watching --> Destroyed: Unity component is destroyed
 ```
 
-Generation counters are part of correctness:
+Four counters and guards keep old work out of a new session:
 
-- `watcherGeneration` rejects completion from an obsolete watcher start.
-- `trackerLifecycleGeneration` rejects an `OpenAsync` continuation after removal/restart.
-- `sessionGeneration` tags raw readings and tells the outlet that the active tracker session changed.
-- Activating/removing/restarting a tracker resets the integer reading gate, clears both queues, and resets locate-failure counts.
+- `watcherGeneration` rejects a late result from an old watcher start.
+- `trackerLifecycleGeneration` rejects a late `OpenAsync` result after removal or restart.
+- `sessionGeneration` marks raw readings and tells the LSL output when the tracker session changes.
+- Starting, removing, or restarting a tracker resets the reading-time guard, clears both queues, and clears pose-failure counts.
 
-### Sample pipeline state
+### One gaze sample
 
-For each publishing tick:
+At each publishing step:
 
-1. `TryGetNextSample` acquires at most one raw reading while holding the tracker gate.
-2. It rejects missing, individually stale, duplicate, regressing, or invalid capture timestamps.
-3. It captures available combined and optional individual-eye tracker-space rays.
-4. It enqueues the raw reading under the 25 ms span and maximum-count policy.
-5. Unity `Update` drains at most 32 raw readings, locates each dynamic node at the original timestamp, transforms rays, and enqueues resulting `GazeSample` values.
-6. The publishing thread collapses an over-span transformed queue and dequeues the oldest retained sample.
+1. `TryGetNextSample` reads at most one raw value while holding the tracker guard.
+2. Reject a missing, old, duplicate, out-of-order, or invalid capture time.
+3. Copy the combined ray and any available left and right rays in tracker space.
+4. Add the raw reading under the 25 ms time-span and 360-item limits.
+5. Unity `Update` handles at most 32 raw readings. For each one, find the device pose at the original time, convert the rays, and add a `GazeSample` to the next queue.
+6. Before publishing, reduce an over-limit converted queue to its newest value and then take the oldest retained value.
 
-An unsuccessful locate still produces a timestamped sample with invalid rays, unless an exception triggers tracker restart. This preserves capture cadence semantics without inventing a pose.
+If finding the device pose simply fails, still make a sample at the capture time with invalid rays. If it throws repeatedly, restart the tracker. Never invent a new capture time.
 
-## HoloLens outlet state machine
+## HoloLens LSL output
 
 ```mermaid
 stateDiagram-v2
-    [*] --> WaitingForTracker: Start + references valid
-    WaitingForTracker --> Publishing: active session exposes 90 Hz
-    Publishing --> Stopping: rate/session unavailable or changed
-    Publishing --> RecoveringProvider: persistent provider exceptions
-    Publishing --> Disabled: outlet/worker fatal failure
-    RecoveringProvider --> WaitingForTracker: worker stopped + tracker restart requested
-    Stopping --> WaitingForTracker: worker stopped and resources disposed
-    Stopping --> Stopping: 500 ms stop timeout / retain resources
+    [*] --> WaitingForTracker: Start and references are valid
+    WaitingForTracker --> Publishing: active session reports 90 Hz
+    Publishing --> Stopping: rate or session disappears or changes
+    Publishing --> RecoveringProvider: provider keeps failing
+    Publishing --> Disabled: output or worker fails permanently
+    RecoveringProvider --> WaitingForTracker: worker stops and tracker restart begins
+    Stopping --> WaitingForTracker: worker stops and resources close
+    Stopping --> Stopping: 500 ms limit / keep resources
     WaitingForTracker --> Destroyed: OnDestroy
-    Publishing --> Destroyed: OnDestroy after successful stop
+    Publishing --> Destroyed: OnDestroy after a successful stop
 ```
 
-Invariants:
+Keep these rules:
 
-- Stream info and outlet are not replaced while the old worker might still call them.
-- A 500 ms worker-stop timeout returns false and retains worker/outlet ownership for a later update.
-- Provider exceptions are tolerated transiently. Consecutive failures reaching approximately one nominal second request tracker recovery.
-- Invalid capture timestamps are dropped, but publisher cadence still advances.
-- Outlet exceptions become fatal worker failures.
-- Outlet recreation uses the configured stream name/type/source ID and current nominal rate.
+- Do not replace or close the stream while the old worker may still send to it.
+- If the worker does not stop within 500 ms, keep the worker and stream and try again during a later update.
+- Brief provider errors do not replace the tracker. About one second of back-to-back provider errors starts recovery.
+- Drop bad capture timestamps, but continue the publishing schedule.
+- Treat an LSL output exception as a permanent worker failure.
+- When recreating the stream, use the saved name, type, source ID, and current expected rate.
 
-The model-target outlet has a simpler lifecycle: validate references, create once, push every `LateUpdate`, disable on creation/push exception, and release references on destruction.
+The model-target output has fewer states. It checks its references, creates one stream, and sends in every `LateUpdate`. A creation or send exception disables it. Destruction releases its references.
 
-### Device lifecycle validation
+### Device checks
 
-- [ ] Permission denied leaves the component unavailable without a partial outlet.
-- [ ] A tracker without exact 90 Hz support never starts publishing.
-- [ ] Late `OpenAsync` completion from an old lifecycle cannot replace the current tracker.
-- [ ] Removal clears both queues and prevents old-generation samples from publishing.
-- [ ] Transient provider exceptions do not immediately replace the tracker.
-- [ ] Persistent provider exceptions stop the worker before restarting the tracker.
-- [ ] A worker-stop timeout retains outlet resources until the worker exits.
-- [ ] Recreated outlet retains configured identity and does not publish backwards timestamps.
-- [ ] Component destruction stops watcher/tracker and publishing without use-after-dispose.
+- [ ] Denied permission leaves no partial stream.
+- [ ] A tracker without exact 90 Hz never starts publishing.
+- [ ] A late `OpenAsync` result from an old session cannot replace the current tracker.
+- [ ] Removal clears both queues and blocks old-session samples.
+- [ ] Brief provider errors do not restart the tracker at once.
+- [ ] Lasting provider errors stop the worker before tracker restart.
+- [ ] A worker stop timeout keeps output resources until the worker ends.
+- [ ] A recreated stream keeps its identity and never sends an earlier timestamp.
+- [ ] Destroying the component stops the watcher, tracker, and worker before releasing resources.
 
-Use the hardware procedure in [device-parity-runbook.md](device-parity-runbook.md) for evidence.
+Use the [hardware test guide](device-parity-runbook.md) to collect device evidence.
 
-## Evidence sources
+## Main source files
 
 - `vicon-lsl-bridge/src/ViconLSLBridge.cpp`
 - `vicon-lsl-bridge/src/ViconClient.cpp`
@@ -421,4 +419,4 @@ Use the hardware procedure in [device-parity-runbook.md](device-parity-runbook.m
 - `hololens-gaze-lsl/Assets/Scripts/GazePublisherWorker.cs`
 - `hololens-gaze-lsl/Assets/Scripts/GazeLSLOutlet.cs`
 - `hololens-gaze-lsl/Assets/Scripts/VuforiaModelTargetPoseOutlet.cs`
-- Existing state and recovery tests under `vicon-lsl-bridge/tests` and `hololens-gaze-lsl/Tests`
+- State and recovery checks under `vicon-lsl-bridge/tests` and `hololens-gaze-lsl/Tests`
