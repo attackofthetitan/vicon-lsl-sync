@@ -27,6 +27,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$packagingSafetyModule = (Resolve-Path -LiteralPath (
+    Join-Path $PSScriptRoot "PackagingSafety.psm1") -ErrorAction Stop).Path
+Import-Module -Name $packagingSafetyModule -Scope Local -Force `
+    -DisableNameChecking -ErrorAction Stop
+
 if ($NativeLauncherPath) {
     if ($LauncherExe) {
         throw "Specify only one of -LauncherExe and -NativeLauncherPath."
@@ -38,69 +43,6 @@ $packageManifestName = ".vicon-lsl-bridge-package-manifest"
 
 if ($ValidateOnly -and -not $UseExistingLicenseBundle) {
     throw "-ValidateOnly requires -UseExistingLicenseBundle and an existing package manifest."
-}
-function Assert-NoReparseAncestors {
-    param([string]$Path, [string]$Description = "path")
-
-    try {
-        $current = [System.IO.Path]::GetFullPath($Path)
-    } catch {
-        throw "$Description is not a valid filesystem path: $Path"
-    }
-    while ($current) {
-        if (Test-Path -LiteralPath $current) {
-            $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
-            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "$Description or an ancestor is a reparse point: $current"
-            }
-        }
-        $parentInfo = [System.IO.Directory]::GetParent($current)
-        $parent = if ($parentInfo) { $parentInfo.FullName } else { $null }
-        if (-not $parent -or $parent -eq $current) {
-            break
-        }
-        $current = $parent
-    }
-}
-
-function Assert-NoReparseTree {
-    param([string]$Root, [string]$Description = "tree")
-
-    Assert-NoReparseAncestors $Root $Description
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
-        throw "$Description was not found: $Root"
-    }
-    $rootItem = Get-Item -LiteralPath $Root -Force -ErrorAction Stop
-    if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "$Description is a reparse point: $Root"
-    }
-    $pending = New-Object System.Collections.Generic.Stack[string]
-    $pending.Push($rootItem.FullName)
-    while ($pending.Count -gt 0) {
-        $directory = $pending.Pop()
-        foreach ($item in @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop)) {
-            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "$Description contains a reparse point: $($item.FullName)"
-            }
-            if ($item.PSIsContainer) {
-                $pending.Push($item.FullName)
-            }
-        }
-    }
-}
-
-function Remove-TreeSafe {
-    param([string]$Path, [string]$Description = "tree")
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-    Assert-NoReparseAncestors $Path $Description
-    Assert-NoReparseTree $Path $Description
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
-    if (Test-Path -LiteralPath $Path) {
-        throw "Unable to remove ${Description}: $Path"
-    }
 }
 
 function Get-PackageFilePaths {
@@ -319,7 +261,8 @@ function Invoke-NativePackage {
             $verify.Dispose()
         }
     } finally {
-        Remove-TreeSafe $work "portable packaging temporary directory"
+        Remove-TreeSafe $work "portable packaging temporary directory" `
+            -InvalidRootError NotFound
     }
 }
 
@@ -329,7 +272,8 @@ function Copy-DeploymentTree {
     if (-not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
         throw "Deployment directory was not found: $SourceDirectory"
     }
-    Assert-NoReparseTree $SourceDirectory "deployment source tree"
+    Assert-NoReparseTree $SourceDirectory "deployment source tree" `
+        -InvalidRootError NotFound
     Assert-NoReparseAncestors $DestinationDirectory "deployment destination"
     New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
     if ((Get-Item -LiteralPath $DestinationDirectory -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
@@ -337,7 +281,8 @@ function Copy-DeploymentTree {
     }
     Get-ChildItem -LiteralPath $SourceDirectory -Force -ErrorAction Stop |
         Copy-Item -Destination $DestinationDirectory -Recurse -Force
-    Assert-NoReparseTree $DestinationDirectory "copied deployment tree"
+    Assert-NoReparseTree $DestinationDirectory "copied deployment tree" `
+        -InvalidRootError NotFound
 }
 
 function Find-DeploymentFile {
@@ -353,43 +298,10 @@ function Find-DeploymentFile {
     return $null
 }
 
-function Assert-X64PeFile {
-    param([string]$Path, [string]$Description)
-
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "$Description was not found: $Path"
-    }
-    $stream = [System.IO.File]::Open(
-        $Path,
-        [System.IO.FileMode]::Open,
-        [System.IO.FileAccess]::Read,
-        [System.IO.FileShare]::Read)
-    $reader = New-Object System.IO.BinaryReader($stream)
-    try {
-        if ($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5a4d) {
-            throw "$Description is not a PE executable: $Path"
-        }
-        $stream.Position = 0x3c
-        $peOffset = $reader.ReadInt32()
-        if ($peOffset -lt 0 -or ([int64]$peOffset + 6) -gt $stream.Length) {
-            throw "$Description has an invalid PE header offset: $Path"
-        }
-        $stream.Position = $peOffset
-        if ($reader.ReadUInt32() -ne 0x00004550) {
-            throw "$Description has an invalid PE signature: $Path"
-        }
-        if ($reader.ReadUInt16() -ne 0x8664) {
-            throw "$Description is not an x64 PE file: $Path"
-        }
-    } finally {
-        $reader.Dispose()
-    }
-}
-
 function Assert-MsvcRuntime {
     param([string]$Root, [string]$Description)
 
-    foreach ($required in @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")) {
+    foreach ($required in @(Get-MandatoryMsvcRuntimeDllNames)) {
         $path = Join-Path $Root $required
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "$Description is missing required x64 MSVC runtime DLL ${required}: $Root"
@@ -431,7 +343,8 @@ function Resolve-SafeOutputPath {
 function New-PackageArchive {
     param([string]$SourceDirectory, [string]$DestinationPath)
 
-    Assert-NoReparseTree $SourceDirectory "package archive source"
+    Assert-NoReparseTree $SourceDirectory "package archive source" `
+        -InvalidRootError NotFound
     $entries = @(Get-ChildItem -LiteralPath $SourceDirectory -Force -ErrorAction Stop |
         Where-Object { $_.Name -ne $StageMarkerName -and $_.Name -ne $packageManifestName })
     if ($entries.Count -eq 0) {
@@ -504,7 +417,7 @@ function Validate-LicenseBundle {
         throw "Existing license inventory does not cover every file under licenses (inventory=$($seen.Count), files=$($actualFiles.Count))"
     }
     foreach ($file in $actualFiles) {
-        $relative = $file.FullName.Substring($licensesRoot.Length).Replace('\', '\')
+        $relative = $file.FullName.Substring($licensesRoot.Length)
         if (-not $seen.Contains($relative)) {
             throw "Existing license bundle contains an unlisted file: $relative"
         }
@@ -602,7 +515,8 @@ New-Item -ItemType Directory -Path $deployPath -Force | Out-Null
 if (-not (Test-Path -LiteralPath $deployPath -PathType Container)) {
     throw "Deployment directory could not be created: $deployPath"
 }
-Assert-NoReparseTree $deployPath "deployment directory"
+Assert-NoReparseTree $deployPath "deployment directory" `
+    -InvalidRootError NotFound
 
 $stageMarkerPath = Join-Path $deployPath $StageMarkerName
 if (-not (Test-Path -LiteralPath $stageMarkerPath -PathType Leaf)) {
@@ -620,12 +534,14 @@ if ($UseExistingLicenseBundle) {
 # isolated so its Qt/LSL runtime cannot collide with the bridge runtime.
 if ($LabRecorderDeployDir) {
     $labRecorderPath = Join-Path $deployPath "labrecorder"
-    Remove-TreeSafe $labRecorderPath "LabRecorder deployment directory"
+    Remove-TreeSafe $labRecorderPath "LabRecorder deployment directory" `
+        -InvalidRootError NotFound
     Copy-DeploymentTree $LabRecorderDeployDir $labRecorderPath
 }
 if ($StairModelDir) {
     $stairPath = Join-Path $deployPath "stair_model"
-    Remove-TreeSafe $stairPath "stair-model deployment directory"
+    Remove-TreeSafe $stairPath "stair-model deployment directory" `
+        -InvalidRootError NotFound
     Copy-DeploymentTree $StairModelDir $stairPath
 }
 
@@ -665,33 +581,31 @@ $labRecorderPath = Join-Path $deployPath "labrecorder"
 if (-not (Test-Path -LiteralPath $labRecorderPath -PathType Container)) {
     throw "The deployment must contain an isolated labrecorder directory."
 }
-if (Test-Path -LiteralPath $labRecorderPath -PathType Container) {
-    foreach ($required in @("LabRecorder.exe", "LabRecorderCLI.exe", "LabRecorder.cfg", "LICENSE")) {
-        if (-not (Test-Path -LiteralPath (Join-Path $labRecorderPath $required))) {
-            $located = Find-DeploymentFile $labRecorderPath $required
-            if (-not $located) {
-                throw "LabRecorder deployment is missing ${required}: $labRecorderPath"
-            }
-            Copy-Item -LiteralPath $located.FullName -Destination (Join-Path $labRecorderPath $required) -Force
+foreach ($required in @("LabRecorder.exe", "LabRecorderCLI.exe", "LabRecorder.cfg", "LICENSE")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $labRecorderPath $required))) {
+        $located = Find-DeploymentFile $labRecorderPath $required
+        if (-not $located) {
+            throw "LabRecorder deployment is missing ${required}: $labRecorderPath"
         }
+        Copy-Item -LiteralPath $located.FullName -Destination (Join-Path $labRecorderPath $required) -Force
     }
-    $recorderLsl = Get-ChildItem -LiteralPath $labRecorderPath -Recurse -File |
-        Where-Object { $_.Name -match '^(lib)?lsl.*\.dll$' } | Select-Object -First 1
-    if (-not $recorderLsl) {
-        throw "LabRecorder deployment does not contain an lsl runtime DLL: $labRecorderPath"
-    }
-    if ($recorderLsl.Name -ne $lslRuntime.Name) {
-        throw "LabRecorder lsl runtime ($($recorderLsl.Name)) does not match bridge runtime ($($lslRuntime.Name))."
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $labRecorderPath "platforms\qwindows.dll"))) {
-        throw "LabRecorder deployment is missing Qt platforms/qwindows.dll: $labRecorderPath"
-    }
-    Assert-X64PeFile (Join-Path $labRecorderPath "LabRecorder.exe") "LabRecorder GUI executable"
-    Assert-X64PeFile (Join-Path $labRecorderPath "LabRecorderCLI.exe") "LabRecorder CLI executable"
-    Assert-X64PeFile $recorderLsl.FullName "LabRecorder liblsl runtime"
-    Assert-X64PeFile (Join-Path $labRecorderPath "platforms\qwindows.dll") "LabRecorder Qt platform plugin"
-    Assert-MsvcRuntime $labRecorderPath "LabRecorder deployment"
 }
+$recorderLsl = Get-ChildItem -LiteralPath $labRecorderPath -Recurse -File |
+    Where-Object { $_.Name -match '^(lib)?lsl.*\.dll$' } | Select-Object -First 1
+if (-not $recorderLsl) {
+    throw "LabRecorder deployment does not contain an lsl runtime DLL: $labRecorderPath"
+}
+if ($recorderLsl.Name -ne $lslRuntime.Name) {
+    throw "LabRecorder lsl runtime ($($recorderLsl.Name)) does not match bridge runtime ($($lslRuntime.Name))."
+}
+if (-not (Test-Path -LiteralPath (Join-Path $labRecorderPath "platforms\qwindows.dll"))) {
+    throw "LabRecorder deployment is missing Qt platforms/qwindows.dll: $labRecorderPath"
+}
+Assert-X64PeFile (Join-Path $labRecorderPath "LabRecorder.exe") "LabRecorder GUI executable"
+Assert-X64PeFile (Join-Path $labRecorderPath "LabRecorderCLI.exe") "LabRecorder CLI executable"
+Assert-X64PeFile $recorderLsl.FullName "LabRecorder liblsl runtime"
+Assert-X64PeFile (Join-Path $labRecorderPath "platforms\qwindows.dll") "LabRecorder Qt platform plugin"
+Assert-MsvcRuntime $labRecorderPath "LabRecorder deployment"
 
 # License collection is mandatory for a fresh package. Reusing an existing
 # bundle requires validating its immutable inventory before packaging.
@@ -726,7 +640,8 @@ if ($UseExistingLicenseBundle) {
     Validate-LicenseBundle $deployPath
 }
 
-Assert-NoReparseTree $deployPath "final deployment tree"
+Assert-NoReparseTree $deployPath "final deployment tree" `
+    -InvalidRootError NotFound
 if ($UseExistingLicenseBundle) {
     Validate-PackageManifest $deployPath
 } else {
