@@ -164,23 +164,24 @@ namespace GazeLSL
 #if ENABLE_WINMD_SUPPORT
         private void AcquireRawReadingLocked()
         {
-            TimeSpan currentSystemRelativeTime =
-                TimeSpan.FromTicks(GazeTiming.CurrentSystemRelativeTimeTicks());
+            DateTime queryTime = DateTime.Now;
+            double queryLslTime = LSL.LSL.local_clock();
+
             EyeGazeTrackerReading reading =
-                tracker.TryGetReadingAtSystemRelativeTime(currentSystemRelativeTime);
+                tracker.TryGetReadingAtTimestamp(queryTime);
             if (reading == null)
             {
                 return;
             }
 
-            long systemRelativeTimeTicks = reading.SystemRelativeTime.Ticks;
-            if (!GazeTiming.IsFreshCaptureTimestamp(
-                    systemRelativeTimeTicks,
-                    currentSystemRelativeTime.Ticks,
-                    GazeTiming.MaxBacklogSpanTicks))
+            double ageSeconds =
+                (queryTime - reading.Timestamp).TotalSeconds;
+            if (Math.Abs(ageSeconds) > 0.050)
             {
                 return;
             }
+
+            long systemRelativeTimeTicks = reading.SystemRelativeTime.Ticks;
             if (!readingGate.TryAccept(systemRelativeTimeTicks))
             {
                 return;
@@ -190,8 +191,7 @@ namespace GazeLSL
             {
                 Generation = sessionGeneration,
                 SystemRelativeTimeTicks = systemRelativeTimeTicks,
-                Timestamp = GazeTiming.SystemRelativeTicksToLslTimestamp(
-                    systemRelativeTimeTicks)
+                Timestamp = queryLslTime - ageSeconds
             };
 
             raw.Combined = ReadCombinedRay(reading);
