@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using LSL;
 using UnityEngine;
 
@@ -99,14 +98,11 @@ namespace GazeLSL
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
             acquisition.append_child_value("acquisition_mode", "extended_eye_tracking_90hz");
-            acquisition.append_child_value("timestamp", "sdk_system_relative_time");
+            acquisition.append_child_value("timestamp", "eye_gaze_tracker_timestamp");
             acquisition.append_child_value("timestamp_units", "seconds");
             acquisition.append_child_value(
-                "timestamp_conversion", "system_relative_qpc_ticks_divided_by_runtime_qpc_frequency");
-            acquisition.append_child_value(
-                "timestamp_tick_frequency_hz",
-                GazeTiming.SystemRelativeTicksPerSecond.ToString(CultureInfo.InvariantCulture));
-            acquisition.append_child_value("capture_clock_domain", "windows_qpc_system_relative");
+                "timestamp_conversion", "lsl_query_time_minus_sdk_timestamp_age");
+            acquisition.append_child_value("capture_clock_domain", "eye_gaze_tracker_datetime");
             acquisition.append_child_value("clock_domain", "lsl_local_clock");
             acquisition.append_child_value(
                 "coordinate_frame", "hololens_stationary_shared_with_gaze");
@@ -114,9 +110,9 @@ namespace GazeLSL
 
             synchronization.append_child_value("clock_domain", "lsl_local_clock");
             synchronization.append_child_value(
-                "timestamp_origin", "eye_gaze_tracker_system_relative_time");
+                "timestamp_origin", "eye_gaze_tracker_reading_timestamp");
             synchronization.append_child_value(
-                "timestamp_mapping", "direct_qpc_ticks_to_lsl_local_clock_seconds");
+                "timestamp_mapping", "query_lsl_clock_minus_query_to_capture_age");
             synchronization.append_child_value("can_drop_samples", "true");
             synchronization.append_child_value(
                 "backlog_policy", "drop_when_capture_span_exceeds_25ms_retain_latest");
