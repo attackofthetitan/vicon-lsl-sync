@@ -67,3 +67,81 @@ Do not include any of these in normal patch-level code cleanup:
 - Public command, source interface, setting, build target, or release filename changes.
 
 For one of these changes, write down the old and new behavior. Explain how existing users or files move forward and which checks prove the move is safe.
+
+## Desktop session release gate for later releases
+
+This section is prospective and does not change the completed `v1.10.5` record
+above. Apply it to any release containing the guided desktop-session work.
+
+### Configuration
+
+- [ ] A new settings scope starts with schema version 1, persists every session
+  field in one JSON value, and rejects unsupported versions without rewriting
+  them.
+- [ ] Versioned preset Reset/Save/Load/Import/Export round trips scientific
+  configuration, while geometry, splitter, tabs, and recent paths remain outside
+  presets.
+- [ ] A complete managed calibration profile round trips ID/version, physical
+  setup, stair identity/pose, coordinate frames, transform, notes, creation time,
+  quality, fallback confirmation, and retirement state.
+
+### State, failure, and shutdown
+
+- [ ] Rapid Start/Stop, conflicting refresh/filename work, split replies,
+  malformed replies, timeout, reconnect, replacement connection, process exit,
+  detach, and all connection/recording/operation policy combinations pass.
+- [ ] Close before Start transmission, during every Start command, while
+  Recording, during Stop, and after disconnect produces one deterministic final
+  recorder operation.
+- [ ] Close during bridge connect/stream/reconnect/SDK delay, preview
+  resolve/metadata/poll/calibration, file open/mapping, discovery, and verification
+  remains responsive. Repeated close requests create one shutdown sequence.
+- [ ] Four-second bridge, two-second preview/file, and 15-second recorder
+  deadlines are visible diagnostic outcomes. No GUI-thread destructor waits
+  indefinitely, and only an owned recorder may be ended.
+
+### Selection, destination, and session evidence
+
+- [ ] Bound/unbound preview names, source-identity selection, explicit
+  follow-by-name, duplicate names, newest same-source recovery, and source-ID
+  collisions across hosts are deterministic and visible.
+- [ ] XDF inventory, explicit mapping, compatible recovered-instance stitching,
+  selected/excluded summary, malformed/truncated input, and no-supported-stream
+  rejection pass.
+- [ ] All-visible remote selection and exact packaged-command-line selection
+  include the frozen intended streams and no unintended identity.
+- [ ] The displayed path is byte-for-byte the recorder destination after
+  extension, traversal/symlink, reserved-name, trailing-character, length,
+  writeability, storage, collision, overwrite, and Find Next Run checks.
+- [ ] Required/warning/information preflight, recorder-only mode, reasoned
+  override, verification success/warning/failure, and verified-only run increment
+  are preserved in the exported diagnostic bundle.
+
+### Responsiveness and accessibility
+
+- [ ] Ordinary GUI operations stay within 50 ms; live preview stays within the
+  100 ms latency target; file cancellation completes within 250 ms; latest-frame
+  delivery remains one frame; recorder queue, event log, and process output stay
+  at their documented bounds.
+- [ ] Short, one-hour, and multi-hour CSV/XDF checks respect the configured cache,
+  can seek beyond two hours, and keep exact verification statistics despite
+  visual decimation.
+- [ ] Small/default/scaled layouts keep controls reachable through scroll areas;
+  label buddies, accessible names, keyboard focus and shortcuts pass; light,
+  dark, and high-contrast rendering remains legible.
+- [ ] The painter preview passes local desktop, supported remote/virtual desktop,
+  and headless rendering checks with deterministic Fit View and Reset Camera.
+
+### Package
+
+- [ ] A clean full Windows build and registered checks pass, as does the
+  dependency-light C++ build and the generated-stream/device-independent suite.
+- [ ] The Windows package includes the desktop and command-line bridge,
+  `LabRecorder.exe`, `LabRecorderCLI.exe`, local runtime libraries, stair model,
+  launchers, and licenses at their established paths.
+- [ ] Packaged built-in GUI checks cover bundled/custom recorder lookup, an
+  existing external endpoint, portable extraction paths, settings isolation,
+  asynchronous preview-stop phases, palette/layout/accessibility, and renderer
+  operation.
+- [ ] Documentation links, whitespace, workflow/script parsing, generated files,
+  and third-party submodule revisions are clean.
