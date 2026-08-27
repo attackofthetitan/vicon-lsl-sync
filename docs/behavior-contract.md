@@ -191,8 +191,12 @@ Treat any of these as a stream change that needs its own move plan:
 
 - Default host: `localhost`.
 - Default port: `22345`.
-- A new connection request stops both timers, clears queued work, and fails active work.
-- It then closes the old socket, sets recording state to unknown, and starts the new connection timeout.
+- A new connection request is rejected while Start, Stop, acknowledged recording,
+  or uncertain sent-Start work is active on a connected endpoint.
+- Otherwise it stops both timers, clears queued work, fails active work, closes
+  the old socket, sets recording state to unknown, and starts the new connection
+  timeout. Reconnecting after connection loss preserves uncertain sent-Start
+  evidence until Stop is acknowledged.
 - End each command with a newline.
 - Run commands one at a time in queued groups.
 - Send the next command only after the current reply begins with `OK`.
@@ -202,15 +206,31 @@ Treat any of these as a stream change that needs its own move plan:
 - It also sets recording state to unknown and closes the connection.
 - Connection and command timeouts stay separate.
 
+The recorder has three independent pieces of state: connection, the last
+acknowledged recording state, and the desired recording state. Its operation is
+one of `Idle`, `Refreshing`, `UpdatingFilename`, `Starting`, `Stopping`, or
+`ShuttingDown`. The dashboard shows the active command number and bounded queue
+depth. The queue holds at most eight batches, replaces an unsent filename update
+with the newest value, rejects duplicate Start and Stop work, and makes Stop the
+next safe operation by removing queued nonessential work.
+
 ### Command order
 
 - Refresh: `update`
 - Change filename: `filename`
 - Start without stream selection: `filename`, `start`
-- Start from the desktop app: `update`, `select all`, `filename`, `start`
+- Start in **Record every visible stream** mode: `update`, `select all`,
+  `filename`, `start`
 - Stop: `stop`
 
 The `update` and `select all` steps must run before Start so LabRecorder includes streams that appeared after its last refresh.
+
+The exact-selection mode does not pretend that the graphical remote-control
+protocol has an allowlist command. It launches the packaged `LabRecorderCLI`
+with the validated absolute output path and one query for each selected stream.
+The query uses source ID when available and otherwise constrains name by host.
+The selected discovery snapshot is fixed before launch. Pressing Stop writes the
+CLI terminator, and this CLI process is owned by the desktop app.
 
 ### Filename fields
 
@@ -223,15 +243,29 @@ The `update` and `select all` steps must run before Start so LabRecorder include
 | `%a` | Acquisition |
 | `%m` | Modality |
 
-Replace `{` and `}` with `_`, replace line breaks with spaces, and remove spaces at the start and end. Leave empty fields out of the remote `filename` command.
+One normalized filename request is used for validation, display, diagnostics,
+directory creation, and the recorder command. Braces and line breaks are
+protocol-breaking and are rejected with a field-specific corrective action;
+they are not silently changed in the accepted destination. Surrounding spaces
+are trimmed during normalization. Leave empty optional fields out of the remote
+`filename` command.
 
-Do not start recording unless:
+Do not start recording unless the study root is an existing canonical directory;
+the template is a relative path; participant, session, task, acquisition,
+modality, and a positive run are present; no `%` placeholder is unresolved; and
+the canonical destination remains under the study root unless the advanced
+outside-root override is explicitly enabled. Append `.xdf` when the template
+does not already end in that extension. Reject parent traversal, symlink escape,
+absolute templates, Windows-reserved names or characters, trailing spaces or
+periods, impractical path length, an unwritable destination, and a collision
+unless overwrite is explicitly enabled. Missing parent directories are created
+only for an accepted Start request. Low or unavailable storage is a visible
+warning at the configured threshold rather than a silent condition.
 
-- The study folder is set, exists, and is a folder.
-- The filename pattern is not empty.
-- Participant, session, task, acquisition, and modality are not empty.
-- No known or unknown `%` token remains in the result.
-- The final path preview is not empty.
+The path shown in **Exact Recording Destination** must equal the path passed to
+the recorder. **Find Next Run** searches at most 1,000 positive run values for a
+nonexistent destination. Optional automatic increment runs only after the file
+exists and the configured verification-completion rule is satisfied.
 
 The default pattern is:
 
@@ -239,10 +273,21 @@ The default pattern is:
 
 ### LabRecorder process ownership
 
-- Use a valid user-selected program first. Otherwise, use `labrecorder/LabRecorder.exe` beside the desktop app when it exists.
-- A LabRecorder started by the desktop app is owned by the desktop app.
-- Retry the remote connection every 250 ms for up to 15 seconds, but only while it is neither connected nor already connecting.
-- When the desktop app closes, ask only an owned LabRecorder to exit. If needed, force-close only that owned process.
+- Probe the configured endpoint before automatic launch. Use a valid
+  user-selected program first; otherwise use `labrecorder/LabRecorder.exe`
+  beside the desktop app when it exists.
+- Launch is asynchronous, uses the executable directory as its working
+  directory, and distinguishes external, launching, owned-running,
+  owned-exited, launch-failed, and detached states.
+- Retain at most 64 KiB of child-process output and emit bounded lines to the
+  event log. A slow or failed launch never waits on the GUI thread.
+- Retry the remote connection every 250 ms for up to 15 seconds, but only while
+  it is neither connected nor already connecting.
+- Disconnecting from or closing the app around an external process never ends
+  that process. Detach deliberately relinquishes ownership.
+- End an owned process during shutdown only after Stop settles or the 15-second
+  recorder deadline expires. Give termination one further second before the
+  owned process is force-ended.
 
 ## Desktop app
 
@@ -250,18 +295,62 @@ The default pattern is:
 - Status shows bridge state, marker and segment counts, frame number, and a rate calculated by the GUI.
 - A streaming status becomes stale after three seconds without an update. The displayed rate then becomes `0.0 Hz`, and readiness reports that status is stale.
 - Normal streaming updates follow the bridge's 100-frame layout-check timing, not every frame.
-- Closing asks the bridge to stop. If recording state is exactly `Recording`, closing also asks LabRecorder to stop.
-- Closing waits up to four seconds for the bridge and up to 15 seconds for LabRecorder to confirm Stop. It then finishes closing and stops an owned LabRecorder process.
-- Recording buttons follow `LabRecorderRuntimePolicy`. Bridge streaming appears in readiness text but is not a hard requirement inside `canStartRecording`.
+- Persistent typed indicators separately show workflow, bridge, recorder,
+  preview, calibration, file, path, and verification state. A normal status
+  update never clears the persistent last error. The timestamped event log is
+  limited to 1,000 entries and can be copied or exported with configuration,
+  inventories, transitions, rates, preflight, shutdown, and verification data,
+  but not recording samples.
+- Recording controls follow the complete connection, acknowledged state,
+  desired state, operation, process, path, and preflight model. The dashboard
+  shows `STARTING`, `RECORDING`, or `STOPPING`, elapsed time, exact destination,
+  run, endpoint, ownership, stream health, storage, and separate source/input
+  coalescing and display-replacement counters.
 - A valid filename change is sent to a connected, non-recording LabRecorder 300 ms after typing stops.
+- **Start Session** guides bridge start, preview start, stream discovery,
+  preflight, and recording while leaving each independent control available.
+  **Stop Session** reverses the safe order: recording, preview, bridge, then an
+  owned recorder when requested. Partial completion remains visible and
+  stoppable.
+- Preflight classifies bridge recency, recorder readiness, exact path, selected
+  identities, freshness, schema, coordinate metadata, nominal rate, stair model,
+  and calibration as required, warning, or information. Recorder-only mode
+  deliberately removes the bridge requirement. A required failure blocks Start
+  unless **Record Anyway** receives a nonempty reason; the result and reason are
+  retained in diagnostics.
+
+Closing is one noninteractive, asynchronous state machine. It freezes new work,
+cancels discovery/file/verification work, requests preview and bridge Stop, and
+calls recorder shutdown exactly once. A Start not yet sent is canceled; if Start
+may have reached the server, Stop becomes the final recorder operation. Repeated
+close requests do not start another sequence. The window stays responsive and
+visible until every required component actually stops. Four-second bridge,
+two-second preview/file, and 15-second recorder deadlines are visible diagnostic
+outcomes, not permission to destroy a running worker. Only an owned recorder may
+be ended, and an external recorder remains untouched even after connection loss.
+Local queue settlement is not treated as a safe recorder result while a sent
+Start remains uncertain; that close records `Recorder connection lost`.
+Ordinary GUI-thread operations, including Stop requests, have a 50 ms budget and
+no GUI-thread destructor performs an unbounded wait.
 
 ## Preview
 
 ### Live data
 
-- By default, find `ViconMarkers`, `ViconSegments`, `HoloLensGaze`, and `HoloLensModelTargetPose` by exact name.
-- Try again once per second when a stream is missing.
-- Read full LSL metadata when possible. Use the fixed HoloLens labels if that metadata is incomplete.
+- The default marker and segment bindings follow the bridge output names.
+  **Preview external streams** makes those bindings independently configurable.
+- Discover name, type, source ID, host, session ID, publisher UID and creation
+  time, channel count, nominal/effective rate, coordinate frame, freshness, and
+  schema health. A role normally binds to source identity. **Follow by name** is
+  an explicit fallback for intentionally unstable source IDs.
+- A missing selected source ID does not silently fall back by name. Duplicate
+  names without a selected identity are reported as ambiguous. Multiple visible
+  instances of the same recovered source ID select the newest publisher
+  deterministically and say so; deterministic name fallback is also visible.
+- Try again once per second when a stream is missing. LSL resolve calls are
+  limited to 50 ms, metadata reads to 250 ms, and sample pulls are nonblocking.
+- Read full LSL metadata when possible. Use the fixed HoloLens labels if that
+  metadata is incomplete, but show a warning and diagnostic entry.
 - Ask LSL to correct clock differences for live data.
 - Treat a stream as fresh for 500 ms after its newest sample.
 - Read at most 16 samples from one stream in one pass and keep the newest.
@@ -269,54 +358,120 @@ The default pattern is:
 - Without a new marker, a new segment or gaze sample may make a frame. If both update, use the later time.
 - `*_stream_present` means the LSL input is connected. It does not mean the stream is fresh or contains parsed values.
 - Convert Vicon positions from millimetres to metres for display. Gaze is already in metres.
-- Automatic stair alignment uses 20 stable target samples and lasts only for the current preview session. Manual controls stay saved.
+- Deliver live frames through a one-frame latest mailbox. A configurable 30 or
+  60 Hz GUI timer consumes it, while source-rate and calibration accounting stay
+  independent. Show preview latency, source/input coalescing, and display-frame
+  replacements separately; do not call intentional display coalescing source
+  loss.
+- Automatic stair alignment starts only when requested, uses 20 stable target
+  samples, and lasts only for the current desktop session until explicitly saved
+  as a managed profile. Manual controls stay saved.
 
 ### Merged CSV files
 
+- Load on a worker while retaining the prior usable live or recorded source.
+  Report progress and honor cancellation between bounded line/sample groups. A
+  cancellation or failure never installs partial playback state.
 - Use the first row as labels.
 - Prefer `relative_time` for frame time.
 - Otherwise, subtract the first finite `lsl_time` from each finite `lsl_time`.
 - Otherwise, use the row number starting at zero.
 - Turn marker, segment, and gaze columns into the shared `PreviewFrame` form.
+- Store a bounded, visually decimated frame cache while retaining exact source
+  timing statistics separately.
 
 ### XDF files
 
-- Read numeric streams that the preview understands. Count and skip string streams.
+- Inventory every stream before assembly. Read numeric streams that the preview
+  understands, count and skip string streams, and reject a file with no supported
+  preview role.
 - Ignore an incomplete final chunk only when its remaining length header or declared body is cut off. Report other malformed data as an error.
 - A missing timestamp may be rebuilt only when an earlier timestamp and a positive expected rate are available.
 - Fit and apply recorded clock offsets once.
 - Repair corrected timestamps so they always increase.
-- Choose the main stream in this order: markers, segments, another stream with `Vicon` in its name, gaze, then any numeric stream.
+- Group candidates by role, source ID, name, host, and schema. Automatically
+  stitch compatible recovered instances across their full time ranges. A source
+  ID reused on different hosts is not assumed to be the same publisher.
+- Choose the suggested master in this order: markers, segments, another supported
+  Vicon stream, then gaze. Require an explicit mapping when incompatible
+  candidates remain, and let the user choose the master and included groups.
 - Match other streams to the nearest corrected full timestamp within the chosen time limit.
 - Show playback time from zero, based on the first corrected main-stream timestamp.
 - Shared-world gaze may use automatic stair alignment. Old `eye_tracker_space` gaze may be shown but never aligned from the target.
+- The summary names the master stream ID, selected groups and stream IDs,
+  excluded groups, stitched instances, unmatched percentages, time ranges, and
+  applied clock corrections.
+
+CSV and XDF playback share a timeline, current/duration and frame position,
+play/pause, speed-preserving seek, one-frame steps, start/end jumps, configurable
+time jumps, and an explicit loop toggle. Recent files and drag-and-drop open are
+supported. **Export Image** writes only the current preview image and never
+changes the source data. The painter renderer supplies Fit View, Reset Camera,
+expanding bounds, axes/units, a legend, valid/total counts, layout-change trail
+cleanup, palette-aware drawing, and a headless rendering path without an OpenGL
+runtime dependency.
+
+### Playback limits and responsiveness
+
+- CSV decoding retains one bounded frame cache. XDF loading can temporarily
+  retain an indexed cache, a selected/stitched assembly cache, and a decoded
+  frame cache; each is constrained by the configured 16-2,048 MiB cache size.
+  Only the decoded cache remains after a successful load.
+- The decoded preview has a 200,000-frame ceiling and an XDF stream retains at
+  most 2,000,000 stored values. Safety limits are 64 GiB per XDF, 100,000,000
+  declared samples per stream, 65,536 channels, 4,096 streams, and a 4 MiB
+  header. Exceeding a limit is an error, not an allocation attempt.
+- File cancellation is checked at least every 1,024 bounded units and has a
+  250 ms target. Progress covers reading, indexing, metadata, timestamps,
+  calibration, and frame preparation. Live preview latency has a 100 ms target.
+
+### Managed calibration profiles
+
+A version-1 managed profile contains an ID and display name, physical setup ID,
+stair model path and identity, measured fixed Vicon stair pose, gaze transform,
+gaze and target coordinate frames, setup notes, creation time, sample count,
+translation and rotation RMS, metadata-fallback confirmation, and retirement
+state. Profiles can be selected, applied, duplicated, retired, imported, and
+exported. Applying a profile is visible and reversible by choosing the manual
+transform. A new automatic solve remains session-only until **Save Session
+Calibration** is chosen. Collection progress, quality, rejection, and coordinate
+compatibility remain visible; missing coordinate metadata requires an explicit
+fallback confirmation before a profile is complete.
+
+### Post-recording verification
+
+After an acknowledged Stop, wait for the exact destination to exist and inspect
+it on a background thread. Compare the preflight inventory and expected bindings
+with recorded name, source identity, host, schema, time range, sample count,
+effective rate, gaps, clock corrections, and repaired timestamps. The result is
+`Verified`, `Verified with warnings`, or `Needs attention`; a Stop
+acknowledgement by itself is not presented as proof of saved data. Verification
+never edits or deletes the XDF. Findings are part of the diagnostic bundle and
+the file can be opened directly in playback.
 
 ## Saved settings
 
 Settings use organization `ViconLSL` and application `ViconLSLBridge`.
 
-Bridge and recording keys:
+The authoritative scientific/session value is version-1 JSON at
+`session/configuration`; `session/configurationVersion` records its schema. It
+contains bridge endpoint and outputs, identity bindings and matching mode,
+preview/cache controls, recorder endpoint/ownership/selection, exact path policy,
+workflow options, and selected calibration-profile ID. Named presets and JSON
+Import/Export use this same versioned model.
 
-- `server`, `markerStream`, `segmentStream`
-- `recordingRoot`, `recordingTemplate`
-- `participant`, `session`, `task`, `run`, `acquisition`, `modality`
-- `labRecorderExecutable`, `labRecorderHost`, `labRecorderPort`
+The guided-session configuration starts at schema version 1 and is stored as one
+JSON value. Settings from older application releases are intentionally not
+imported into this new model. Unsupported schema versions are rejected instead
+of being guessed or rewritten.
 
-Preview keys:
+Machine/UI state is deliberately outside presets: `ui/windowGeometry`,
+`ui/mainSplitter`, active control and preview tabs, up to ten recent recordings,
+and recent preset/diagnostic directories. Managed calibration profiles are
+versioned separately at `session/calibrationProfiles`.
 
-- `preview/markerStream`, `preview/segmentStream`, `preview/gazeStream`, `preview/calibrationStream`
-- `preview/matchTolerance`, `preview/trailPoints`, `preview/playbackSpeed`
-- `preview/gazeTx`, `preview/gazeTy`, `preview/gazeTz`
-- `preview/gazeRx`, `preview/gazeRy`, `preview/gazeRz`
-- `preview/stairModel`
-
-Loading removes these old automatic-alignment keys:
-
-- `preview/gazeUseQuaternion`
-- `preview/gazeQTx`, `preview/gazeQTy`, `preview/gazeQTz`
-- `preview/gazeQx`, `preview/gazeQy`, `preview/gazeQz`, `preview/gazeQw`
-
-Changing a current key needs a plan that reads the old value and proves that saved user settings still work.
+Changing the version-1 schema requires an explicit format change and tests for
+both rejection and the new round trip.
 
 ## Build and package names
 
@@ -325,7 +480,8 @@ Keep:
 - CMake options that begin with `VICON_LSL_` or `VICON_LSL_BRIDGE_`.
 - Targets `vicon-lsl-bridge-logic`, `vicon-lsl-bridge-runtime`, `vicon-lsl-bridge`, `vicon-lsl-bridge-gui`, and the Windows package targets.
 - The C++ checks that run without the runtime, GUI, or a downloaded test library.
-- Program names and the packaged `labrecorder`, `stair_model`, runtime, and license folders.
+- Program names and the packaged `labrecorder` (including `LabRecorder.exe` and
+  `LabRecorderCLI.exe`), `stair_model`, runtime, and license folders.
 - The generated-stream check and the device-independent C# check project.
 
 Handle dependency updates and package-layout changes separately from code cleanup.
