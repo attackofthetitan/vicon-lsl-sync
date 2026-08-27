@@ -57,5 +57,13 @@ void testConnectionTimeoutDoesNotShortenCommandTimeout();
 void testCommandTimeoutDisconnectsAndDropsQueuedWork();
 void testMidCommandDisconnectReportsFailure();
 void testConnectionStateTracksIdleDisconnectAndReconnect();
+void testNormalizedPathPolicy();
+void testSessionConfiguration();
+void testSessionControllerStateModel();
+void testCalibrationProfileStore();
+void testRecorderAllowlistPolicy();
+void testRecorderDuplicateAndShutdownProtocol();
+void testRecordingVerifierOutcomes();
+void testRecorderProcessControllerLifecycle();
 
 } // namespace labrecorder_client_tests
