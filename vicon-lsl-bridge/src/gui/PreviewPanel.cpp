@@ -52,7 +52,12 @@ QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& t
     auto* label = new QLabel(text);
     label->setToolTip(tooltip);
     if (control) {
+        label->setBuddy(control);
         control->setToolTip(tooltip);
+        QString accessible = text;
+        accessible.remove('&');
+        accessible.remove(':');
+        control->setAccessibleName(accessible.trimmed());
     }
     return label;
 }
@@ -119,6 +124,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     stream_grid->setVerticalSpacing(4);
     marker_stream_edit_ = new QLineEdit(stream_defaults::ViconMarkers);
     segment_stream_edit_ = new QLineEdit(stream_defaults::ViconSegments);
+    marker_stream_edit_->setObjectName("previewMarkerInput");
+    segment_stream_edit_->setObjectName("previewSegmentInput");
     gaze_stream_edit_ = new QLineEdit(stream_defaults::HoloLensGaze);
     calibration_stream_edit_ = new QLineEdit(stream_defaults::HoloLensModelTargetPose);
     tolerance_spin_ = new QDoubleSpinBox();
@@ -332,11 +339,26 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     play_csv_button_->setEnabled(false);
     status_label_ = new QLabel("Preview stopped");
     status_label_->setWordWrap(true);
+    delivery_metrics_label_ = new QLabel(
+        "display replacements 0 | input backlog discarded 0 | latency 0 ms");
+    delivery_metrics_label_->setToolTip(
+        "Frames intentionally replaced before display and latest-frame display latency.");
+    auto* fit_view_button = new QPushButton("Fit View");
+    auto* reset_camera_button = new QPushButton("Reset Camera");
+    auto* export_image_button = new QPushButton("Export Image");
+    fit_view_button->setToolTip("Fit the camera to all currently visible data.");
+    reset_camera_button->setToolTip("Restore the default camera angle, zoom, and fit.");
+    export_image_button->setToolTip(
+        "Export the current preview view as a PNG image without changing source data.");
     button_row->addWidget(start_button_);
     button_row->addWidget(stop_button_);
     button_row->addWidget(open_csv_button_);
     button_row->addWidget(open_xdf_button_);
     button_row->addWidget(play_csv_button_);
+    button_row->addWidget(fit_view_button);
+    button_row->addWidget(reset_camera_button);
+    button_row->addWidget(export_image_button);
+    button_row->addWidget(delivery_metrics_label_);
     button_row->addWidget(status_label_, 1);
     controls_layout->addLayout(button_row);
 
@@ -419,6 +441,31 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     csv_timer_ = new QTimer(this);
     csv_timer_->setInterval(16);
     playback_elapsed_.start();
+    live_render_timer_ = new QTimer(this);
+    live_render_timer_->setTimerType(Qt::PreciseTimer);
+    live_render_timer_->setInterval(1000 / gui::PerformanceBudgets::DefaultRenderHz);
+
+    start_button_->setShortcut(QKeySequence("Alt+P"));
+    stop_button_->setShortcut(QKeySequence("Alt+Shift+P"));
+    open_xdf_button_->setShortcut(QKeySequence::Open);
+    play_csv_button_->setShortcut(Qt::Key_Space);
+    fit_view_button->setShortcut(Qt::Key_F);
+    reset_camera_button->setShortcut(Qt::Key_R);
+    const auto buttons = findChildren<QPushButton*>();
+    for (QPushButton* button : buttons) {
+        if (button->accessibleName().trimmed().isEmpty()) {
+            QString accessible = button->text();
+            accessible.remove('&');
+            button->setAccessibleName(accessible.trimmed());
+        }
+    }
+    status_label_->setAccessibleName("Preview status");
+    delivery_metrics_label_->setAccessibleName("Preview delivery health");
+    file_state_label_->setAccessibleName("Recording file load state");
+    memory_label_->setAccessibleName("Playback cache memory estimate");
+    playback_position_label_->setAccessibleName("Playback time and frame position");
+    calibration_quality_label_->setAccessibleName("Persistent calibration quality");
+    calibration_metadata_label_->setAccessibleName("Calibration metadata compatibility");
 
     connect(start_button_, &QPushButton::clicked, this, &PreviewPanel::startPreview);
     connect(stop_button_, &QPushButton::clicked, this, &PreviewPanel::stopPreview);
@@ -426,6 +473,37 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     connect(open_xdf_button_, &QPushButton::clicked, this, &PreviewPanel::openXdf);
     connect(play_csv_button_, &QPushButton::clicked, this, &PreviewPanel::toggleCsvPlayback);
     connect(csv_timer_, &QTimer::timeout, this, &PreviewPanel::advanceCsvPlayback);
+    connect(live_render_timer_, &QTimer::timeout,
+            this, &PreviewPanel::displayLatestLiveFrame);
+    connect(fit_view_button, &QPushButton::clicked, this, &PreviewPanel::fitView);
+    connect(reset_camera_button, &QPushButton::clicked, this, &PreviewPanel::resetCamera);
+    connect(export_image_button, &QPushButton::clicked,
+            this, &PreviewPanel::exportPreviewImage);
+    connect(cancel_load_button_, &QPushButton::clicked, this, &PreviewPanel::cancelFileLoad);
+    connect(open_recent_button, &QPushButton::clicked, this, &PreviewPanel::openRecentRecording);
+    connect(timeline_slider_, &QSlider::valueChanged,
+            this, &PreviewPanel::seekPlaybackFromSlider);
+    connect(loop_playback_check_, &QCheckBox::toggled, this, [this](bool looping) {
+        playback_clock_.setLooping(looping, playback_elapsed_.elapsed() / 1000.0);
+    });
+    connect(jump_start_button, &QPushButton::clicked, this, [this]() { seekToFrame(0); });
+    connect(jump_end_button, &QPushButton::clicked, this, [this]() {
+        if (!csv_frames_.empty()) seekToFrame(csv_frames_.size() - 1);
+    });
+    connect(step_back_button, &QPushButton::clicked, this, [this]() {
+        if (csv_frames_.empty()) return;
+        const std::size_t index = playback_clock_.frameIndex(playback_elapsed_.elapsed() / 1000.0);
+        seekToFrame(index == 0 ? 0 : index - 1);
+    });
+    connect(step_forward_button, &QPushButton::clicked, this, [this]() {
+        if (csv_frames_.empty()) return;
+        const std::size_t index = playback_clock_.frameIndex(playback_elapsed_.elapsed() / 1000.0);
+        seekToFrame((std::min)(csv_frames_.size() - 1, index + 1));
+    });
+    connect(jump_back_button, &QPushButton::clicked, this,
+            [this]() { seekBySeconds(-jump_seconds_spin_->value()); });
+    connect(jump_forward_button, &QPushButton::clicked, this,
+            [this]() { seekBySeconds(jump_seconds_spin_->value()); });
     connect(playback_speed_spin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double speed) {
                 playback_clock_.setSpeed(speed, playback_elapsed_.elapsed() / 1000.0);
@@ -667,22 +745,80 @@ void PreviewPanel::startPreview() {
     config.gaze_stream_name = gaze_stream_edit_->text().trimmed();
     config.calibration_stream_name = calibration_stream_edit_->text().trimmed();
     config.match_tolerance_seconds = tolerance_spin_->value();
+    config.marker_source_id = marker_binding_.source_id;
+    config.segment_source_id = segment_binding_.source_id;
+    config.gaze_source_id = gaze_binding_.source_id;
+    config.calibration_source_id = calibration_binding_.source_id;
+    config.marker_follow_by_name =
+        marker_binding_.reconnection == gui::StreamReconnectionMode::FollowName;
+    config.segment_follow_by_name =
+        segment_binding_.reconnection == gui::StreamReconnectionMode::FollowName;
+    config.gaze_follow_by_name =
+        gaze_binding_.reconnection == gui::StreamReconnectionMode::FollowName;
+    config.calibration_follow_by_name =
+        calibration_binding_.reconnection == gui::StreamReconnectionMode::FollowName;
     config.vicon_transform.name = "Vicon";
     config.vicon_transform.scale = 0.001;
     config.gaze_transform = gazeTransform();
 
-    worker_ = new PreviewStreamWorker(config, this);
+    worker_ = services_.create_preview_worker(std::move(config), this);
     worker_stopping_ = false;
     PreviewStreamWorker* const started_worker = worker_;
-    connect(worker_, &PreviewStreamWorker::frameReady, widget_, &PreviewWidget::setFrame);
     connect(worker_, &PreviewStreamWorker::targetPoseReady, this, &PreviewPanel::handleTargetPose);
     connect(worker_, &PreviewStreamWorker::statusChanged, this, &PreviewPanel::setStatus);
+    connect(worker_, &PreviewStreamWorker::lifecycleChanged, this,
+            [this](ComponentLifecycleState state, const QString& detail) {
+                lifecycle_state_ = state;
+                if (!detail.isEmpty()) setStatus(detail);
+                emit lifecycleChanged(state, detail);
+            });
+    connect(worker_, &PreviewStreamWorker::streamIdentityChanged, this,
+            [this](const gui::StreamIdentity& identity, const QString& warning) {
+                gui::StreamIdentity updated = identity;
+                updated.warning = warning;
+                const auto update_binding = [&updated](gui::StreamBinding& binding) {
+                    if (binding.reconnection == gui::StreamReconnectionMode::SourceIdentity &&
+                        binding.source_id.isEmpty()) {
+                        binding.source_id = updated.source_id;
+                    }
+                };
+                if (updated.role == "markers") update_binding(marker_binding_);
+                if (updated.role == "segments") update_binding(segment_binding_);
+                if (updated.role == "gaze") update_binding(gaze_binding_);
+                if (updated.role == "calibration") update_binding(calibration_binding_);
+                latest_stream_inventory_.erase(std::remove_if(
+                    latest_stream_inventory_.begin(), latest_stream_inventory_.end(),
+                    [&updated](const gui::StreamIdentity& existing) {
+                        return existing.role == updated.role;
+                    }), latest_stream_inventory_.end());
+                latest_stream_inventory_.push_back(updated);
+                QString gaze_frame;
+                QString target_frame;
+                for (const gui::StreamIdentity& stream : latest_stream_inventory_) {
+                    if (stream.role == "gaze") gaze_frame = stream.coordinate_frame;
+                    if (stream.role == "calibration") target_frame = stream.coordinate_frame;
+                }
+                calibration_metadata_compatible_ = !gaze_frame.isEmpty() &&
+                    !target_frame.isEmpty() &&
+                    calibrationCoordinateFramesCompatible(gaze_frame.toStdString(),
+                                                          target_frame.toStdString());
+                calibration_metadata_label_->setText(calibration_metadata_compatible_
+                    ? "Coordinate metadata: compatible (" + gaze_frame + ")"
+                    : "Coordinate metadata: missing, fallback, or incompatible");
+                emit streamInventoryChanged(latest_stream_inventory_);
+                emit calibrationStateChanged(sessionCalibrationState(),
+                                             calibrationQualityText(),
+                                             calibration_metadata_compatible_);
+            });
     connect(worker_, &QThread::finished, worker_, &QObject::deleteLater);
     connect(worker_, &QThread::finished, this, [this, started_worker]() {
         if (worker_ != started_worker) {
             return;
         }
         worker_ = nullptr;
+        lifecycle_state_ = ComponentLifecycleState::Stopped;
+        emit lifecycleChanged(lifecycle_state_, "Preview stopped");
+        live_render_timer_->stop();
         worker_stopping_ = false;
         start_button_->setEnabled(true);
         stop_button_->setEnabled(false);
@@ -696,8 +832,26 @@ void PreviewPanel::startPreview() {
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
-    setStatus("Preview resolving LSL streams and calibrating from the stair target...");
+    setStatus("Preview resolving configured LSL streams; stair calibration is ready on request...");
+    lifecycle_state_ = ComponentLifecycleState::Starting;
+    emit lifecycleChanged(lifecycle_state_, "Resolving configured streams");
+    live_render_timer_->start();
     worker_->start();
+}
+
+bool PreviewPanel::accessibilityContractSatisfied() const {
+    if (!widget_ || widget_->accessibleName().trimmed().isEmpty() ||
+        !timeline_slider_ || timeline_slider_->accessibleName().trimmed().isEmpty()) {
+        return false;
+    }
+    const auto buttons = findChildren<QPushButton*>();
+    for (const QPushButton* button : buttons) {
+        if (button->accessibleName().trimmed().isEmpty() ||
+            button->focusPolicy() == Qt::NoFocus) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void PreviewPanel::stopPreview() {
@@ -712,16 +866,43 @@ void PreviewPanel::stopPreview() {
     }
 
     worker_stopping_ = true;
+    lifecycle_state_ = ComponentLifecycleState::Stopping;
+    emit lifecycleChanged(lifecycle_state_, "Preview stop requested");
     PreviewStreamWorker* const stopping_worker = worker_;
     stopping_worker->requestInterruption();
     start_button_->setEnabled(false);
     stop_button_->setEnabled(false);
     open_csv_button_->setEnabled(false);
     open_xdf_button_->setEnabled(false);
-    setStatus("Preview stopping...");
-    if (!stopping_worker->wait(1000)) {
-        setStatus("Preview is still stopping; restart is disabled until it finishes");
+    setStatus("Preview stopping asynchronously...");
+}
+
+void PreviewPanel::displayLatestLiveFrame() {
+    if (!worker_) {
+        return;
     }
+    PreviewFrame frame;
+    PreviewDeliveryMetrics metrics;
+    if (worker_->takeLatestFrame(frame, metrics)) {
+        widget_->setFrame(std::move(frame));
+    }
+    metrics = worker_->deliveryMetrics();
+    last_delivery_metrics_ = metrics;
+    const bool late = metrics.display_latency_ms >
+        gui::PerformanceBudgets::MaximumLivePreviewLatencyMs;
+    delivery_metrics_label_->setText(
+        QString(late ? "PREVIEW LATE | display replacements "
+                     : "display replacements ") +
+        QString::number(metrics.replaced_before_display) +
+        " | input backlog discarded " +
+        QString::number(metrics.coalesced_input_samples) +
+        " | latency " + QString::number(metrics.display_latency_ms) + " ms");
+    delivery_metrics_label_->setToolTip(
+        late ? "Display latency exceeds the documented live-preview budget of " +
+                   QString::number(gui::PerformanceBudgets::MaximumLivePreviewLatencyMs) +
+                   " ms; source-rate measurements remain independent."
+             : "Latest-frame delivery is within the live-preview latency budget.");
+    emit deliveryMetricsChanged(metrics);
 }
 
 void PreviewPanel::beginCalibration() {
