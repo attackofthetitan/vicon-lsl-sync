@@ -40,8 +40,22 @@ public:
 
     bool stairModelLoaded() const { return stair_model_loaded_; }
     bool configurableTooltipsPresent() const;
+    bool accessibilityContractSatisfied() const;
+    ComponentLifecycleState lifecycleState() const { return lifecycle_state_; }
+    QVector<vicon_lsl::gui::StreamIdentity> streamInventory() const;
+    void applySessionConfiguration(const vicon_lsl::gui::SessionConfiguration& configuration);
+    void updateSessionConfiguration(vicon_lsl::gui::SessionConfiguration& configuration) const;
+    void requestShutdown();
+    bool shutdownReady() const;
+    bool fileLoadActive() const { return file_loader_ != nullptr; }
+    vicon_lsl::gui::SessionCalibrationState sessionCalibrationState() const;
+    QString calibrationQualityText() const;
+    bool calibrationMetadataCompatible() const { return calibration_metadata_compatible_; }
+    PreviewDeliveryMetrics deliveryMetrics() const;
+    QString currentRecordingPath() const { return current_recording_path_; }
+    void openRecording(const QString& path);
 
-private slots:
+public slots:
     void startPreview();
     void stopPreview();
     void fitView();
@@ -75,6 +89,13 @@ private slots:
     void beginCalibration();
     void useManualTransform();
     void handleTargetPose(vicon_lsl::CalibrationTargetPose pose);
+    void applySelectedCalibrationProfile();
+    void saveSessionCalibrationProfile();
+    void duplicateCalibrationProfile();
+    void retireCalibrationProfile();
+    void importCalibrationProfile();
+    void exportCalibrationProfile();
+    void updateMeasuredStairPose();
 
 private:
     enum class PendingRecordingOpen {
@@ -102,6 +123,15 @@ private:
     void saveSettings() const;
     QString defaultStairModelPath() const;
     void setStatus(const QString& status);
+    void loadCalibrationProfiles();
+    void saveCalibrationProfiles();
+    void refreshCalibrationProfileUi(const QString& select_id = {});
+    gui::ManagedCalibrationProfile* selectedCalibrationProfile();
+    const gui::ManagedCalibrationProfile* selectedCalibrationProfile() const;
+    CalibrationProfile activeSolverProfile() const;
+    void updateCalibrationPersistentStatus(gui::SessionCalibrationState state,
+                                           const QString& text,
+                                           bool metadata_compatible);
 
     PreviewWidget* widget_ = nullptr;
     QLineEdit* marker_stream_edit_ = nullptr;

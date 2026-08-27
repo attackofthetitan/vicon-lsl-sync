@@ -75,6 +75,15 @@ QDoubleSpinBox* makeAngleSpin(double value = 0.0) {
     return spin;
 }
 
+QDoubleSpinBox* makeQuaternionSpin(double value = 0.0) {
+    auto* spin = new QDoubleSpinBox();
+    spin->setRange(-1.0, 1.0);
+    spin->setDecimals(6);
+    spin->setSingleStep(0.01);
+    spin->setValue(value);
+    return spin;
+}
+
 } // namespace
 
 PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
@@ -216,6 +225,87 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     calibration_row->addWidget(use_manual_transform_button_);
     calibration_row->addStretch(1);
     alignment_layout->addLayout(calibration_row);
+
+    auto* profiles_group = new QGroupBox("Managed Calibration Profile");
+    auto* profiles_layout = new QVBoxLayout(profiles_group);
+    auto* profile_form = new QFormLayout();
+    calibration_profile_combo_ = new QComboBox();
+    calibration_profile_combo_->setToolTip(
+        "Saved calibration setup. Automatic solutions remain session-only until explicitly saved.");
+    calibration_profile_name_edit_ = new QLineEdit();
+    calibration_profile_name_edit_->setToolTip("Human-readable calibration profile name.");
+    calibration_setup_id_edit_ = new QLineEdit();
+    calibration_setup_id_edit_->setToolTip(
+        "Stable identifier for the physical stair, room, and tracker arrangement.");
+    calibration_notes_edit_ = new QLineEdit();
+    calibration_notes_edit_->setToolTip("Setup notes needed to reproduce the physical alignment.");
+    gaze_frame_edit_ = new QLineEdit("hololens_stationary_shared_with_gaze");
+    target_frame_edit_ = new QLineEdit("hololens_stationary_shared_with_gaze");
+    gaze_frame_edit_->setToolTip("Coordinate-frame identifier expected on the gaze stream.");
+    target_frame_edit_->setToolTip("Coordinate-frame identifier expected on the stair-target stream.");
+    profile_form->addRow("Profile:", calibration_profile_combo_);
+    profile_form->addRow("Name:", calibration_profile_name_edit_);
+    profile_form->addRow("Physical setup ID:", calibration_setup_id_edit_);
+    profile_form->addRow("Setup notes:", calibration_notes_edit_);
+    profile_form->addRow("Gaze frame:", gaze_frame_edit_);
+    profile_form->addRow("Target frame:", target_frame_edit_);
+    profiles_layout->addLayout(profile_form);
+
+    auto* pose_grid = new QGridLayout();
+    stair_tx_spin_ = makeDistanceSpin();
+    stair_ty_spin_ = makeDistanceSpin();
+    stair_tz_spin_ = makeDistanceSpin();
+    stair_qx_spin_ = makeQuaternionSpin();
+    stair_qy_spin_ = makeQuaternionSpin();
+    stair_qz_spin_ = makeQuaternionSpin();
+    stair_qw_spin_ = makeQuaternionSpin(1.0);
+    const QString pose_tooltip =
+        "Measured rigid pose of the stair target in Vicon coordinates. Translation is metres; rotation is a quaternion.";
+    QWidget* const pose_controls[] = {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_,
+                                      stair_qx_spin_, stair_qy_spin_, stair_qz_spin_,
+                                      stair_qw_spin_};
+    for (QWidget* control : pose_controls) control->setToolTip(pose_tooltip);
+    pose_grid->addWidget(new QLabel("Measured stair T (m):"), 0, 0);
+    pose_grid->addWidget(stair_tx_spin_, 0, 1);
+    pose_grid->addWidget(stair_ty_spin_, 0, 2);
+    pose_grid->addWidget(stair_tz_spin_, 0, 3);
+    pose_grid->addWidget(new QLabel("Measured stair Q:"), 1, 0);
+    pose_grid->addWidget(stair_qx_spin_, 1, 1);
+    pose_grid->addWidget(stair_qy_spin_, 1, 2);
+    pose_grid->addWidget(stair_qz_spin_, 1, 3);
+    pose_grid->addWidget(stair_qw_spin_, 1, 4);
+    profiles_layout->addLayout(pose_grid);
+
+    auto* profile_buttons = new QHBoxLayout();
+    auto* apply_profile_button = new QPushButton("Apply");
+    auto* save_profile_button = new QPushButton("Save Session Calibration");
+    auto* duplicate_profile_button = new QPushButton("Duplicate");
+    auto* retire_profile_button = new QPushButton("Retire");
+    auto* import_profile_button = new QPushButton("Import");
+    auto* export_profile_button = new QPushButton("Export");
+    apply_profile_button->setToolTip("Apply the selected saved profile to live preview and diagnostics.");
+    save_profile_button->setToolTip(
+        "Persist the current session calibration with physical setup and quality metadata.");
+    duplicate_profile_button->setToolTip("Duplicate the selected profile with a new stable ID.");
+    retire_profile_button->setToolTip(
+        "Hide the selected profile from normal selection without deleting its history.");
+    import_profile_button->setToolTip("Import a versioned calibration profile JSON file.");
+    export_profile_button->setToolTip("Export the selected calibration profile as JSON.");
+    profile_buttons->addWidget(apply_profile_button);
+    profile_buttons->addWidget(save_profile_button);
+    profile_buttons->addWidget(duplicate_profile_button);
+    profile_buttons->addWidget(retire_profile_button);
+    profile_buttons->addWidget(import_profile_button);
+    profile_buttons->addWidget(export_profile_button);
+    profiles_layout->addLayout(profile_buttons);
+    calibration_quality_label_ = new QLabel("Quality: not calibrated");
+    calibration_quality_label_->setObjectName("calibrationQuality");
+    calibration_quality_label_->setWordWrap(true);
+    calibration_metadata_label_ = new QLabel("Coordinate metadata: not observed");
+    calibration_metadata_label_->setWordWrap(true);
+    profiles_layout->addWidget(calibration_quality_label_);
+    profiles_layout->addWidget(calibration_metadata_label_);
+    alignment_layout->addWidget(profiles_group);
     alignment_layout->addStretch(1);
 
     auto* stair_row = new QHBoxLayout();
@@ -345,11 +435,35 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
             this, &PreviewPanel::reloadStairModel);
     connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
     connect(use_manual_transform_button_, &QPushButton::clicked, this, &PreviewPanel::useManualTransform);
+    connect(apply_profile_button, &QPushButton::clicked,
+            this, &PreviewPanel::applySelectedCalibrationProfile);
+    connect(save_profile_button, &QPushButton::clicked,
+            this, &PreviewPanel::saveSessionCalibrationProfile);
+    connect(duplicate_profile_button, &QPushButton::clicked,
+            this, &PreviewPanel::duplicateCalibrationProfile);
+    connect(retire_profile_button, &QPushButton::clicked,
+            this, &PreviewPanel::retireCalibrationProfile);
+    connect(import_profile_button, &QPushButton::clicked,
+            this, &PreviewPanel::importCalibrationProfile);
+    connect(export_profile_button, &QPushButton::clicked,
+            this, &PreviewPanel::exportCalibrationProfile);
+    connect(calibration_profile_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { refreshCalibrationProfileUi(); });
+    QDoubleSpinBox* const pose_spins[] = {
+        stair_tx_spin_, stair_ty_spin_, stair_tz_spin_, stair_qx_spin_,
+        stair_qy_spin_, stair_qz_spin_, stair_qw_spin_,
+    };
+    for (QDoubleSpinBox* spin : pose_spins) {
+        connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, &PreviewPanel::updateMeasuredStairPose);
+    }
     connect(trail_points_spin_, QOverload<int>::of(&QSpinBox::valueChanged),
             widget_, &PreviewWidget::setTrailPointLimit);
 
     loadSettings();
+    loadCalibrationProfiles();
     reloadStairModel();
+    calibration_progress_throttle_.start();
 }
 
 PreviewPanel::~PreviewPanel() {
@@ -361,9 +475,137 @@ PreviewPanel::~PreviewPanel() {
     }
     if (worker_) {
         worker_->requestInterruption();
-        worker_->wait();
+        worker_->disconnect(this);
+        worker_->setParent(nullptr);
+        worker_ = nullptr;
     }
     saveSettings();
+}
+
+QVector<gui::StreamIdentity> PreviewPanel::streamInventory() const {
+    return worker_ ? worker_->streamInventory() : latest_stream_inventory_;
+}
+
+void PreviewPanel::applySessionConfiguration(
+    const gui::SessionConfiguration& configuration) {
+    marker_binding_ = configuration.preview_markers;
+    segment_binding_ = configuration.preview_segments;
+    gaze_binding_ = configuration.preview_gaze;
+    calibration_binding_ = configuration.preview_calibration;
+    marker_stream_edit_->setText(marker_binding_.name);
+    segment_stream_edit_->setText(segment_binding_.name);
+    gaze_stream_edit_->setText(gaze_binding_.name);
+    calibration_stream_edit_->setText(calibration_binding_.name);
+    marker_stream_edit_->setReadOnly(!configuration.preview_external_streams);
+    segment_stream_edit_->setReadOnly(!configuration.preview_external_streams);
+    tolerance_spin_->setValue(configuration.preview_match_tolerance);
+    cache_megabytes_spin_->setValue(configuration.preview_cache_megabytes);
+    trail_points_spin_->setValue(configuration.preview_trail_points);
+    playback_speed_spin_->setValue(configuration.preview_playback_speed);
+    loop_playback_check_->setChecked(configuration.preview_loop_playback);
+    gaze_tx_spin_->setValue(configuration.preview_gaze_translation.x);
+    gaze_ty_spin_->setValue(configuration.preview_gaze_translation.y);
+    gaze_tz_spin_->setValue(configuration.preview_gaze_translation.z);
+    gaze_rx_spin_->setValue(configuration.preview_gaze_rotation_degrees.x);
+    gaze_ry_spin_->setValue(configuration.preview_gaze_rotation_degrees.y);
+    gaze_rz_spin_->setValue(configuration.preview_gaze_rotation_degrees.z);
+    const int render_hz = std::clamp(configuration.preview_render_hz, 1,
+                                     gui::PerformanceBudgets::MaximumRenderHz);
+    live_render_timer_->setInterval((std::max)(1, 1000 / render_hz));
+    if (!configuration.stair_model_path.trimmed().isEmpty()) {
+        stair_model_edit_->setText(configuration.stair_model_path);
+    }
+    const int profile_index = calibration_profile_combo_
+        ? calibration_profile_combo_->findData(configuration.calibration_profile_id)
+        : -1;
+    if (profile_index >= 0) calibration_profile_combo_->setCurrentIndex(profile_index);
+}
+
+void PreviewPanel::updateSessionConfiguration(
+    gui::SessionConfiguration& configuration) const {
+    configuration.preview_markers = marker_binding_;
+    configuration.preview_segments = segment_binding_;
+    configuration.preview_gaze = gaze_binding_;
+    configuration.preview_calibration = calibration_binding_;
+    configuration.preview_markers.name = marker_stream_edit_->text().trimmed();
+    configuration.preview_segments.name = segment_stream_edit_->text().trimmed();
+    configuration.preview_gaze.name = gaze_stream_edit_->text().trimmed();
+    configuration.preview_calibration.name = calibration_stream_edit_->text().trimmed();
+    configuration.preview_match_tolerance = tolerance_spin_->value();
+    configuration.preview_cache_megabytes = cache_megabytes_spin_->value();
+    configuration.preview_trail_points = trail_points_spin_->value();
+    configuration.preview_playback_speed = playback_speed_spin_->value();
+    configuration.preview_loop_playback = loop_playback_check_->isChecked();
+    configuration.preview_gaze_translation = {
+        gaze_tx_spin_->value(), gaze_ty_spin_->value(), gaze_tz_spin_->value()};
+    configuration.preview_gaze_rotation_degrees = {
+        gaze_rx_spin_->value(), gaze_ry_spin_->value(), gaze_rz_spin_->value()};
+    configuration.stair_model_path = stair_model_edit_->text().trimmed();
+    if (calibration_profile_combo_) {
+        configuration.calibration_profile_id =
+            calibration_profile_combo_->currentData().toString();
+    }
+}
+
+void PreviewPanel::requestShutdown() {
+    if (file_loader_) cancelFileLoad();
+    stopPreview();
+    csv_timer_->stop();
+}
+
+bool PreviewPanel::shutdownReady() const {
+    return worker_ == nullptr && file_loader_ == nullptr;
+}
+
+gui::SessionCalibrationState PreviewPanel::sessionCalibrationState() const {
+    switch (calibration_state_) {
+        case CalibrationState::Manual: return gui::SessionCalibrationState::Manual;
+        case CalibrationState::Collecting: return gui::SessionCalibrationState::Collecting;
+        case CalibrationState::AutomaticSession:
+            return gui::SessionCalibrationState::AutomaticSession;
+        case CalibrationState::SavedProfile:
+            return gui::SessionCalibrationState::SavedProfile;
+    }
+    return gui::SessionCalibrationState::Manual;
+}
+
+QString PreviewPanel::calibrationQualityText() const {
+    return calibration_quality_label_ ? calibration_quality_label_->text() : QString();
+}
+
+PreviewDeliveryMetrics PreviewPanel::deliveryMetrics() const {
+    return worker_ ? worker_->deliveryMetrics() : last_delivery_metrics_;
+}
+
+void PreviewPanel::openRecording(const QString& path) {
+    if (path.endsWith(".xdf", Qt::CaseInsensitive)) {
+        loadXdf(path);
+    } else if (path.endsWith(".csv", Qt::CaseInsensitive)) {
+        loadMergedCsv(path);
+    } else {
+        setStatus("Unsupported preview recording type: " + QFileInfo(path).suffix());
+    }
+}
+
+void PreviewPanel::fitView() {
+    widget_->fitView();
+}
+
+void PreviewPanel::resetCamera() {
+    widget_->resetCamera();
+}
+
+void PreviewPanel::exportPreviewImage() {
+    const QString path = services_.file_dialogs->saveFile(
+        this, "Export preview image", QString(), "PNG images (*.png)");
+    if (path.isEmpty()) return;
+    QString normalized = path;
+    if (!normalized.endsWith(".png", Qt::CaseInsensitive)) normalized += ".png";
+    if (!widget_->grab().save(normalized, "PNG")) {
+        setStatus("Could not export preview image to " + normalized);
+        return;
+    }
+    setStatus("Exported preview image to " + QDir::toNativeSeparators(normalized));
 }
 
 bool PreviewPanel::configurableTooltipsPresent() const {
@@ -385,6 +627,17 @@ bool PreviewPanel::configurableTooltipsPresent() const {
         trail_points_spin_,
         calibrate_button_,
         use_manual_transform_button_,
+        jump_seconds_spin_,
+        recent_files_combo_,
+        cancel_load_button_,
+        calibration_profile_combo_,
+        calibration_profile_name_edit_,
+        calibration_setup_id_edit_,
+        calibration_notes_edit_,
+        gaze_frame_edit_,
+        target_frame_edit_,
+        stair_tx_spin_, stair_ty_spin_, stair_tz_spin_,
+        stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_,
     };
     for (const QWidget* control : controls) {
         if (!control || control->toolTip().trimmed().isEmpty()) {
@@ -407,8 +660,6 @@ void PreviewPanel::startPreview() {
     widget_->setTrailPointLimit(trail_points_spin_->value());
     widget_->resetForNewSource();
     calibration_samples_.clear();
-    automatic_gaze_transform_ = {};
-    calibration_state_ = CalibrationState::Collecting;
 
     PreviewWorkerConfig config;
     config.marker_stream_name = marker_stream_edit_->text().trimmed();
@@ -450,7 +701,6 @@ void PreviewPanel::startPreview() {
 }
 
 void PreviewPanel::stopPreview() {
-    resetCalibrationSession();
     if (!worker_) {
         worker_stopping_ = false;
         start_button_->setEnabled(true);
@@ -479,11 +729,29 @@ void PreviewPanel::beginCalibration() {
         setStatus("Start the preview before calibrating from the stair target");
         return;
     }
+    if (!calibration_metadata_compatible_) {
+        const auto answer = QMessageBox::warning(
+            this, "Coordinate metadata unavailable",
+            "Gaze and stair-target coordinate metadata is missing or incompatible. "
+            "Continue with fallback compatibility for this session?",
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            updateCalibrationPersistentStatus(
+                gui::SessionCalibrationState::Failed,
+                "Calibration rejected: coordinate metadata was not confirmed", false);
+            return;
+        }
+    }
     calibration_samples_.clear();
     calibration_state_ = CalibrationState::Collecting;
-    const auto& profile = defaultStairCalibrationProfile();
+    calibration_rejection_reason_.clear();
+    const CalibrationProfile profile = activeSolverProfile();
     setStatus("Waiting for " + QString::number(profile.required_samples) +
               " stable tracked stair-target poses...");
+    updateCalibrationPersistentStatus(gui::SessionCalibrationState::Collecting,
+                                      "Quality: collecting 0/" +
+                                          QString::number(profile.required_samples),
+                                      calibration_metadata_compatible_);
 }
 
 void PreviewPanel::useManualTransform() {
@@ -495,16 +763,24 @@ void PreviewPanel::useManualTransform() {
     widget_->requestViewRefit();
     saveSettings();
     setStatus("Using manual HoloLens transform");
+    calibration_quality_ = {};
+    updateCalibrationPersistentStatus(gui::SessionCalibrationState::Manual,
+                                      "Quality: manual transform (not solved)",
+                                      calibration_metadata_compatible_);
 }
 
 void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
-    const auto& profile = defaultStairCalibrationProfile();
+    const CalibrationProfile profile = activeSolverProfile();
     if (calibration_state_ != CalibrationState::Collecting) {
         return;
     }
     if (!pose.tracked) {
         calibration_samples_.clear();
-        setStatus("Stair target lost; waiting for a stable acquisition...");
+        calibration_rejection_reason_ = "Stair target lost";
+        if (calibration_progress_throttle_.elapsed() >= 100) {
+            setStatus("Stair target lost; waiting for a stable acquisition...");
+            calibration_progress_throttle_.restart();
+        }
         return;
     }
 
@@ -512,16 +788,25 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         !targetPoseWithinTolerance(calibration_samples_.front(), pose, profile)) {
         calibration_samples_.clear();
         calibration_samples_.push_back(pose);
-        setStatus("Stair target moved; restarting stable-pose collection (1/" +
-                  QString::number(static_cast<qulonglong>(profile.required_samples)) + ")");
+        calibration_rejection_reason_ = "Target motion exceeded the stability tolerance";
+        if (calibration_progress_throttle_.elapsed() >= 100) {
+            setStatus("Stair target moved; restarting stable-pose collection (1/" +
+                      QString::number(static_cast<qulonglong>(profile.required_samples)) + ")");
+            calibration_progress_throttle_.restart();
+        }
         return;
     }
 
     calibration_samples_.push_back(pose);
     if (calibration_samples_.size() < profile.required_samples) {
-        setStatus("Collecting stair-target poses: " +
-                  QString::number(calibration_samples_.size()) + "/" +
-                  QString::number(profile.required_samples));
+        if (calibration_progress_throttle_.elapsed() >= 100) {
+            const QString progress = "Collecting stair-target poses: " +
+                QString::number(calibration_samples_.size()) + "/" +
+                QString::number(profile.required_samples);
+            setStatus(progress);
+            calibration_quality_label_->setText("Quality: " + progress);
+            calibration_progress_throttle_.restart();
+        }
         return;
     }
 
@@ -529,7 +814,12 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     calibration_state_ = CalibrationState::Manual;
     calibration_samples_.clear();
     if (!solution) {
-        setStatus("Calibration failed: stair-target motion exceeded quality limits");
+        calibration_rejection_reason_ =
+            "Translation or rotation RMS exceeded the selected profile limits";
+        setStatus("Calibration failed: " + calibration_rejection_reason_);
+        updateCalibrationPersistentStatus(gui::SessionCalibrationState::Failed,
+            "Quality: rejected — " + calibration_rejection_reason_,
+            calibration_metadata_compatible_);
         return;
     }
 
@@ -537,6 +827,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         profile,
         solution->holo_from_target);
     calibration_state_ = CalibrationState::AutomaticSession;
+    calibration_quality_ = solution->quality;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
     }
@@ -546,6 +837,14 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
               QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
               " mm, " + QString::number(solution->quality.rotation_rms_degrees, 'f', 2) +
               " deg)");
+    updateCalibrationPersistentStatus(
+        gui::SessionCalibrationState::AutomaticSession,
+        "Quality: " + QString::number(solution->quality.sample_count) +
+            " samples, translation RMS " +
+            QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
+            " mm, rotation RMS " +
+            QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg",
+        calibration_metadata_compatible_);
 }
 
 void PreviewPanel::openMergedCsv() {
@@ -970,7 +1269,8 @@ PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
 }
 
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
-    if (calibration_state_ == CalibrationState::AutomaticSession) {
+    if (calibration_state_ == CalibrationState::AutomaticSession ||
+        calibration_state_ == CalibrationState::SavedProfile) {
         return automatic_gaze_transform_;
     }
     return manualGazeTransform();
@@ -984,63 +1284,331 @@ void PreviewPanel::resetCalibrationSession() {
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
     PreviewTransformProfile transform = transformProfileFromRigid(
-        defaultStairCalibrationProfile().vicon_from_target,
-        "Stair");
+        activeSolverProfile().vicon_from_target, "Stair");
     transform.scale = 0.001;
     return transform;
 }
 
-void PreviewPanel::loadSettings() {
-    QSettings settings("ViconLSL", "ViconLSLBridge");
-    marker_stream_edit_->setText(settings.value(
-        "preview/markerStream", stream_defaults::ViconMarkers).toString());
-    segment_stream_edit_->setText(settings.value(
-        "preview/segmentStream", stream_defaults::ViconSegments).toString());
-    gaze_stream_edit_->setText(settings.value(
-        "preview/gazeStream", stream_defaults::HoloLensGaze).toString());
-    calibration_stream_edit_->setText(settings.value(
-        "preview/calibrationStream", stream_defaults::HoloLensModelTargetPose).toString());
-    tolerance_spin_->setValue(settings.value("preview/matchTolerance", 0.05).toDouble());
-    trail_points_spin_->setValue(settings.value("preview/trailPoints", 24).toInt());
-    playback_speed_spin_->setValue(settings.value("preview/playbackSpeed", 1.0).toDouble());
-    gaze_tx_spin_->setValue(settings.value("preview/gazeTx", 0.0).toDouble());
-    gaze_ty_spin_->setValue(settings.value("preview/gazeTy", 0.0).toDouble());
-    gaze_tz_spin_->setValue(settings.value("preview/gazeTz", 0.0).toDouble());
-    gaze_rx_spin_->setValue(settings.value("preview/gazeRx", 0.0).toDouble());
-    gaze_ry_spin_->setValue(settings.value("preview/gazeRy", 0.0).toDouble());
-    gaze_rz_spin_->setValue(settings.value("preview/gazeRz", 0.0).toDouble());
-    resetCalibrationSession();
-    const QStringList obsolete_automatic_keys = {
-        "preview/gazeUseQuaternion",
-        "preview/gazeQTx", "preview/gazeQTy", "preview/gazeQTz",
-        "preview/gazeQx", "preview/gazeQy", "preview/gazeQz", "preview/gazeQw",
-    };
-    for (const QString& key : obsolete_automatic_keys) {
-        settings.remove(key);
+void PreviewPanel::loadCalibrationProfiles() {
+    calibration_profiles_ = services_.settings->loadCalibrationProfiles();
+    const gui::SessionConfiguration configuration =
+        services_.settings->loadConfiguration();
+    refreshCalibrationProfileUi(configuration.calibration_profile_id);
+}
+
+void PreviewPanel::saveCalibrationProfiles() {
+    QString error;
+    if (!services_.settings->saveCalibrationProfiles(
+            calibration_profiles_, &error)) {
+        setStatus("Could not save calibration profiles: " + error);
+        return;
     }
-    QString stair_model = settings.value("preview/stairModel", "").toString().trimmed();
+    gui::SessionConfiguration configuration =
+        services_.settings->loadConfiguration();
+    configuration.calibration_profile_id =
+        calibration_profile_combo_->currentData().toString();
+    services_.settings->saveConfiguration(configuration);
+}
+
+void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
+    if (!calibration_profile_combo_) return;
+    QString desired = select_id;
+    if (desired.isEmpty()) desired = calibration_profile_combo_->currentData().toString();
+    {
+        const QSignalBlocker blocker(calibration_profile_combo_);
+        calibration_profile_combo_->clear();
+        for (const gui::ManagedCalibrationProfile& profile : calibration_profiles_) {
+            if (!profile.retired || profile.id == desired) {
+                calibration_profile_combo_->addItem(
+                    profile.display_name + (profile.retired ? " (retired)" : ""),
+                    profile.id);
+            }
+        }
+        int index = calibration_profile_combo_->findData(desired);
+        if (index < 0 && calibration_profile_combo_->count() > 0) index = 0;
+        calibration_profile_combo_->setCurrentIndex(index);
+    }
+    const gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
+    if (!profile) return;
+    const QSignalBlocker name_blocker(calibration_profile_name_edit_);
+    const QSignalBlocker setup_blocker(calibration_setup_id_edit_);
+    const QSignalBlocker notes_blocker(calibration_notes_edit_);
+    const QSignalBlocker gaze_blocker(gaze_frame_edit_);
+    const QSignalBlocker target_blocker(target_frame_edit_);
+    const QSignalBlocker tx_blocker(stair_tx_spin_);
+    const QSignalBlocker ty_blocker(stair_ty_spin_);
+    const QSignalBlocker tz_blocker(stair_tz_spin_);
+    const QSignalBlocker qx_blocker(stair_qx_spin_);
+    const QSignalBlocker qy_blocker(stair_qy_spin_);
+    const QSignalBlocker qz_blocker(stair_qz_spin_);
+    const QSignalBlocker qw_blocker(stair_qw_spin_);
+    calibration_profile_name_edit_->setText(profile->display_name);
+    calibration_setup_id_edit_->setText(profile->physical_setup_id);
+    calibration_notes_edit_->setText(profile->setup_notes);
+    gaze_frame_edit_->setText(profile->gaze_coordinate_frame);
+    target_frame_edit_->setText(profile->target_coordinate_frame);
+    stair_tx_spin_->setValue(profile->vicon_from_target.translation.x);
+    stair_ty_spin_->setValue(profile->vicon_from_target.translation.y);
+    stair_tz_spin_->setValue(profile->vicon_from_target.translation.z);
+    stair_qx_spin_->setValue(profile->vicon_from_target.rotation.x);
+    stair_qy_spin_->setValue(profile->vicon_from_target.rotation.y);
+    stair_qz_spin_->setValue(profile->vicon_from_target.rotation.z);
+    stair_qw_spin_->setValue(profile->vicon_from_target.rotation.w);
+    if (profile->quality.sample_count > 0) {
+        calibration_quality_label_->setText(
+            "Saved quality: " + QString::number(profile->quality.sample_count) +
+            " samples, translation RMS " +
+            QString::number(profile->quality.translation_rms_m * 1000.0, 'f', 1) +
+            " mm, rotation RMS " +
+            QString::number(profile->quality.rotation_rms_degrees, 'f', 2) + " deg");
+    }
+}
+
+gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() {
+    if (!calibration_profile_combo_) return nullptr;
+    const QString id = calibration_profile_combo_->currentData().toString();
+    for (gui::ManagedCalibrationProfile& profile : calibration_profiles_) {
+        if (profile.id == id) return &profile;
+    }
+    return nullptr;
+}
+
+const gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() const {
+    return const_cast<PreviewPanel*>(this)->selectedCalibrationProfile();
+}
+
+CalibrationProfile PreviewPanel::activeSolverProfile() const {
+    CalibrationProfile result = defaultStairCalibrationProfile();
+    if (const gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile()) {
+        result = profile->solverProfile();
+    }
+    if (stair_tx_spin_) {
+        result.vicon_from_target.translation = {
+            stair_tx_spin_->value(), stair_ty_spin_->value(), stair_tz_spin_->value()};
+        result.vicon_from_target.rotation = normalizeQuaternion({
+            stair_qx_spin_->value(), stair_qy_spin_->value(),
+            stair_qz_spin_->value(), stair_qw_spin_->value()});
+    }
+    return result;
+}
+
+void PreviewPanel::applySelectedCalibrationProfile() {
+    gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
+    if (!profile) return;
+    QString reason;
+    if (!profile->complete(&reason)) {
+        setStatus("Calibration profile is incomplete: " + reason);
+        return;
+    }
+    bool metadata_matches = true;
+    for (const gui::StreamIdentity& identity : latest_stream_inventory_) {
+        if (identity.role == "gaze" && !identity.coordinate_frame.isEmpty() &&
+            identity.coordinate_frame != profile->gaze_coordinate_frame) {
+            metadata_matches = false;
+        }
+        if (identity.role == "calibration" && !identity.coordinate_frame.isEmpty() &&
+            identity.coordinate_frame != profile->target_coordinate_frame) {
+            metadata_matches = false;
+        }
+    }
+    if ((!calibration_metadata_compatible_ || !metadata_matches) &&
+        !profile->metadata_fallback_confirmed) {
+        const auto answer = QMessageBox::warning(
+            this, "Calibration metadata mismatch",
+            "The live coordinate metadata is missing or differs from this profile. "
+            "Apply the profile using fallback compatibility?",
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            setStatus("Calibration profile was not applied because metadata was not confirmed");
+            return;
+        }
+        profile->metadata_fallback_confirmed = true;
+        saveCalibrationProfiles();
+    }
+    automatic_gaze_transform_ = profile->gaze_transform;
+    calibration_quality_ = profile->quality;
+    calibration_state_ = CalibrationState::SavedProfile;
+    if (worker_) worker_->setGazeTransform(gazeTransform());
+    reloadStairModel();
+    widget_->requestViewRefit();
+    updateCalibrationPersistentStatus(
+        gui::SessionCalibrationState::SavedProfile,
+        profile->quality.sample_count > 0
+            ? "Quality: saved translation RMS " +
+                  QString::number(profile->quality.translation_rms_m * 1000.0, 'f', 1) +
+                  " mm, rotation RMS " +
+                  QString::number(profile->quality.rotation_rms_degrees, 'f', 2) + " deg"
+            : "Quality: saved profile has no measured RMS values",
+        calibration_metadata_compatible_ && metadata_matches);
+    setStatus("Applied calibration profile " + profile->display_name);
+}
+
+void PreviewPanel::saveSessionCalibrationProfile() {
+    if (calibration_state_ != CalibrationState::AutomaticSession &&
+        calibration_state_ != CalibrationState::SavedProfile) {
+        setStatus("Solve or apply a calibration before saving a managed profile");
+        return;
+    }
+    gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
+    const QString display_name = calibration_profile_name_edit_->text().trimmed();
+    const bool create_new = !selected || selected->quality.sample_count == 0 || selected->retired;
+    gui::ManagedCalibrationProfile profile = selected
+        ? *selected : gui::CalibrationProfileStore::defaultProfile();
+    if (create_new) {
+        profile.id = gui::CalibrationProfileStore::newProfileId(
+            display_name, calibration_profiles_);
+        profile.created_at = services_.clock->nowUtc();
+        profile.retired = false;
+    }
+    profile.display_name = display_name;
+    profile.physical_setup_id = calibration_setup_id_edit_->text().trimmed();
+    profile.setup_notes = calibration_notes_edit_->text().trimmed();
+    profile.stair_model_path = stair_model_edit_->text().trimmed();
+    profile.stair_model_identity =
+        gui::CalibrationProfileStore::stairModelIdentity(profile.stair_model_path);
+    if (profile.stair_model_identity.isEmpty()) {
+        profile.stair_model_identity = QFileInfo(profile.stair_model_path).fileName();
+    }
+    profile.vicon_from_target = activeSolverProfile().vicon_from_target;
+    profile.gaze_transform = gazeTransform();
+    profile.gaze_coordinate_frame = gaze_frame_edit_->text().trimmed();
+    profile.target_coordinate_frame = target_frame_edit_->text().trimmed();
+    profile.quality = calibration_quality_;
+    profile.metadata_fallback_confirmed = !calibration_metadata_compatible_;
+    QString reason;
+    if (!profile.complete(&reason)) {
+        setStatus("Cannot save calibration profile: " + reason);
+        return;
+    }
+    if (create_new) {
+        calibration_profiles_.push_back(profile);
+    } else {
+        *selected = profile;
+    }
+    saveCalibrationProfiles();
+    refreshCalibrationProfileUi(profile.id);
+    calibration_state_ = CalibrationState::SavedProfile;
+    updateCalibrationPersistentStatus(gui::SessionCalibrationState::SavedProfile,
+                                      calibrationQualityText(),
+                                      calibration_metadata_compatible_);
+    setStatus("Saved calibration profile " + profile.display_name);
+}
+
+void PreviewPanel::duplicateCalibrationProfile() {
+    const gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
+    if (!selected) return;
+    gui::ManagedCalibrationProfile duplicate =
+        gui::CalibrationProfileStore::duplicate(*selected, calibration_profiles_);
+    calibration_profiles_.push_back(duplicate);
+    saveCalibrationProfiles();
+    refreshCalibrationProfileUi(duplicate.id);
+    setStatus("Duplicated calibration profile as " + duplicate.display_name);
+}
+
+void PreviewPanel::retireCalibrationProfile() {
+    const gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
+    if (!selected) return;
+    const QString id = selected->id;
+    const auto answer = QMessageBox::question(
+        this, "Retire calibration profile",
+        "Retire " + selected->display_name + "? Existing diagnostic records keep its ID.",
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) return;
+    if (gui::CalibrationProfileStore::retire(calibration_profiles_, id)) {
+        saveCalibrationProfiles();
+        refreshCalibrationProfileUi();
+        setStatus("Calibration profile retired");
+    }
+}
+
+void PreviewPanel::importCalibrationProfile() {
+    const QString path = services_.file_dialogs->openFile(
+        this, "Import calibration profile", QString(), "JSON files (*.json)");
+    if (path.isEmpty()) return;
+    gui::ManagedCalibrationProfile profile;
+    QString error;
+    if (!gui::CalibrationProfileStore::importProfile(path, profile, &error)) {
+        setStatus("Could not import calibration profile: " + error);
+        return;
+    }
+    if (std::any_of(calibration_profiles_.begin(), calibration_profiles_.end(),
+                    [&profile](const auto& existing) { return existing.id == profile.id; })) {
+        profile.id = gui::CalibrationProfileStore::newProfileId(
+            profile.display_name, calibration_profiles_);
+    }
+    calibration_profiles_.push_back(profile);
+    saveCalibrationProfiles();
+    refreshCalibrationProfileUi(profile.id);
+    setStatus("Imported calibration profile " + profile.display_name);
+}
+
+void PreviewPanel::exportCalibrationProfile() {
+    const gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
+    if (!profile) return;
+    const QString path = services_.file_dialogs->saveFile(
+        this, "Export calibration profile", profile->id + ".json",
+        "JSON files (*.json)");
+    if (path.isEmpty()) return;
+    QString error;
+    if (!gui::CalibrationProfileStore::exportProfile(path, *profile, &error)) {
+        setStatus("Could not export calibration profile: " + error);
+        return;
+    }
+    setStatus("Exported calibration profile to " + QDir::toNativeSeparators(path));
+}
+
+void PreviewPanel::updateMeasuredStairPose() {
+    if (!stair_model_loaded_) return;
+    try {
+        const PreviewMesh mesh = loadObjMesh(
+            QDir::toNativeSeparators(stair_model_edit_->text()).toStdString());
+        widget_->setStairMesh(mesh, stairTransform());
+        widget_->requestViewRefit();
+    } catch (const std::exception&) {
+        // The normal stair-model error path reports file errors on reload.
+    }
+}
+
+void PreviewPanel::updateCalibrationPersistentStatus(
+    gui::SessionCalibrationState state,
+    const QString& text,
+    bool metadata_compatible) {
+    if (calibration_quality_label_) calibration_quality_label_->setText(text);
+    emit calibrationStateChanged(state, text, metadata_compatible);
+}
+
+void PreviewPanel::loadSettings() {
+    gui::SessionConfiguration configuration =
+        services_.settings->loadConfiguration();
+    applySessionConfiguration(configuration);
+    resetCalibrationSession();
+    QString stair_model = configuration.stair_model_path.trimmed();
     if (stair_model.isEmpty() || !QFileInfo::exists(stair_model)) {
         stair_model = defaultStairModelPath();
     }
     stair_model_edit_->setText(stair_model);
+    const QStringList recent_files =
+        services_.settings->loadUiState().recent_recordings;
+    recent_files_combo_->clear();
+    for (const QString& path : recent_files) {
+        if (!path.trimmed().isEmpty()) {
+            recent_files_combo_->addItem(QFileInfo(path).fileName(), path);
+        }
+    }
 }
 
 void PreviewPanel::saveSettings() const {
-    QSettings settings("ViconLSL", "ViconLSLBridge");
-    settings.setValue("preview/markerStream", marker_stream_edit_->text());
-    settings.setValue("preview/segmentStream", segment_stream_edit_->text());
-    settings.setValue("preview/gazeStream", gaze_stream_edit_->text());
-    settings.setValue("preview/calibrationStream", calibration_stream_edit_->text());
-    settings.setValue("preview/matchTolerance", tolerance_spin_->value());
-    settings.setValue("preview/trailPoints", trail_points_spin_->value());
-    settings.setValue("preview/playbackSpeed", playback_speed_spin_->value());
-    settings.setValue("preview/gazeTx", gaze_tx_spin_->value());
-    settings.setValue("preview/gazeTy", gaze_ty_spin_->value());
-    settings.setValue("preview/gazeTz", gaze_tz_spin_->value());
-    settings.setValue("preview/gazeRx", gaze_rx_spin_->value());
-    settings.setValue("preview/gazeRy", gaze_ry_spin_->value());
-    settings.setValue("preview/gazeRz", gaze_rz_spin_->value());
-    settings.setValue("preview/stairModel", stair_model_edit_->text());
+    gui::SessionConfiguration configuration =
+        services_.settings->loadConfiguration();
+    updateSessionConfiguration(configuration);
+    services_.settings->saveConfiguration(configuration);
+    gui::SessionUiState ui_state = services_.settings->loadUiState();
+    QStringList recent_files;
+    for (int index = 0; index < recent_files_combo_->count(); ++index) {
+        recent_files.push_back(recent_files_combo_->itemData(index).toString());
+    }
+    ui_state.recent_recordings = recent_files;
+    services_.settings->saveUiState(ui_state);
 }
 
 QString PreviewPanel::defaultStairModelPath() const {
