@@ -133,7 +133,8 @@ bool LabRecorderClient::updateFilename(const LabRecorderFilenameFields& fields) 
             "Filename changes are unavailable while recording");
         return false;
     }
-    return beginBatch(CommandKind::Filename, "update filename", {filenameCommand(fields)},
+    return beginBatch(CommandKind::Filename, "update filename",
+                      {LabRecorderFilenamePolicy::filenameCommand(fields)},
                       RecorderRecordingState::Unknown);
 }
 
@@ -145,7 +146,8 @@ bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields,
         return false;
     }
     return beginBatch(CommandKind::Start, "start recording",
-                      startRecordingCommands(fields, select_all_first),
+                      LabRecorderFilenamePolicy::startRecordingCommands(
+                          fields, select_all_first),
                       RecorderRecordingState::Recording);
 }
 
@@ -415,27 +417,4 @@ void LabRecorderClient::onCommandTimeout() {
     if (have_active_batch_) {
         failActiveConnection("Timed out waiting for LabRecorder command acknowledgement");
     }
-}
-
-QString LabRecorderClient::filenameCommand(const LabRecorderFilenameFields& fields) {
-    return LabRecorderFilenamePolicy::filenameCommand(fields);
-}
-
-QString LabRecorderClient::renderedFilename(const LabRecorderFilenameFields& fields) {
-    return LabRecorderFilenamePolicy::renderedFilename(fields);
-}
-
-bool LabRecorderClient::hasUnresolvedFilenamePlaceholders(
-    const LabRecorderFilenameFields& fields) {
-    return LabRecorderFilenamePolicy::hasUnresolvedFilenamePlaceholders(fields);
-}
-
-QStringList LabRecorderClient::startRecordingCommands(
-    const LabRecorderFilenameFields& fields,
-    bool select_all_first) {
-    return LabRecorderFilenamePolicy::startRecordingCommands(fields, select_all_first);
-}
-
-QString LabRecorderClient::sanitizedValue(QString value) {
-    return LabRecorderFilenamePolicy::sanitizedValue(std::move(value));
 }

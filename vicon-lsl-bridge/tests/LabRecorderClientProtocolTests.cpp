@@ -303,7 +303,7 @@ void testRecorderDuplicateAndShutdownProtocol() {
                "the single active Start is visible");
         const QStringList commands = {
             "update", "select all",
-            LabRecorderClient::filenameCommand(fields), "start",
+            LabRecorderFilenamePolicy::filenameCommand(fields), "start",
         };
         for (const QString& command : commands) {
             expect(readCommand(socket.get()) == command,
@@ -347,7 +347,7 @@ void testRecorderDuplicateAndShutdownProtocol() {
         expect(!client.sendCommand("ignored"), "shutdown rejects new work");
 
         const QStringList remaining = {
-            "select all", LabRecorderClient::filenameCommand(fields), "start",
+            "select all", LabRecorderFilenamePolicy::filenameCommand(fields), "start",
         };
         expect(writeReply(socket.get(), "OK"), "first Start command is acknowledged");
         for (const QString& command : remaining) {
