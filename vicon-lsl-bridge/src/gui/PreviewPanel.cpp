@@ -1,4 +1,5 @@
 #include "gui/PreviewPanel.h"
+#include "gui/PreviewFileLoader.h"
 
 #include "preview/ObjMesh.h"
 #include "preview/PreviewCsv.h"
@@ -13,6 +14,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -547,15 +549,11 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
 PreviewPanel::~PreviewPanel() {
     if (file_loader_) {
         file_loader_->cancel();
-        file_loader_->disconnect(this);
-        file_loader_->setParent(nullptr);
-        file_loader_ = nullptr;
+        file_loader_->wait();
     }
     if (worker_) {
         worker_->requestInterruption();
-        worker_->disconnect(this);
-        worker_->setParent(nullptr);
-        worker_ = nullptr;
+        worker_->wait();
     }
     saveSettings();
 }
@@ -674,7 +672,7 @@ void PreviewPanel::resetCamera() {
 }
 
 void PreviewPanel::exportPreviewImage() {
-    const QString path = services_.file_dialogs->saveFile(
+    const QString path = QFileDialog::getSaveFileName(
         this, "Export preview image", QString(), "PNG images (*.png)");
     if (path.isEmpty()) return;
     QString normalized = path;
@@ -1029,7 +1027,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
 }
 
 void PreviewPanel::openMergedCsv() {
-    const QString path = services_.file_dialogs->openFile(
+    const QString path = QFileDialog::getOpenFileName(
         this, "Open merged preview CSV", QString(),
         "CSV files (*.csv);;All files (*)");
     if (path.isEmpty()) {
@@ -1054,7 +1052,7 @@ void PreviewPanel::loadMergedCsv(const QString& path) {
 }
 
 void PreviewPanel::openXdf() {
-    const QString path = services_.file_dialogs->openFile(
+    const QString path = QFileDialog::getOpenFileName(
         this, "Open recorded XDF", QString(),
         "XDF files (*.xdf);;All files (*)");
     if (path.isEmpty()) {
@@ -1101,7 +1099,7 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
     options.cancellation_check_sample_interval =
         gui::PerformanceBudgets::FileCancelSampleInterval;
 
-    auto* loader = services_.create_file_loader(
+    auto* loader = new PreviewFileLoader(
         type, path, vicon_transform, gazeTransform(), tolerance_spin_->value(),
         options, this);
     file_loader_ = loader;
@@ -1412,7 +1410,7 @@ void PreviewPanel::dropEvent(QDropEvent* event) {
 }
 
 void PreviewPanel::browseStairModel() {
-    const QString path = services_.file_dialogs->openFile(
+    const QString path = QFileDialog::getOpenFileName(
         this, "Select stair OBJ", stair_model_edit_->text(),
         "Wavefront OBJ (*.obj);;All files (*)");
     if (!path.isEmpty()) {
@@ -1638,7 +1636,7 @@ void PreviewPanel::saveSessionCalibrationProfile() {
     if (create_new) {
         profile.id = gui::CalibrationProfileStore::newProfileId(
             display_name, calibration_profiles_);
-        profile.created_at = services_.clock->nowUtc();
+        profile.created_at = QDateTime::currentDateTimeUtc();
         profile.retired = false;
     }
     profile.display_name = display_name;
@@ -1703,7 +1701,7 @@ void PreviewPanel::retireCalibrationProfile() {
 }
 
 void PreviewPanel::importCalibrationProfile() {
-    const QString path = services_.file_dialogs->openFile(
+    const QString path = QFileDialog::getOpenFileName(
         this, "Import calibration profile", QString(), "JSON files (*.json)");
     if (path.isEmpty()) return;
     gui::ManagedCalibrationProfile profile;
@@ -1726,7 +1724,7 @@ void PreviewPanel::importCalibrationProfile() {
 void PreviewPanel::exportCalibrationProfile() {
     const gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
     if (!profile) return;
-    const QString path = services_.file_dialogs->saveFile(
+    const QString path = QFileDialog::getSaveFileName(
         this, "Export calibration profile", profile->id + ".json",
         "JSON files (*.json)");
     if (path.isEmpty()) return;

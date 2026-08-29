@@ -140,10 +140,7 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
 
 PreviewStreamWorker::~PreviewStreamWorker() {
     requestInterruption();
-    if (isRunning() && !wait(gui::PerformanceBudgets::PreviewStopDeadlineMs)) {
-        terminate();
-        wait(100);
-    }
+    wait();
 }
 
 bool PreviewStreamWorker::takeLatestFrame(PreviewFrame& frame,
