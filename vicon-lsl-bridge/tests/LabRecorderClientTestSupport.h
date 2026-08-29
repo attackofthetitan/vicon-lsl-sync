@@ -48,7 +48,6 @@ void testFilenameCommand();
 void testRenderedFilenameUsesSharedSanitization();
 void testUnresolvedFilenamePlaceholders();
 void testStartRecordingCommands();
-void testBridgeWindowSettingsContract();
 void testRuntimePolicy();
 void testTcpCommandSequence();
 void testTcpStartRecordingSequenceWithSelectAll();

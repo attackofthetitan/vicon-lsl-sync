@@ -254,7 +254,7 @@ void RecordingVerifier::run() {
                 addFinding(report, EventSeverity::Error, "missing-required-stream",
                            expected.name,
                            "Required stream " + expected.name + " is absent from the XDF",
-                           "Review the final preflight inventory and recorder selection.");
+                           "Review the final stream list and recorder selection.");
                 continue;
             }
             if (expected.expected_channels > 0 &&

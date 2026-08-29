@@ -7,9 +7,7 @@
 
 namespace vicon_lsl::gui {
 
-// These limits are part of the desktop application's operational contract.
-// They are kept in one place so production code and verification use the same
-// values.
+// Keep the app's time, memory, and size limits in one place.
 struct PerformanceBudgets {
     static constexpr int MaximumGuiThreadStallMs = 50;
     static constexpr int BridgeStopDeadlineMs = 4000;

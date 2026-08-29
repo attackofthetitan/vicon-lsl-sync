@@ -156,7 +156,7 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
     addItem(result, "recorder-idle", SessionComponent::Recorder,
             PreflightLevel::Required, recorder_idle,
             recorder_idle ? "Recorder has no conflicting work"
-                          : "Recorder is recording or has an operation in flight",
+                          : "Recorder is busy or already recording",
             "Stop the current recording and wait for pending commands to finish.");
 
     addItem(result, "recording-path", SessionComponent::Path,

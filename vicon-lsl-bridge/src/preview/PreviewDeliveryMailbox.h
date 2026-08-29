@@ -18,8 +18,7 @@ struct PreviewDeliveryMetrics {
     std::int64_t display_latency_ms = 0;
 };
 
-// Single-slot display delivery. Publishing can never grow an event queue:
-// an undisplayed frame is replaced, while the replacement remains observable.
+// Keep only the newest frame so the display cannot fall behind.
 class PreviewDeliveryMailbox {
 public:
     void publish(PreviewFrame frame, std::int64_t created_ms) {

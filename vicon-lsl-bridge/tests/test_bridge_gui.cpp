@@ -78,9 +78,7 @@ int main(int argc, char* argv[]) {
         const QSize target_size(800, 600);
         const QSize minimum = window.minimumSizeHint();
         const bool fits = minimum.width() <= 1280 && minimum.height() <= 720;
-        const bool controls_are_described =
-            window.configurableTooltipsPresent() &&
-            window.accessibilityContractSatisfied();
+        const bool controls_are_described = window.passesInterfaceChecks();
 
         window.resize(target_size);
         window.ensurePolished();

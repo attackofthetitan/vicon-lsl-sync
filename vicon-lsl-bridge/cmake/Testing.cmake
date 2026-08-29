@@ -67,13 +67,11 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     add_executable(vicon-lsl-labrecorder-tests
         tests/test_labrecorder_client.cpp
         tests/LabRecorderFilenameTests.cpp
-        tests/BridgeWindowSettingsTests.cpp
         tests/LabRecorderRuntimePolicyTests.cpp
         tests/LabRecorderClientProtocolTests.cpp
         tests/SessionGuiModelTests.cpp
         tests/RecordingVerifierTests.cpp
         tests/RecorderProcessControllerTests.cpp
-        src/gui/BridgeWindowSettings.cpp
         src/gui/LabRecorderClient.cpp
         src/gui/LabRecorderFilenamePolicy.cpp
         src/gui/LabRecorderRuntimePolicy.cpp

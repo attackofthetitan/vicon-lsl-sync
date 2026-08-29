@@ -2,7 +2,6 @@
 
 #include <memory>
 
-#include "gui/BridgeWindowSettings.h"
 #include "gui/GuiServices.h"
 #include "gui/LabRecorderFilenamePolicy.h"
 
@@ -130,8 +129,6 @@ struct BridgeWindowUi {
     QPushButton* open_verified_recording_button = nullptr;
     vicon_lsl::PreviewPanel* preview_panel = nullptr;
 
-    void applySettings(const BridgeWindowSettings& settings) const;
-    BridgeWindowSettings settings() const;
     LabRecorderFilenameFields filenameFields() const;
     void setBridgeInputsEnabled(bool enabled) const;
     bool configurableTooltipsPresent() const;

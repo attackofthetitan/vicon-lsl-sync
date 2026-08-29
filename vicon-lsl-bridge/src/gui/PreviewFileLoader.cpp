@@ -96,7 +96,7 @@ void PreviewFileLoader::run() {
             emit progressChanged("calibration", 0,
                                  "Evaluating recorded stair-target calibration");
             emit progressChanged("frame preparation", 0,
-                                 "Assembling the bounded playback cache");
+                                 "Preparing frames for playback");
             loaded = buildXdfPreviewRecording(xdf, vicon_transform_, gaze_transform_,
                                               match_tolerance_seconds_, mapping, options);
             emit progressChanged("calibration", 100,

@@ -138,7 +138,7 @@ std::size_t correctAndRepairTimestamps(XdfStreamData& stream) {
         if (previous && repaired <= *previous) {
             repaired = std::nextafter(*previous, std::numeric_limits<double>::infinity());
             if (!std::isfinite(repaired)) {
-                throw std::runtime_error("Unable to repair non-monotonic XDF timestamp");
+                throw std::runtime_error("Could not fix an XDF timestamp that moved backward");
             }
             accumulated_shift += static_cast<long double>(repaired) - shifted;
             ++repaired_count;

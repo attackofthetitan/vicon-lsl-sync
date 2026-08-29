@@ -69,16 +69,7 @@ public:
         vicon_lsl::gui::GuiServices services = vicon_lsl::gui::defaultGuiServices());
     ~BridgeWindow() override;
 
-    // Stable state accessors for headless UI verification.
-    bool labRecorderConnected() const;
-    bool labRecorderOwnedProcessRunning() const;
-    bool stairModelLoaded() const;
-    bool configurableTooltipsPresent() const;
-    bool accessibilityContractSatisfied() const;
-    vicon_lsl::gui::SessionWorkflowState workflowState() const;
-    ComponentLifecycleState bridgeLifecycleState() const;
-    bool closePending() const { return close_pending_; }
-    QJsonObject diagnosticBundle() const;
+    bool passesInterfaceChecks() const;
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -109,7 +100,6 @@ private slots:
     void onCopyDiagnostics();
     void onExportDiagnostics();
     void onShowVerificationDetails();
-    void updateFilenamePreview();
     void syncFilenameToLabRecorder();
     void onStatusStaleCheck();
     void onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
@@ -134,8 +124,6 @@ private:
     void refreshPresetList(const QString& select = {});
     void restoreUiState();
     void saveUiState();
-    void setInputsEnabled(bool enabled);
-    LabRecorderFilenameFields filenameFields() const;
     RecordingPathValidationOptions pathValidationOptions(bool create_parent) const;
     void validateRecordingPath(bool create_parent = false);
     void setLabRecorderStatus(const QString& status,
@@ -145,6 +133,7 @@ private:
     void updateRecordingButtons();
     void updateDashboard();
     void updateEventLog();
+    QJsonObject diagnosticBundle() const;
     void appendEvent(SessionComponent component,
                      EventSeverity severity,
                      const QString& message);

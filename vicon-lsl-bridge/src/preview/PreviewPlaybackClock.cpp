@@ -24,7 +24,7 @@ void PreviewPlaybackClock::setTimeline(const std::vector<double>& timestamps) {
         }
         const double relative = timestamp - first;
         if (!timeline_.empty() && relative < previous) {
-            throw std::invalid_argument("Playback timeline is not monotonic");
+            throw std::invalid_argument("Playback times must always increase");
         }
         timeline_.push_back(relative);
         previous = relative;
@@ -48,7 +48,7 @@ void PreviewPlaybackClock::setFrameTimeline(const std::vector<PreviewFrame>& fra
         }
         const double relative = frame.timestamp - first;
         if (relative < previous) {
-            throw std::invalid_argument("Playback timeline is not monotonic");
+            throw std::invalid_argument("Playback times must always increase");
         }
         previous = relative;
     }

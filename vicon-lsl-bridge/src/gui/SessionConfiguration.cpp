@@ -200,7 +200,7 @@ StreamIdentitySelection selectStreamIdentity(
     const bool fallback = !required_source.isEmpty() || matches.size() > 1;
     return {matches.front(), false, fallback,
             fallback
-                ? "Follow by name selected the first deterministic source identity"
+                ? "Follow by name selected the first matching source"
                 : "Selected the only matching stream identity"};
 }
 

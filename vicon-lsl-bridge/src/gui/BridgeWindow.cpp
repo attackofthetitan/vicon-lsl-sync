@@ -212,8 +212,7 @@ BridgeWindow::BridgeWindow(QWidget* parent,
     appendEvent(SessionComponent::Application, EventSeverity::Information,
                 "Application interface initialized");
 
-    // The endpoint probe is always first. Automatic launch is considered only
-    // after the probe has produced a definite failure.
+    // Check for a running recorder before starting another one.
     QTimer::singleShot(0, this, &BridgeWindow::beginLabRecorderStartup);
 }
 
@@ -404,7 +403,7 @@ void BridgeWindow::connectSignals() {
                     startup_endpoint_probe_ = false;
                     labrecorder_retry_timer_->stop();
                     appendEvent(SessionComponent::Recorder, EventSeverity::Information,
-                                "Connected to configured recorder endpoint");
+                                "Connected to the recorder");
                     if (guided_start_pending_) advanceGuidedStart();
                 } else if (startup_endpoint_probe_ &&
                            state != RecorderConnectionState::Connecting) {
@@ -512,7 +511,7 @@ void BridgeWindow::connectSignals() {
                     dashboard_.recording_started_at = QDateTime::currentDateTimeUtc();
                     recording_elapsed_.restart();
                     appendEvent(SessionComponent::Recorder, EventSeverity::Information,
-                                "Allowlist recorder is recording");
+                                "Selected-stream recorder is recording");
                 } else if (state == RecorderRecordingState::Stopped) {
                     requestVerification();
                 }
@@ -524,13 +523,13 @@ void BridgeWindow::connectSignals() {
     connect(recorder_process_, &vicon_lsl::gui::RecorderProcessController::outputLine,
             this, [this](EventSeverity severity, const QString& line) {
                 appendEvent(SessionComponent::Recorder, severity,
-                            "Recorder process: " + line);
+                            "Recorder: " + line);
             });
     connect(recorder_process_, &vicon_lsl::gui::RecorderProcessController::processExited,
             this, [this](int exit_code, bool expected, RecorderProcessKind kind) {
                 if (kind == RecorderProcessKind::AllowlistRecorder && !expected) {
                     appendEvent(SessionComponent::Recorder, EventSeverity::Error,
-                                "Allowlist recorder exited unexpectedly with code " +
+                                "Selected-stream recorder closed unexpectedly with code " +
                                     QString::number(exit_code));
                     dashboard_.workflow = SessionWorkflowState::Failed;
                 }
@@ -599,33 +598,9 @@ void BridgeWindow::connectSignals() {
     }
 }
 
-bool BridgeWindow::labRecorderConnected() const {
-    return labrecorder_client_ &&
-           labrecorder_client_->connectionState() == RecorderConnectionState::Connected;
-}
-
-bool BridgeWindow::labRecorderOwnedProcessRunning() const {
-    return recorder_process_ && recorder_process_->ownsRunningProcess();
-}
-
-bool BridgeWindow::stairModelLoaded() const {
-    return ui_->preview_panel && ui_->preview_panel->stairModelLoaded();
-}
-
-bool BridgeWindow::configurableTooltipsPresent() const {
-    return ui_->configurableTooltipsPresent();
-}
-
-bool BridgeWindow::accessibilityContractSatisfied() const {
-    return ui_->accessibilityContractSatisfied();
-}
-
-SessionWorkflowState BridgeWindow::workflowState() const {
-    return dashboard_.workflow;
-}
-
-ComponentLifecycleState BridgeWindow::bridgeLifecycleState() const {
-    return bridge_lifecycle_;
+bool BridgeWindow::passesInterfaceChecks() const {
+    return ui_->configurableTooltipsPresent() &&
+           ui_->accessibilityContractSatisfied();
 }
 
 void BridgeWindow::loadSettings() {
@@ -900,10 +875,6 @@ void BridgeWindow::onBrowseLabRecorder() {
     }
 }
 
-LabRecorderFilenameFields BridgeWindow::filenameFields() const {
-    return ui_->filenameFields();
-}
-
 RecordingPathValidationOptions BridgeWindow::pathValidationOptions(
     bool create_parent) const {
     RecordingPathValidationOptions options;
@@ -919,7 +890,7 @@ RecordingPathValidationOptions BridgeWindow::pathValidationOptions(
 
 void BridgeWindow::validateRecordingPath(bool create_parent) {
     path_result_ = LabRecorderFilenamePolicy::validate(
-        filenameFields(), pathValidationOptions(create_parent));
+        ui_->filenameFields(), pathValidationOptions(create_parent));
     ui_->filename_preview_label->setText(path_result_.absolute_path);
     ui_->filename_preview_label->setToolTip(path_result_.absolute_path);
     ui_->filename_preview_label->setCursorPosition(0);
@@ -933,13 +904,11 @@ void BridgeWindow::validateRecordingPath(bool create_parent) {
     updateDashboard();
 }
 
-void BridgeWindow::updateFilenamePreview() {
-    validateRecordingPath();
-}
-
 void BridgeWindow::onFindNextRun() {
     const int next = LabRecorderFilenamePolicy::findNextRun(
-        filenameFields(), ui_->run_spin->value(), pathValidationOptions(false));
+        ui_->filenameFields(),
+        ui_->run_spin->value(),
+        pathValidationOptions(false));
     if (next > ui_->run_spin->value()) {
         ui_->run_spin->setValue(next);
         appendEvent(SessionComponent::Path, EventSeverity::Information,
@@ -989,10 +958,6 @@ void BridgeWindow::setLabRecorderStatus(const QString& status,
                                         EventSeverity severity) {
     ui_->labrecorder_status_label->setText(status);
     appendEvent(SessionComponent::Recorder, severity, status);
-}
-
-void BridgeWindow::setInputsEnabled(bool enabled) {
-    ui_->setBridgeInputsEnabled(enabled);
 }
 
 void BridgeWindow::updateDashboard() {
@@ -1101,7 +1066,7 @@ void BridgeWindow::beginLabRecorderStartup() {
     updateConfigurationFromUi();
     startup_endpoint_probe_ = true;
     startup_launch_attempted_ = false;
-    setLabRecorderStatus("Probing configured recorder endpoint");
+    setLabRecorderStatus("Looking for the recorder at the configured address");
     labrecorder_client_->connectToServer(
         configuration_.recorder_host,
         static_cast<quint16>(configuration_.recorder_port), 500);
@@ -1113,7 +1078,7 @@ void BridgeWindow::launchConfiguredRecorder() {
     const QString executable = resolveLabRecorderExecutable();
     if (executable.isEmpty()) {
         setLabRecorderStatus(
-            "Configured endpoint is unavailable and no recorder executable was found",
+            "The recorder could not be reached or found on this computer",
             EventSeverity::Warning);
         return;
     }
@@ -1124,7 +1089,7 @@ void BridgeWindow::launchConfiguredRecorder() {
                              EventSeverity::Error);
         return;
     }
-    setLabRecorderStatus("Launching recorder asynchronously");
+    setLabRecorderStatus("Starting the recorder in the background");
 }
 
 void BridgeWindow::onLaunchLabRecorder() {
@@ -1134,7 +1099,7 @@ void BridgeWindow::onLaunchLabRecorder() {
         labrecorder_client_->connectionState() ==
             RecorderConnectionState::Connecting) {
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning,
-                    "Recorder launch rejected because an endpoint or recording operation is already active");
+                    "The recorder cannot be started while it is connected or recording");
         return;
     }
     updateConfigurationFromUi();
@@ -1172,7 +1137,7 @@ void BridgeWindow::onDetachLabRecorder() {
     if (recorder_process_->ownsRunningProcess()) {
         recorder_process_->detach();
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning,
-                    "Owned recorder was deliberately detached and will remain running");
+                    "Disconnected from the recorder and left it running");
     } else {
         appendEvent(SessionComponent::Recorder, EventSeverity::Information,
                     "Disconnected from externally managed recorder");
@@ -1193,7 +1158,7 @@ void BridgeWindow::onLabRecorderRetry() {
     if (LabRecorderRuntimePolicy::retryExpired(elapsed)) {
         labrecorder_retry_timer_->stop();
         setLabRecorderStatus(
-            "Recorder endpoint was not ready within the 15 second startup window",
+            "The recorder was not ready within 15 seconds",
             EventSeverity::Error);
         return;
     }
@@ -1231,7 +1196,7 @@ void BridgeWindow::syncFilenameToLabRecorder() {
     validateRecordingPath();
     if (!path_result_.valid() || !configuration_.record_every_visible_stream) return;
     if (labrecorder_client_->updateFilename(path_result_.normalized_fields)) {
-        setLabRecorderStatus("Exact normalized filename update queued");
+        setLabRecorderStatus("Recording file path update queued");
     }
 }
 
@@ -1323,7 +1288,7 @@ void BridgeWindow::updateReadiness() {
     const QString recorder_text = configuration_.record_every_visible_stream
         ? recorderConnectionStateText(labrecorder_client_->connectionState())
         : (resolveAllowlistExecutable().isEmpty()
-            ? "allowlist recorder missing" : "allowlist recorder available");
+            ? "selected-stream recorder missing" : "selected-stream recorder available");
     const QString path_text = path_result_.valid()
         ? "destination valid" : "destination blocked";
     ui_->readiness_label->setText(
@@ -1345,7 +1310,7 @@ void BridgeWindow::onStart() {
     dashboard_.bridge = bridge_lifecycle_;
     ui_->start_button->setEnabled(false);
     ui_->stop_button->setEnabled(true);
-    setInputsEnabled(false);
+    ui_->setBridgeInputsEnabled(false);
     appendEvent(SessionComponent::Bridge, EventSeverity::Information,
                 "Bridge start requested for " + configuration_.vicon_endpoint);
     connect(worker_, &BridgeWorker::statusUpdate,
@@ -1464,7 +1429,7 @@ void BridgeWindow::onWorkerFinished() {
     ui_->frame_rate_label->setText("0.0 Hz");
     ui_->start_button->setEnabled(!close_pending_);
     ui_->stop_button->setEnabled(false);
-    setInputsEnabled(!close_pending_);
+    ui_->setBridgeInputsEnabled(!close_pending_);
     if (completed) completed->deleteLater();
     updateReadiness();
     updateDashboard();
@@ -1846,7 +1811,7 @@ void BridgeWindow::completePendingRecordingStart() {
         preflight_start_waiting_ = true;
         pending_recording_start_ = false;
         appendEvent(SessionComponent::Application, EventSeverity::Warning,
-                    "Recording remains blocked until preflight is corrected or a reasoned override is accepted");
+                    "Fix the failed setup checks or enter a reason to record anyway");
         updateRecordingButtons();
         return;
     }
@@ -1858,7 +1823,7 @@ void BridgeWindow::onOverridePreflight() {
         ui_->preflight_override_reason_edit->text().trimmed();
     if (!session_controller_.overridePreflight(reason)) {
         appendEvent(SessionComponent::Application, EventSeverity::Warning,
-                    "Record Anyway requires blocked preflight checks and a non-empty reason");
+                    "Enter a reason before choosing Record Anyway");
         return;
     }
     dashboard_.workflow = SessionWorkflowState::Ready;
@@ -1902,7 +1867,7 @@ void BridgeWindow::beginRecordingAfterPreflight() {
             recording_inventory_, &error);
         if (!accepted) {
             appendEvent(SessionComponent::Recorder, EventSeverity::Error,
-                        "Allowlist recorder could not start: " + error);
+                        "The selected-stream recorder could not start: " + error);
         }
     }
     pending_recording_start_ = false;
@@ -1915,7 +1880,7 @@ void BridgeWindow::beginRecordingAfterPreflight() {
     } else {
         dashboard_.workflow = SessionWorkflowState::Failed;
         appendEvent(SessionComponent::Recorder, EventSeverity::Error,
-                    "Recording Start was rejected by the active recorder backend");
+                    "The selected recorder could not start recording");
     }
     updateRecordingButtons();
     updateDashboard();
@@ -1939,8 +1904,8 @@ void BridgeWindow::onStopRecording() {
     }
     appendEvent(SessionComponent::Recorder,
                 accepted ? EventSeverity::Information : EventSeverity::Warning,
-                accepted ? "One recording Stop operation was requested"
-                         : "Recording Stop was already active or could not be queued");
+                accepted ? "The recorder was asked to stop"
+                         : "The recorder is already stopping or could not stop");
     updateRecordingButtons();
     updateDashboard();
 }
@@ -2219,15 +2184,15 @@ void BridgeWindow::onCopyDiagnostics() {
         QString::fromUtf8(QJsonDocument(diagnosticBundle())
                               .toJson(QJsonDocument::Indented)));
     appendEvent(SessionComponent::Application, EventSeverity::Information,
-                "Diagnostic bundle copied without recording sample data");
+                "Session details copied without recorded samples");
 }
 
 void BridgeWindow::onExportDiagnostics() {
     const QString path = QFileDialog::getSaveFileName(
-        this, "Export Diagnostic Bundle",
+        this, "Export Session Details",
         QDir(ui_state_.recent_diagnostic_directory)
-            .filePath("session-diagnostics.json"),
-        "Diagnostic bundle (*.json)");
+            .filePath("session-details.json"),
+        "Session details (*.json)");
     if (path.isEmpty()) return;
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -2239,13 +2204,13 @@ void BridgeWindow::onExportDiagnostics() {
         QJsonDocument(diagnosticBundle()).toJson(QJsonDocument::Indented);
     if (file.write(bytes) != bytes.size()) {
         appendEvent(SessionComponent::Application, EventSeverity::Error,
-                    "Could not complete diagnostic export: " + file.errorString());
+                    "Could not export session details: " + file.errorString());
         return;
     }
     file.close();
     ui_state_.recent_diagnostic_directory = QFileInfo(path).absolutePath();
     appendEvent(SessionComponent::Application, EventSeverity::Information,
-                "Diagnostic bundle exported to " + path);
+                "Session details exported to " + path);
 }
 
 void BridgeWindow::onShowVerificationDetails() {
@@ -2290,7 +2255,7 @@ void BridgeWindow::beginClose() {
     ui_->start_button->setEnabled(false);
     ui_->start_recording_button->setEnabled(false);
     ui_->discover_streams_button->setEnabled(false);
-    setInputsEnabled(false);
+    ui_->setBridgeInputsEnabled(false);
 
     const bool bridge_required = worker_ != nullptr;
     const bool preview_required =
@@ -2370,7 +2335,7 @@ void BridgeWindow::updateShutdownStatus() {
     session_controller_.updateShutdownComponent(
         SessionComponent::File, file_done,
         file_done ? "No active file or discovery worker"
-                  : "Canceling file load or bounded discovery",
+                  : "Canceling file loading or stream search",
         now_ms);
     session_controller_.updateShutdownComponent(
         SessionComponent::Verification, verification_done,
@@ -2387,8 +2352,8 @@ void BridgeWindow::updateShutdownStatus() {
                     recorder_deadline && !remote_safe
                         ? EventSeverity::Warning : EventSeverity::Information,
                     recorder_deadline && !remote_safe
-                        ? "Recorder deadline elapsed; ending only the owned process"
-                        : "Recorder Stop is settled; ending the owned process");
+                        ? "The recorder did not stop in time; closing only the recorder started here"
+                        : "Recording has stopped; closing the recorder started here");
     }
     recorder_done = remote_safe && !recorder_process_->ownsRunningProcess();
     if (recorder_connection_lost && !recorder_process_->ownsRunningProcess()) {
@@ -2401,7 +2366,7 @@ void BridgeWindow::updateShutdownStatus() {
             recorder_done ? "Recorder shutdown settled"
                           : (recorder_connection_lost
                                 ? "Connection lost; waiting for recorder deadline"
-                                : "Waiting for final Stop acknowledgement or owned process exit"),
+                                : "Waiting for the recorder to confirm it has stopped or closed"),
             now_ms);
     }
     session_controller_.updateShutdownDeadlines(now_ms);

@@ -380,7 +380,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         if (isInterruptionRequested()) return false;
         if (!state.identity.metadata_complete) {
             if (!selection_warning.isEmpty()) selection_warning += "; ";
-            selection_warning += "Channel or coordinate metadata was incomplete; canonical fallback labels are in use";
+            selection_warning += "Some stream details were missing, so standard labels are in use";
         }
         state.identity.warning = selection_warning;
         {

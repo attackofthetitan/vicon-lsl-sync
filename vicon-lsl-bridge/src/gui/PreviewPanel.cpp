@@ -1672,7 +1672,7 @@ void PreviewPanel::retireCalibrationProfile() {
     const QString id = selected->id;
     const auto answer = QMessageBox::question(
         this, "Retire calibration profile",
-        "Retire " + selected->display_name + "? Existing diagnostic records keep its ID.",
+        "Stop using " + selected->display_name + "? Past session records keep its ID.",
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes) return;
     if (gui::CalibrationProfileStore::retire(calibration_profiles_, id)) {

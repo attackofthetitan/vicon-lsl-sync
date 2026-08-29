@@ -145,7 +145,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         if(Qt6_FOUND)
             add_library(vicon-lsl-bridge-gui-components STATIC
                 src/gui/BridgeWindow.cpp
-                src/gui/BridgeWindowSettings.cpp
                 src/gui/BridgeWindowUi.cpp
                 src/gui/GuiServices.cpp
                 src/gui/LabRecorderClient.cpp
