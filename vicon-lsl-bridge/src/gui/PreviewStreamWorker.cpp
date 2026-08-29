@@ -328,12 +328,12 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         auto inlet = std::make_unique<lsl::stream_inlet>(streams[selected_index], 360, 0, true);
         lsl::stream_info metadata = streams[selected_index];
         try {
-            // Resolver results may contain only the short stream description.
-            // The inlet supplies the full channel and coordinate metadata.
+            // Search results can omit channel details. The opened stream has
+            // the full description, so read the details from it.
             metadata = inlet->info(
                 gui::PerformanceBudgets::PreviewMetadataTimeoutSeconds);
         } catch (const std::exception&) {
-            // Known fixed HoloLens schemas still have a safe label fallback.
+            // Use the standard labels when a known HoloLens stream omits them.
         }
         bool metadata_complete = false;
         state.labels = channelLabels(metadata, state.role, &metadata_complete);
@@ -348,9 +348,8 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
             state.nominal_rate = 0.0;
         }
         state.inlet = std::move(inlet);
-        // Live preview consumes timestamps in the local recorder clock. Keep
-        // clock synchronization scoped to these inlets; XDF playback applies
-        // its recorded offsets independently when loading the file.
+        // Convert live timestamps to this computer's clock. Recorded playback
+        // applies the saved time offsets when it opens a file.
         state.inlet->set_postprocessing(lsl::post_clocksync);
         state.have_sample = false;
         state.last_sample_ms = -1;
@@ -538,8 +537,7 @@ QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 n
         status = state.requested_name + ": " + QString::number(state.latest_sample.size()) + "ch";
     }
 
-    // A stopped stream is already reported as stale. Do not keep showing its
-    // last measured rate as if the old window were still current.
+    // A stopped stream is already unavailable, so clear its old rate.
     if (streamIsFresh(state, now_ms) && state.rate_tracker.hasFullWindow()) {
         status += "; rate " +
                   QString::number(state.rate_tracker.effectiveRateHz(), 'f', 1) + "Hz";

@@ -30,6 +30,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QProgressBar>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -1027,40 +1028,24 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
 }
 
 void PreviewPanel::openMergedCsv() {
-    const QString path = QFileDialog::getOpenFileName(
-        this, "Open merged preview CSV", QString(),
-        "CSV files (*.csv);;All files (*)");
-    if (path.isEmpty()) {
-        return;
-    }
-
-    if (worker_) {
-        pending_recording_open_ = PendingRecordingOpen::Csv;
-        pending_recording_path_ = path;
-        stopPreview();
-        if (worker_) {
-            setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
-            return;
-        }
-    }
-
-    loadMergedCsv(path);
-}
-
-void PreviewPanel::loadMergedCsv(const QString& path) {
-    startFileLoad(PreviewFileType::Csv, path);
+    openRecording(PreviewFileType::Csv, "Open merged preview CSV",
+                  "CSV files (*.csv);;All files (*)");
 }
 
 void PreviewPanel::openXdf() {
+    openRecording(PreviewFileType::Xdf, "Open recorded XDF",
+                  "XDF files (*.xdf);;All files (*)");
+}
+
+void PreviewPanel::openRecording(PreviewFileType type,
+                                 const QString& title,
+                                 const QString& filter) {
     const QString path = QFileDialog::getOpenFileName(
-        this, "Open recorded XDF", QString(),
-        "XDF files (*.xdf);;All files (*)");
-    if (path.isEmpty()) {
-        return;
-    }
+        this, title, QString(), filter);
+    if (path.isEmpty()) return;
 
     if (worker_) {
-        pending_recording_open_ = PendingRecordingOpen::Xdf;
+        pending_recording_type_ = type;
         pending_recording_path_ = path;
         stopPreview();
         if (worker_) {
@@ -1069,11 +1054,7 @@ void PreviewPanel::openXdf() {
         }
     }
 
-    loadXdf(path);
-}
-
-void PreviewPanel::loadXdf(const QString& path) {
-    startFileLoad(PreviewFileType::Xdf, path);
+    startFileLoad(type, path);
 }
 
 void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
@@ -1251,15 +1232,11 @@ void PreviewPanel::requestRecordedStreamMapping(
 }
 
 void PreviewPanel::processPendingRecordingOpen() {
-    const PendingRecordingOpen pending = pending_recording_open_;
+    const std::optional<PreviewFileType> type = pending_recording_type_;
     const QString path = pending_recording_path_;
-    pending_recording_open_ = PendingRecordingOpen::None;
+    pending_recording_type_.reset();
     pending_recording_path_.clear();
-    if (pending == PendingRecordingOpen::Csv) {
-        loadMergedCsv(path);
-    } else if (pending == PendingRecordingOpen::Xdf) {
-        loadXdf(path);
-    }
+    if (type) startFileLoad(*type, path);
 }
 
 void PreviewPanel::toggleCsvPlayback() {
@@ -1469,24 +1446,25 @@ PreviewTransformProfile PreviewPanel::stairTransform() const {
 }
 
 void PreviewPanel::loadCalibrationProfiles() {
-    calibration_profiles_ = services_.settings->loadCalibrationProfiles();
+    calibration_profiles_ =
+        gui::CalibrationProfileStore::load(*services_.settings);
     const gui::SessionConfiguration configuration =
-        services_.settings->loadConfiguration();
+        gui::SessionConfigurationStore::load(*services_.settings);
     refreshCalibrationProfileUi(configuration.calibration_profile_id);
 }
 
 void PreviewPanel::saveCalibrationProfiles() {
     QString error;
-    if (!services_.settings->saveCalibrationProfiles(
-            calibration_profiles_, &error)) {
+    if (!gui::CalibrationProfileStore::save(
+            *services_.settings, calibration_profiles_, &error)) {
         setStatus("Could not save calibration profiles: " + error);
         return;
     }
     gui::SessionConfiguration configuration =
-        services_.settings->loadConfiguration();
+        gui::SessionConfigurationStore::load(*services_.settings);
     configuration.calibration_profile_id =
         calibration_profile_combo_->currentData().toString();
-    services_.settings->saveConfiguration(configuration);
+    gui::SessionConfigurationStore::save(*services_.settings, configuration);
 }
 
 void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
@@ -1553,7 +1531,12 @@ gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() {
 }
 
 const gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() const {
-    return const_cast<PreviewPanel*>(this)->selectedCalibrationProfile();
+    if (!calibration_profile_combo_) return nullptr;
+    const QString id = calibration_profile_combo_->currentData().toString();
+    for (const gui::ManagedCalibrationProfile& profile : calibration_profiles_) {
+        if (profile.id == id) return &profile;
+    }
+    return nullptr;
 }
 
 CalibrationProfile PreviewPanel::activeSolverProfile() const {
@@ -1758,7 +1741,7 @@ void PreviewPanel::updateCalibrationPersistentStatus(
 
 void PreviewPanel::loadSettings() {
     gui::SessionConfiguration configuration =
-        services_.settings->loadConfiguration();
+        gui::SessionConfigurationStore::load(*services_.settings);
     applySessionConfiguration(configuration);
     resetCalibrationSession();
     QString stair_model = configuration.stair_model_path.trimmed();
@@ -1767,7 +1750,8 @@ void PreviewPanel::loadSettings() {
     }
     stair_model_edit_->setText(stair_model);
     const QStringList recent_files =
-        services_.settings->loadUiState().recent_recordings;
+        gui::SessionConfigurationStore::loadUiState(
+            *services_.settings).recent_recordings;
     recent_files_combo_->clear();
     for (const QString& path : recent_files) {
         if (!path.trimmed().isEmpty()) {
@@ -1778,16 +1762,17 @@ void PreviewPanel::loadSettings() {
 
 void PreviewPanel::saveSettings() const {
     gui::SessionConfiguration configuration =
-        services_.settings->loadConfiguration();
+        gui::SessionConfigurationStore::load(*services_.settings);
     updateSessionConfiguration(configuration);
-    services_.settings->saveConfiguration(configuration);
-    gui::SessionUiState ui_state = services_.settings->loadUiState();
+    gui::SessionConfigurationStore::save(*services_.settings, configuration);
+    gui::SessionUiState ui_state =
+        gui::SessionConfigurationStore::loadUiState(*services_.settings);
     QStringList recent_files;
     for (int index = 0; index < recent_files_combo_->count(); ++index) {
         recent_files.push_back(recent_files_combo_->itemData(index).toString());
     }
     ui_state.recent_recordings = recent_files;
-    services_.settings->saveUiState(ui_state);
+    gui::SessionConfigurationStore::saveUiState(*services_.settings, ui_state);
 }
 
 QString PreviewPanel::defaultStairModelPath() const {

@@ -13,6 +13,7 @@
 #include <QElapsedTimer>
 #include <QWidget>
 
+#include <optional>
 #include <vector>
 
 class QDoubleSpinBox;
@@ -98,18 +99,13 @@ private slots:
     void updateMeasuredStairPose();
 
 private:
-    enum class PendingRecordingOpen {
-        None,
-        Csv,
-        Xdf,
-    };
-
     PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
     void resetCalibrationSession();
-    void loadMergedCsv(const QString& path);
-    void loadXdf(const QString& path);
+    void openRecording(PreviewFileType type,
+                       const QString& title,
+                       const QString& filter);
     void startFileLoad(PreviewFileType type, const QString& path);
     void applyLoadedRecording(PreviewFileLoader* loader, const QString& summary);
     void requestRecordedStreamMapping(PreviewFileLoader* loader,
@@ -190,7 +186,7 @@ private:
     PreviewStreamWorker* worker_ = nullptr;
     PreviewFileLoader* file_loader_ = nullptr;
     bool worker_stopping_ = false;
-    PendingRecordingOpen pending_recording_open_ = PendingRecordingOpen::None;
+    std::optional<PreviewFileType> pending_recording_type_;
     QString pending_recording_path_;
     bool stair_model_loaded_ = false;
     ComponentLifecycleState lifecycle_state_ = ComponentLifecycleState::Idle;
