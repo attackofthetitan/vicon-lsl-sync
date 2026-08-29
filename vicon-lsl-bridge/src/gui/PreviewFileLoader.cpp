@@ -1,6 +1,5 @@
 #include "gui/PreviewFileLoader.h"
 
-#include "gui/PerformanceBudgets.h"
 #include "gui/SessionState.h"
 #include "preview/PreviewXdf.h"
 
@@ -31,10 +30,7 @@ PreviewFileLoader::PreviewFileLoader(PreviewFileType type,
 
 PreviewFileLoader::~PreviewFileLoader() {
     cancel();
-    if (isRunning() && !wait(gui::PerformanceBudgets::PreviewStopDeadlineMs)) {
-        terminate();
-        wait(100);
-    }
+    wait();
 }
 
 void PreviewFileLoader::cancel() {

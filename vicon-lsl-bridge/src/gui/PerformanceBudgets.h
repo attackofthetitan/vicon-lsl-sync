@@ -23,7 +23,6 @@ struct PerformanceBudgets {
     static constexpr int DefaultRenderHz = 30;
     static constexpr int MaximumRenderHz = 60;
     static constexpr std::size_t MaximumQueuedLiveFrames = 1;
-    static constexpr int MaximumRecorderQueueDepth = 8;
     static constexpr std::size_t MaximumEventLogEntries = 1000;
     static constexpr qsizetype MaximumProcessOutputBytes = 64 * 1024;
     static constexpr std::size_t MaximumPreviewFrames = 200000;

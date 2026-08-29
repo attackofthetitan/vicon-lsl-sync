@@ -1,6 +1,5 @@
 #include "gui/StreamDiscoveryWorker.h"
 
-#include "gui/PerformanceBudgets.h"
 #include "StreamDefaults.h"
 
 #include <lsl_cpp.h>
@@ -53,10 +52,7 @@ StreamDiscoveryWorker::StreamDiscoveryWorker(gui::SessionConfiguration configura
 
 StreamDiscoveryWorker::~StreamDiscoveryWorker() {
     requestInterruption();
-    if (isRunning() && !wait(gui::PerformanceBudgets::PreviewStopDeadlineMs)) {
-        terminate();
-        wait(100);
-    }
+    wait();
 }
 
 void StreamDiscoveryWorker::run() {

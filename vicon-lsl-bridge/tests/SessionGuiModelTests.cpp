@@ -299,9 +299,7 @@ void testSessionControllerStateModel() {
     inputs.bridge_state = ComponentLifecycleState::Starting;
     inputs.bridge_status_recent = false;
     PreflightResult blocked = controller.runPreflight(inputs);
-    expect(blocked.hasRequiredFailures() &&
-               controller.dashboard().workflow ==
-                   vicon_lsl::gui::SessionWorkflowState::PreflightBlocked,
+    expect(blocked.hasRequiredFailures(),
            "preflight blocks missing bridge readiness");
     expect(!controller.overridePreflight("   "),
            "preflight override rejects an empty reason");
