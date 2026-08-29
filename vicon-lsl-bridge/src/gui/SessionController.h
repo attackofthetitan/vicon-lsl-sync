@@ -116,8 +116,6 @@ public:
 
     SessionEventLog& eventLog() { return event_log_; }
     const SessionEventLog& eventLog() const { return event_log_; }
-    SessionDashboardState& dashboard() { return dashboard_; }
-    const SessionDashboardState& dashboard() const { return dashboard_; }
     const PreflightResult& lastPreflight() const { return last_preflight_; }
     const SessionShutdownStatus& shutdownStatus() const { return shutdown_; }
 
@@ -136,7 +134,8 @@ public:
     void markRecorderConnectionLostDuringShutdown(qint64 now_ms,
                                                   const QString& detail);
     void updateShutdownDeadlines(qint64 now_ms);
-    QJsonObject toJson(qint64 now_ms) const;
+    QJsonObject toJson(const SessionDashboardState& dashboard,
+                       qint64 now_ms) const;
 
     static QString workflowStateText(SessionWorkflowState state);
     static QString calibrationStateText(SessionCalibrationState state);
@@ -150,7 +149,6 @@ private:
                                                          qint64 deadline_ms);
 
     SessionEventLog event_log_;
-    SessionDashboardState dashboard_;
     PreflightResult last_preflight_;
     SessionShutdownStatus shutdown_;
     std::function<QDateTime()> clock_;

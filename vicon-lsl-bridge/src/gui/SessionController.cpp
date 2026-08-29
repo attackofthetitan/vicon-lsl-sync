@@ -287,9 +287,6 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
     }
 
     last_preflight_ = result;
-    dashboard_.workflow = result.hasRequiredFailures()
-        ? SessionWorkflowState::PreflightBlocked
-        : SessionWorkflowState::Ready;
     event_log_.append(SessionComponent::Application,
                       result.hasRequiredFailures() ? EventSeverity::Warning
                                                    : EventSeverity::Information,
@@ -303,7 +300,6 @@ bool SessionController::overridePreflight(const QString& reason) {
     if (!last_preflight_.hasRequiredFailures() || normalized.isEmpty()) return false;
     last_preflight_.override_used = true;
     last_preflight_.override_reason = normalized;
-    dashboard_.workflow = SessionWorkflowState::Ready;
     event_log_.append(SessionComponent::Application, EventSeverity::Warning,
                       "Preflight override accepted: " + normalized);
     return true;
@@ -345,7 +341,6 @@ void SessionController::beginShutdown(qint64 now_ms,
         makeShutdownComponent(SessionComponent::Verification, verification_required, now_ms,
                               PerformanceBudgets::PreviewStopDeadlineMs),
     };
-    dashboard_.workflow = SessionWorkflowState::Closing;
     event_log_.append(SessionComponent::Application, EventSeverity::Information,
                       "Shutdown requested");
 }
@@ -404,30 +399,31 @@ void SessionController::updateShutdownDeadlines(qint64 now_ms) {
     }
 }
 
-QJsonObject SessionController::toJson(qint64 now_ms) const {
+QJsonObject SessionController::toJson(const SessionDashboardState& dashboard,
+                                      qint64 now_ms) const {
     QJsonArray streams;
-    for (const StreamIdentity& identity : dashboard_.selected_streams) {
+    for (const StreamIdentity& identity : dashboard.selected_streams) {
         streams.push_back(identity.toJson());
     }
     return QJsonObject{
-        {"workflow", workflowText(dashboard_.workflow)},
-        {"bridge", componentLifecycleStateText(dashboard_.bridge)},
-        {"preview", componentLifecycleStateText(dashboard_.preview)},
-        {"recorderConnection", recorderConnectionStateText(dashboard_.recorder_connection)},
-        {"recorderRecording", recorderRecordingStateText(dashboard_.recorder_recording)},
-        {"recorderOperation", recorderOperationStateText(dashboard_.recorder_operation)},
-        {"recorderProcess", recorderProcessStateText(dashboard_.recorder_process)},
-        {"calibration", calibrationStateText(dashboard_.calibration)},
-        {"file", fileStateText(dashboard_.file)},
-        {"verification", verificationStateText(dashboard_.verification)},
-        {"recordingPath", dashboard_.recording_path},
-        {"runIdentifier", dashboard_.run_identifier},
-        {"recordingStartedAt", dashboard_.recording_started_at.toString(Qt::ISODateWithMs)},
-        {"availableStorageBytes", dashboard_.available_storage_bytes},
-        {"previewReplacedFrames", static_cast<qint64>(dashboard_.preview_replaced_frames)},
+        {"workflow", workflowText(dashboard.workflow)},
+        {"bridge", componentLifecycleStateText(dashboard.bridge)},
+        {"preview", componentLifecycleStateText(dashboard.preview)},
+        {"recorderConnection", recorderConnectionStateText(dashboard.recorder_connection)},
+        {"recorderRecording", recorderRecordingStateText(dashboard.recorder_recording)},
+        {"recorderOperation", recorderOperationStateText(dashboard.recorder_operation)},
+        {"recorderProcess", recorderProcessStateText(dashboard.recorder_process)},
+        {"calibration", calibrationStateText(dashboard.calibration)},
+        {"file", fileStateText(dashboard.file)},
+        {"verification", verificationStateText(dashboard.verification)},
+        {"recordingPath", dashboard.recording_path},
+        {"runIdentifier", dashboard.run_identifier},
+        {"recordingStartedAt", dashboard.recording_started_at.toString(Qt::ISODateWithMs)},
+        {"availableStorageBytes", dashboard.available_storage_bytes},
+        {"previewReplacedFrames", static_cast<qint64>(dashboard.preview_replaced_frames)},
         {"previewCoalescedInputSamples",
-         static_cast<qint64>(dashboard_.preview_coalesced_input_samples)},
-        {"previewLatencyMs", dashboard_.preview_latency_ms},
+         static_cast<qint64>(dashboard.preview_coalesced_input_samples)},
+        {"previewLatencyMs", dashboard.preview_latency_ms},
         {"selectedStreams", streams},
         {"lastPreflight", last_preflight_.toJson()},
         {"shutdown", shutdown_.toJson(now_ms)},
