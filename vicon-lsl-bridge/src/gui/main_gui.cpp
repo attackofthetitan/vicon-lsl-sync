@@ -1,15 +1,7 @@
 #include <QApplication>
-#include <QCoreApplication>
-#include <QDir>
-#include <QFileInfo>
-#include <QGuiApplication>
 #include <QScreen>
-#include <QTimer>
-
-#include <lsl_cpp.h>
 
 #include "BridgeWindow.h"
-#include "ViconClient.h"
 
 #ifndef VICON_LSL_BRIDGE_VERSION
 #define VICON_LSL_BRIDGE_VERSION "unknown"
@@ -20,119 +12,13 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("Vicon LSL Bridge");
     app.setApplicationVersion(VICON_LSL_BRIDGE_VERSION);
 
-    const bool test_mode = QCoreApplication::arguments().contains("--test");
-    const bool headless_test = test_mode &&
-        QGuiApplication::platformName().compare("offscreen", Qt::CaseInsensitive) == 0;
-
-    BridgeWindow window(nullptr, !headless_test);
+    BridgeWindow window;
     if (const QScreen* screen = window.screen()) {
         const QSize available = screen->availableGeometry().size();
-        const QSize margin(80, 80);
-        const QSize usable(qMax(1, available.width() - margin.width()),
-                           qMax(1, available.height() - margin.height()));
+        const QSize usable(qMax(1, available.width() - 80),
+                           qMax(1, available.height() - 80));
         window.resize(QSize(1440, 900).boundedTo(usable));
     }
-    if (headless_test) {
-        // The offscreen Qt platform cannot create the QOpenGLWidget used by
-        // the preview. Layout and integration checks do not require mapping
-        // the window, so keep it hidden on headless CI runners.
-        window.ensurePolished();
-    } else {
-        window.show();
-    }
-
-    if (test_mode) {
-        QTimer::singleShot(0, [&app, &window, headless_test]() {
-            try {
-                const QSize target_usable(1920 - 80, 1080 - 80);
-                const QSize minimum = window.minimumSizeHint();
-                if (minimum.width() > target_usable.width() ||
-                    minimum.height() > target_usable.height()) {
-                    app.exit(12);
-                    return;
-                }
-                if (!headless_test) {
-                    const QScreen* screen = window.screen();
-                    if (!screen) {
-                        app.exit(13);
-                        return;
-                    }
-                    const QSize frame = window.frameGeometry().size();
-                    const QSize available = screen->availableGeometry().size();
-                    if (frame.width() > available.width() ||
-                        frame.height() > available.height()) {
-                        app.exit(11);
-                        return;
-                    }
-                }
-                if (!window.configurableTooltipsPresent()) {
-                    app.exit(10);
-                    return;
-                }
-
-                ViconClient unavailable_vicon("127.0.0.1:1");
-                if (unavailable_vicon.connect()) {
-                    unavailable_vicon.disconnect();
-                    app.exit(4);
-                    return;
-                }
-
-                const std::string source_id = "vicon-lsl-bridge-gui-test";
-                const lsl::stream_info info(
-                    "ViconLSLBridgeTest",
-                    "Test",
-                    1,
-                    lsl::IRREGULAR_RATE,
-                    lsl::cf_double64,
-                    source_id);
-                const lsl::stream_outlet outlet(info);
-                const auto streams = lsl::resolve_stream("source_id", source_id, 1, 2.0);
-                if (streams.empty()) {
-                    app.exit(2);
-                    return;
-                }
-
-                const QString app_dir = QCoreApplication::applicationDirPath();
-                const bool packaged_payload = QFileInfo::exists(
-                    QDir(app_dir).filePath("labrecorder/LabRecorder.exe"));
-                if (!packaged_payload) {
-                    app.exit(0);
-                    return;
-                }
-                if (!QFileInfo::exists(QDir(app_dir).filePath("stair_model/stair_model1.obj")) ||
-                    !QFileInfo::exists(QDir(app_dir).filePath("stair_model/stair_model1.mtl"))) {
-                    app.exit(5);
-                    return;
-                }
-
-                auto* poll = new QTimer(&app);
-                poll->setInterval(100);
-                QObject::connect(poll, &QTimer::timeout, &app,
-                                 [&app, &window, poll, headless_test]() {
-                    if (window.labRecorderConnected() &&
-                        window.labRecorderOwnedProcessRunning() &&
-                        (headless_test || window.stairModelLoaded())) {
-                        poll->stop();
-                        app.exit(0);
-                    }
-                });
-                poll->start();
-                QTimer::singleShot(20000, &app, [&app, &window, headless_test]() {
-                    if (!window.labRecorderOwnedProcessRunning()) {
-                        app.exit(7);
-                    } else if (!window.labRecorderConnected()) {
-                        app.exit(8);
-                    } else if (!headless_test && !window.stairModelLoaded()) {
-                        app.exit(9);
-                    } else {
-                        app.exit(6);
-                    }
-                });
-            } catch (...) {
-                app.exit(3);
-            }
-        });
-    }
-
+    window.show();
     return app.exec();
 }

@@ -1,19 +1,34 @@
 #pragma once
 
-#include <QWidget>
+#include "ViconLSLBridge.h"
+#include "gui/GuiServices.h"
+#include "gui/LabRecorderFilenamePolicy.h"
+#include "gui/RecordingVerifier.h"
+#include "gui/SessionController.h"
+
+#include <QElapsedTimer>
 #include <QMetaType>
 #include <QThread>
-#include <QElapsedTimer>
-#include <QProcess>
 #include <QTimer>
+#include <QWidget>
+
 #include <memory>
-#include "gui/LabRecorderClient.h"
-#include "ViconLSLBridge.h"
+#include <atomic>
 
 class QCloseEvent;
+class QComboBox;
+class QJsonObject;
 
-namespace vicon_lsl::gui_detail {
+class LabRecorderClient;
+
+namespace vicon_lsl {
+class StreamDiscoveryWorker;
+namespace gui {
+class RecorderProcessController;
+}
+namespace gui_detail {
 struct BridgeWindowUi;
+}
 }
 
 enum class BridgeExitResult {
@@ -26,31 +41,44 @@ class BridgeWorker : public QThread {
 public:
     explicit BridgeWorker(const Config& config, QObject* parent = nullptr);
     void stopBridge();
+    ComponentLifecycleState lifecycleState() const { return lifecycle_state_.load(); }
 
 signals:
     void statusUpdate(int state, unsigned long long markers, unsigned long long segments,
                       unsigned int frames, const QString& message);
+    void lifecycleChanged(ComponentLifecycleState state, QString detail);
     void terminal(BridgeExitResult result, const QString& message);
 
 protected:
     void run() override;
 
 private:
+    void setLifecycleState(ComponentLifecycleState state, const QString& detail = {});
+
     std::unique_ptr<ViconLSLBridge> bridge_;
+    std::atomic<ComponentLifecycleState> lifecycle_state_{ComponentLifecycleState::Idle};
+    std::atomic<bool> stop_requested_{false};
 };
 
 class BridgeWindow : public QWidget {
     Q_OBJECT
 public:
-    explicit BridgeWindow(QWidget* parent = nullptr, bool enable_preview = true);
+    explicit BridgeWindow(
+        QWidget* parent = nullptr,
+        bool enable_preview = true,
+        vicon_lsl::gui::GuiServices services = vicon_lsl::gui::defaultGuiServices());
     ~BridgeWindow() override;
 
-    // These accessors intentionally expose the small amount of state that an
-    // automated GUI check needs without coupling it to widget text.
+    // Stable state accessors for headless UI verification.
     bool labRecorderConnected() const;
     bool labRecorderOwnedProcessRunning() const;
     bool stairModelLoaded() const;
     bool configurableTooltipsPresent() const;
+    bool accessibilityContractSatisfied() const;
+    vicon_lsl::gui::SessionWorkflowState workflowState() const;
+    ComponentLifecycleState bridgeLifecycleState() const;
+    bool closePending() const { return close_pending_; }
+    QJsonObject diagnosticBundle() const;
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -58,13 +86,29 @@ protected:
 private slots:
     void onStart();
     void onStop();
+    void onStartSession();
+    void onStopSession();
+    void onEmergencyStop();
     void onBrowseStudyRoot();
     void onBrowseLabRecorder();
     void onLaunchLabRecorder();
     void onConnectLabRecorder();
+    void onDetachLabRecorder();
     void onRefreshLabRecorder();
     void onStartRecording();
     void onStopRecording();
+    void onRunPreflight();
+    void onOverridePreflight();
+    void onDiscoverStreams();
+    void onFindNextRun();
+    void onResetConfiguration();
+    void onSavePreset();
+    void onLoadPreset();
+    void onImportConfiguration();
+    void onExportConfiguration();
+    void onCopyDiagnostics();
+    void onExportDiagnostics();
+    void onShowVerificationDetails();
     void updateFilenamePreview();
     void syncFilenameToLabRecorder();
     void onStatusStaleCheck();
@@ -73,45 +117,114 @@ private slots:
     void onWorkerFinished();
     void onLabRecorderRetry();
     void onClosePoll();
+    void onDashboardTick();
+    void onVerificationFilePoll();
 
 private:
+    enum class RecorderBackend {
+        RemoteControl,
+        AllowlistProcess,
+    };
+
+    void connectSignals();
     void loadSettings();
-    void saveSettings() const;
+    void saveSettings();
+    void applyConfigurationToUi();
+    void updateConfigurationFromUi();
+    void refreshPresetList(const QString& select = {});
+    void restoreUiState();
+    void saveUiState();
     void setInputsEnabled(bool enabled);
     LabRecorderFilenameFields filenameFields() const;
-    QString renderedFilenamePreview() const;
-    QString filenameValidationError() const;
-    void setLabRecorderStatus(const QString& status);
-    bool isFilenameValid() const;
+    RecordingPathValidationOptions pathValidationOptions(bool create_parent) const;
+    void validateRecordingPath(bool create_parent = false);
+    void setLabRecorderStatus(const QString& status,
+                              EventSeverity severity = EventSeverity::Information);
     void scheduleFilenameSync();
     void updateReadiness();
     void updateRecordingButtons();
+    void updateDashboard();
+    void updateEventLog();
+    void appendEvent(SessionComponent component,
+                     EventSeverity severity,
+                     const QString& message);
+    void populatePreflight(const PreflightResult& result);
+    vicon_lsl::gui::SessionPreflightInputs preflightInputs() const;
+    void beginRecordingAfterPreflight();
+    void completePendingRecordingStart();
+    QVector<vicon_lsl::gui::StreamIdentity> selectedStreams() const;
+    void populateStreamTable();
+    void populateBindingCombos();
+    void updateBindingsFromUi();
+    static void selectBindingCombo(QComboBox* combo,
+                                   const vicon_lsl::gui::StreamBinding& binding);
+    void startStreamDiscovery(bool continue_recording_start);
+    void cancelStreamDiscovery();
     QString resolveLabRecorderExecutable() const;
+    QString resolveAllowlistExecutable() const;
     void beginLabRecorderStartup();
-    void stopOwnedLabRecorder();
+    void launchConfiguredRecorder();
+    void requestVerification();
+    void startVerifier();
+    void finishVerification(const vicon_lsl::gui::RecordingVerificationReport& report);
+    void advanceGuidedStart();
+    void advanceGuidedStop();
+    RecorderBackend activeRecorderBackend() const;
+    RecorderRecordingState effectiveRecordingState() const;
+    RecorderOperationState effectiveOperationState() const;
+    bool recordingActiveOrPending() const;
+    bool bridgeStatusRecent() const;
+    void beginClose();
+    void updateShutdownStatus();
     void finishCloseIfReady();
 
+    vicon_lsl::gui::GuiServices services_;
     std::unique_ptr<vicon_lsl::gui_detail::BridgeWindowUi> ui_;
+    vicon_lsl::gui::SessionController session_controller_;
+    vicon_lsl::gui::SessionDashboardState dashboard_;
+    vicon_lsl::gui::SessionConfiguration configuration_;
+    vicon_lsl::gui::SessionUiState ui_state_;
+    RecordingPathResult path_result_;
+    QVector<vicon_lsl::gui::StreamIdentity> stream_inventory_;
+    QVector<vicon_lsl::gui::StreamIdentity> recording_inventory_;
+    vicon_lsl::gui::RecordingVerificationReport verification_report_;
 
-    LabRecorderClient labrecorder_client_;
-    std::unique_ptr<QProcess> labrecorder_process_;
-    bool labrecorder_process_owned_ = false;
+    LabRecorderClient* labrecorder_client_ = nullptr;
+    vicon_lsl::gui::RecorderProcessController* recorder_process_ = nullptr;
+    vicon_lsl::StreamDiscoveryWorker* discovery_worker_ = nullptr;
+    vicon_lsl::gui::RecordingVerifier* verifier_ = nullptr;
+    BridgeWorker* worker_ = nullptr;
+
     QTimer* labrecorder_retry_timer_ = nullptr;
     QTimer* filename_sync_timer_ = nullptr;
-    QElapsedTimer labrecorder_retry_elapsed_;
     QTimer* close_poll_timer_ = nullptr;
-    QElapsedTimer close_elapsed_;
-    bool close_stop_requested_ = false;
+    QTimer* status_stale_timer_ = nullptr;
+    QTimer* dashboard_timer_ = nullptr;
+    QTimer* verification_file_timer_ = nullptr;
+    QElapsedTimer labrecorder_retry_elapsed_;
+    QElapsedTimer monotonic_clock_;
     QElapsedTimer status_timer_;
-    QTimer* status_stale_timer_;
+    QElapsedTimer recording_elapsed_;
+    QElapsedTimer verification_file_elapsed_;
+
+    ComponentLifecycleState bridge_lifecycle_ = ComponentLifecycleState::Idle;
     bool have_previous_status_ = false;
     unsigned int previous_frames_ = 0;
     qint64 previous_status_ms_ = 0;
+    double bridge_effective_rate_ = 0.0;
     bool bridge_streaming_ = false;
     bool bridge_status_stale_ = false;
-    BridgeWorker* worker_ = nullptr;
+    bool startup_endpoint_probe_ = false;
+    bool startup_launch_attempted_ = false;
+    bool pending_recording_start_ = false;
+    bool preflight_start_waiting_ = false;
+    bool guided_start_pending_ = false;
+    bool guided_stop_pending_ = false;
+    bool verification_waiting_for_file_ = false;
     bool close_pending_ = false;
     bool close_finalizing_ = false;
+    bool owned_process_end_requested_ = false;
+    QString pending_recording_path_;
 };
 
 Q_DECLARE_METATYPE(BridgeExitResult)
