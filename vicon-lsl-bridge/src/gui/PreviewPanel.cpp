@@ -656,9 +656,9 @@ PreviewDeliveryMetrics PreviewPanel::deliveryMetrics() const {
 
 void PreviewPanel::openRecording(const QString& path) {
     if (path.endsWith(".xdf", Qt::CaseInsensitive)) {
-        loadXdf(path);
+        startFileLoad(PreviewFileType::Xdf, path);
     } else if (path.endsWith(".csv", Qt::CaseInsensitive)) {
-        loadMergedCsv(path);
+        startFileLoad(PreviewFileType::Csv, path);
     } else {
         setStatus("Unsupported preview recording type: " + QFileInfo(path).suffix());
     }
@@ -823,7 +823,7 @@ void PreviewPanel::startPreview() {
         stop_button_->setEnabled(false);
         open_csv_button_->setEnabled(true);
         open_xdf_button_->setEnabled(true);
-        if (pending_recording_open_ != PendingRecordingOpen::None) {
+        if (pending_recording_type_) {
             processPendingRecordingOpen();
         } else {
             setStatus("Preview stopped");
@@ -1353,8 +1353,7 @@ void PreviewPanel::openRecentRecording() {
         setStatus("The selected recent recording is no longer available");
         return;
     }
-    if (path.endsWith(".xdf", Qt::CaseInsensitive)) loadXdf(path);
-    else loadMergedCsv(path);
+    openRecording(path);
 }
 
 void PreviewPanel::dragEnterEvent(QDragEnterEvent* event) {
@@ -1374,12 +1373,12 @@ void PreviewPanel::dropEvent(QDropEvent* event) {
     for (const QUrl& url : event->mimeData()->urls()) {
         const QString path = url.toLocalFile();
         if (path.endsWith(".xdf", Qt::CaseInsensitive)) {
-            loadXdf(path);
+            startFileLoad(PreviewFileType::Xdf, path);
             event->acceptProposedAction();
             return;
         }
         if (path.endsWith(".csv", Qt::CaseInsensitive)) {
-            loadMergedCsv(path);
+            startFileLoad(PreviewFileType::Csv, path);
             event->acceptProposedAction();
             return;
         }
