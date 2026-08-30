@@ -70,16 +70,16 @@ For one of these changes, write down the old and new behavior. Explain how exist
 
 ## Desktop session release gate for later releases
 
-This section is prospective and does not change the completed `v1.10.5` record
-above. Apply it to any release containing the guided desktop-session work.
+This section does not change the completed `v1.10.5` record above. Use it for
+any later release that contains the guided desktop-session work.
 
 ### Configuration
 
-- [ ] A new settings scope starts with schema version 1, persists every session
+- [ ] A new settings area starts with format version 1 and saves every session
   field in one JSON value, and rejects unsupported versions without rewriting
   them.
-- [ ] Versioned preset Reset/Save/Load/Import/Export round trips scientific
-  configuration, while geometry, splitter, tabs, and recent paths remain outside
+- [ ] Preset Reset/Save/Load/Import/Export preserves the recording setup, while
+  window size, splitter, tabs, and recent paths remain outside
   presets.
 - [ ] A complete managed calibration profile round trips ID/version, physical
   setup, stair identity/pose, coordinate frames, transform, notes, creation time,
@@ -87,25 +87,25 @@ above. Apply it to any release containing the guided desktop-session work.
 
 ### State, failure, and shutdown
 
-- [ ] Rapid Start/Stop, conflicting refresh/filename work, split replies,
+- [ ] Repeated Start/Stop, conflicting refresh/filename work, split replies,
   malformed replies, timeout, reconnect, replacement connection, process exit,
-  detach, and all connection/recording/operation policy combinations pass.
+  detach, and all connection, recording, and operation combinations pass.
 - [ ] Close before Start transmission, during every Start command, while
-  Recording, during Stop, and after disconnect produces one deterministic final
+  Recording, during Stop, and after disconnect produces one predictable final
   recorder operation.
 - [ ] Close during bridge connect/stream/reconnect/SDK delay, preview
-  resolve/metadata/poll/calibration, file open/mapping, discovery, and verification
+  search/details/read/calibration, file open/stream choice, discovery, and file checking
   remains responsive. Repeated close requests create one shutdown sequence.
 - [ ] Four-second bridge, two-second preview/file, and 15-second recorder
-  deadlines are visible diagnostic outcomes. No GUI-thread destructor waits
-  indefinitely, and only an owned recorder may be ended.
+  deadlines are visible status results. Window cleanup never waits forever, and
+  only a recorder started by this app may be ended.
 
 ### Selection, destination, and session evidence
 
-- [ ] Bound/unbound preview names, source-identity selection, explicit
+- [ ] Linked and independent preview names, source-ID selection, explicit
   follow-by-name, duplicate names, newest same-source recovery, and source-ID
-  collisions across hosts are deterministic and visible.
-- [ ] XDF inventory, explicit mapping, compatible recovered-instance stitching,
+  duplicate IDs across hosts are handled predictably and visibly.
+- [ ] XDF stream list, explicit stream choices, joining compatible restarted streams,
   selected/excluded summary, malformed/truncated input, and no-supported-stream
   rejection pass.
 - [ ] All-visible remote selection and exact packaged-command-line selection
@@ -113,24 +113,25 @@ above. Apply it to any release containing the guided desktop-session work.
 - [ ] The displayed path is byte-for-byte the recorder destination after
   extension, traversal/symlink, reserved-name, trailing-character, length,
   writeability, storage, collision, overwrite, and Find Next Run checks.
-- [ ] Required/warning/information preflight, recorder-only mode, reasoned
-  override, verification success/warning/failure, and verified-only run increment
-  are preserved in the exported diagnostic bundle.
+- [ ] Required/warning/information setup checks, recorder-only mode, a recorded
+  reason for Record Anyway, file-check success/warning/failure, and run increment
+  after a passing result are preserved in the exported session details.
 
 ### Responsiveness and accessibility
 
 - [ ] Ordinary GUI operations stay within 50 ms; live preview stays within the
   100 ms latency target; file cancellation completes within 250 ms; latest-frame
-  delivery remains one frame; recorder queue, event log, and process output stay
-  at their documented bounds.
+  delivery remains one frame; the active recorder command, event log, and process
+  output stay within their documented limits.
 - [ ] Short, one-hour, and multi-hour CSV/XDF checks respect the configured cache,
-  can seek beyond two hours, and keep exact verification statistics despite
-  visual decimation.
+  can seek beyond two hours, and keep exact file-check numbers even when the
+  preview draws fewer frames.
 - [ ] Small/default/scaled layouts keep controls reachable through scroll areas;
   label buddies, accessible names, keyboard focus and shortcuts pass; light,
   dark, and high-contrast rendering remains legible.
 - [ ] The painter preview passes local desktop, supported remote/virtual desktop,
-  and headless rendering checks with deterministic Fit View and Reset Camera.
+  and drawing checks without a visible display, with predictable Fit View and
+  Reset Camera.
 
 ### Package
 
@@ -141,7 +142,7 @@ above. Apply it to any release containing the guided desktop-session work.
   launchers, and licenses at their established paths.
 - [ ] Packaged built-in GUI checks cover bundled/custom recorder lookup, an
   existing external endpoint, portable extraction paths, settings isolation,
-  asynchronous preview-stop phases, palette/layout/accessibility, and renderer
+  preview stopping, colors/layout/keyboard and screen-reader use, and preview-drawing
   operation.
 - [ ] Documentation links, whitespace, workflow/script parsing, generated files,
   and third-party submodule revisions are clean.

@@ -10,10 +10,9 @@ The project also includes Unity scripts that send HoloLens 2 eye-gaze data direc
 2. Start your Vicon DataStream server.
 3. Run `vicon-lsl-bridge-gui`.
 4. Choose the study folder and session values, then select **Start Session**.
-5. Review stream discovery and preflight. Fix required failures or use a
-   reasoned **Record Anyway** override for a deliberate recorder-only workflow.
-6. Select **Stop Session** when the run is complete and review the automatic XDF
-   verification result.
+5. Review the setup check. Fix required failures, or enter a reason and choose
+   **Record Anyway** when the exception is deliberate.
+6. Select **Stop Session** when the run is complete and review the XDF file check.
 
 The default Vicon server address is `localhost:801`.
 
@@ -36,26 +35,27 @@ The desktop app lets you:
 
 - Start and stop a complete session or control the bridge, preview, and recorder
   independently.
-- Discover LSL publishers and bind roles by source identity, with explicit
-  follow-by-name behavior for unstable publishers.
-- Validate the exact XDF destination and selected stream inventory before Start.
-- View persistent bridge, recorder, preview, calibration, path, storage, stream
-  health, error, and verification status.
+- Find LSL streams and choose each source by its source ID. You can deliberately
+  follow a stream name when source IDs change between runs.
+- Check the final XDF path and selected streams before Start.
+- Keep bridge, recorder, preview, calibration, path, storage, stream health,
+  errors, and file-check results visible.
 - Open, seek, step, loop, and visually inspect merged CSV or XDF recordings.
 - Align HoloLens gaze with the Vicon world and manage identified calibration
   profiles.
-- Connect to an external recorder or asynchronously launch an included recorder.
+- Connect to an external recorder or start an included recorder without freezing
+  the window.
 
 By default, the preview's marker and segment roles stay bound to the bridge output
 names, while gaze and calibration use `HoloLensGaze` and
 `HoloLensModelTargetPose`. The **Streams** tab shows name, type, source ID, host,
-session, channels, nominal/effective rate, coordinate frame, freshness, and
-warnings. Duplicate names do not silently choose an unexplained publisher.
+session, channels, expected and measured rates, coordinate name, sample age, and
+warnings. When names are duplicated, the app does not silently choose one.
 
-Session presets contain the versioned scientific/session configuration. Import,
-Export, Reset, Save Preset, and Load Preset do not include window geometry,
-splitter position, tab selection, or recent paths. The new session schema starts
-at version 1; settings from older application releases are not imported.
+Session presets contain the recording setup. Import, Export, Reset, Save Preset,
+and Load Preset do not include window size, splitter position, tab selection, or
+recent paths. The saved file format starts at version 1; settings from older
+application releases are not imported.
 
 The built-in XDF reader is for visual checks. Use [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) for scientific analysis.
 
@@ -86,7 +86,7 @@ An automatic solution stays session-only until you select **Save Session
 Calibration**. A managed profile records a physical setup ID, stair model and
 measured pose, coordinate frames, transform, notes, creation time, and
 translation/rotation quality. Profiles can be applied, duplicated, retired,
-imported, and exported. Confirm missing coordinate metadata deliberately; the
+imported, and exported. Confirm missing coordinate details deliberately; the
 quality and compatibility display remains visible after stream-health updates.
 
 Restarting the HoloLens app can create a new Unity world, so run the alignment again after a restart. If the physical stairs move, update the fixed Vicon stair pose before relying on the result.
@@ -96,7 +96,7 @@ The gaze publisher keeps the original device capture time. It drops duplicate, o
 ## Record with LabRecorder
 
 The default recorder remote-control address is `localhost:22345`. Before
-automatic launch, the desktop app probes that endpoint so it does not start a
+automatic launch, the desktop app checks that address so it does not start a
 duplicate recorder. A recorder it launches is shown as owned; an already-running
 external recorder is shown as external and is never terminated by the desktop
 app. **Disconnect / Detach** disconnects or relinquishes ownership without
@@ -114,55 +114,56 @@ ending an external process.
    - **Use external graphical recorder** uses its remote-control connection and
      deliberately records everything visible after an immediate refresh.
 
-6. Select **Run Preflight** and review every required, warning, and information
+6. Select **Check Setup** and review every required, warning, and information
    item.
 7. Select **Start Recording**, or use **Start Session** to run the guided bridge,
-   preview, discovery, preflight, and recording sequence.
+   preview, stream search, setup check, and recording steps.
 8. Select **Stop Recording** or **Stop Session** when finished.
 
-The **Exact Recording Destination** is the single canonical path used for the
-preview, validation, recorder command, and diagnostics. The app appends `.xdf`
-when needed and blocks traversal, reserved Windows names, unwritable paths,
-unconfirmed collisions, and destinations outside the study root. **Find Next
+The **Exact Recording Destination** is the final full path shown in the window,
+checked by the app, sent to the recorder, and saved in the session details. The
+app appends `.xdf` when needed and blocks paths that escape the study folder,
+reserved Windows names, unwritable paths, existing files that were not approved,
+and destinations outside the study root. **Find Next
 Run** finds an unused run number. Low storage is a visible warning at the chosen
 threshold.
 
 Check these items before recording:
 
 - The bridge is streaming.
-- The selected recorder backend is connected or available and has no conflicting
-  operation in flight.
-- Required stream identities are present, fresh, schema-compatible, and use the
-  expected coordinate frames.
+- The selected recorder is connected or available and is not busy with another
+  command.
+- Required streams are present, recent, have the expected channel layout, and
+  use the expected coordinate names.
 - `ViconMarkers`, `ViconSegments`, and `HoloLensGaze` show healthy effective
   rates when those roles are required.
 - The filename preview points to the intended `.xdf` file.
 
-An invalid folder, field, token, or selection explains the blocking condition and
-corrective action inline. A recorder error does not stop the Vicon bridge. Rapid
-duplicate Start or Stop requests are coalesced/rejected, and closing during a
-pending Start either cancels it before transmission or arranges one final Stop.
+An invalid folder, field, token, or selection explains the problem and how to fix
+it. A recorder error does not stop the Vicon bridge. Repeated Start or Stop
+requests are refused, and closing while Start is in progress either cancels it
+before it is sent or sends one final Stop.
 
-After a successful Stop, the app waits for the exact XDF and verifies selected
-streams, source identities, schemas, time ranges, rates, gaps, clock corrections,
+After a successful Stop, the app waits for the XDF file and checks the selected
+streams, source IDs, channel layouts, time ranges, rates, gaps, time corrections,
 and repaired timestamps in the background. The run becomes **Verified**,
-**Verified with warnings**, or **Needs attention**. Verification never rewrites
+**Verified with warnings**, or **Needs attention**. This check never rewrites
 the recording; use **Open Recording in Preview** for a visual review or export
 the report with the diagnostic bundle.
 
 ## Review a recording
 
 Open a merged CSV or XDF from **Preview**, drag a file onto the window, or choose
-a recent file. Loading, indexing, metadata, timestamp correction, calibration,
+a recent file. Reading the file, finding stream details, correcting time, calibration,
 and frame preparation run in the background with progress and cancellation. The
 previous usable source remains visible unless the new file finishes successfully.
 
 CSV and XDF share play/pause, a timeline, current time and frame position,
 single-frame steps, start/end and configurable-time jumps, speed, and an explicit
-loop option. Long recordings use a configurable bounded cache and visual
-decimation; reported verification timing remains exact. XDF files with
-incompatible duplicate roles ask for a master and selected mapping, while
-compatible recovered publisher instances are stitched deterministically.
+loop option. Long recordings use a configurable memory limit and draw fewer
+frames when needed; reported file timing remains exact. XDF files with several
+possible streams ask the user to choose the main timeline and the streams to use.
+Compatible pieces from a source that restarted are joined in a predictable way.
 
 ## Use the command line
 
