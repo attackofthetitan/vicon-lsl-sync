@@ -258,14 +258,19 @@ Keep these rules:
 ### Start the included LabRecorder
 
 1. Check the configured remote-control address first. Never start a duplicate process when that address is already reachable.
-2. Launch only when automatic launch is enabled and the endpoint probe has definitely failed.
+2. Launch only when automatic launch is enabled and nothing answers at that
+   address.
 3. Use a valid user-selected program first. Otherwise, look for `labrecorder/LabRecorder.exe` beside the desktop app.
 4. Start it without blocking the window and use the program's directory as its
    working directory. State is `External`, `Launching`, `OwnedRunning`,
    `OwnedExited`, `LaunchFailed`, or `Detached`.
 5. Drain standard output and error into the event log while retaining at most 64 KiB of process output and 4 KiB per emitted line.
 6. Retry remote control every 250 ms only while neither connected nor connecting, for at most 15 seconds.
-7. Disconnecting from an external process never ends it. Detach relinquishes ownership of a launched process without ending it.
+7. Disconnecting from an external process never ends it. Detach leaves a
+   recorder started here running and prevents the app from closing it later.
+
+These internal state names appear in the interface as plain descriptions such
+as **External**, **Starting here**, and **Started here**.
 
 Exact-selection mode starts the included `LabRecorderCLI` without blocking the
 window. It passes one full output path and one search for each selected stream.
@@ -321,7 +326,12 @@ after four seconds. The window stays responsive and shows it until the call
 returns. LSL stream searches are limited to 50 ms, stream-detail reads to 250 ms,
 and sample reads do not wait.
 
-An owned recorder may be ended only after remote Stop is settled or the 15-second recorder deadline is exceeded. Termination receives one further second before a force-end. An external process is never ended. If the remote connection is already lost, external ownership settles locally with a recorded `RecorderConnectionLost` result; an owned process waits for the recorder deadline.
+A recorder started by the app may be ended only after remote Stop is settled or
+the 15-second recorder deadline is exceeded. It receives one further second to
+close before the app forces it to end. An external process is never ended. If
+the remote connection is already lost, an external recorder settles locally
+with a recorded `RecorderConnectionLost` result; a recorder started here waits
+for the deadline.
 
 Normal cleanup does not wait for active work. A still-running worker cleans itself
 up when it finishes. Backup cleanup waits at most two seconds, followed by one
@@ -331,9 +341,10 @@ Normal work on the window thread should finish within 50 ms. A Stop request only
 sets a cancel flag and returns. SDK, LSL, file, process, and file-check cleanup
 runs away from the window thread.
 
-Check normal replies, every Start command, active Stop, disconnect, owned and
-external process rules, bridge connection and retry delays, preview search and
-calibration, file opening, canceled file checks, and repeated close requests.
+Check normal replies, every Start command, active Stop, disconnect, rules for
+recorders started here or elsewhere, bridge connection and retry delays,
+preview search and calibration, file opening, canceled file checks, and repeated
+close requests.
 
 ## Preview
 
@@ -456,19 +467,21 @@ stateDiagram-v2
     AutomaticSession --> SavedProfile: Save Session Calibration
     AutomaticSession --> Manual: Use Manual Transform
     SavedProfile --> Manual: Use Manual Transform
-    Manual --> SavedProfile: Apply saved profile
+    Manual --> SavedProfile: Apply saved calibration
 ```
+
+`SavedProfile` is the internal state name; the interface shows **Saved calibration**.
 
 - Losing the target clears the collected poses.
 - A pose outside the allowed movement from the first pose restarts collection from that new pose.
 - Missing or incompatible coordinate details pause collection for an explicit
   fallback confirmation. Compatibility and the rejection reason remain visible.
 - Automatic alignment stays in memory for the desktop session and is not saved
-  unless the user explicitly creates a complete managed profile.
+  unless the user explicitly creates a complete saved calibration.
 - Transform changes reach the worker through a lock. The drawing area then asks to fit the view again.
-- Profile import/export, duplicate, retirement, stair-pose editing, and Apply
-  preserve profile ID, version, physical setup, stair identity, coordinate
-  frames, notes, creation time, sample count, and translation/rotation RMS.
+- Saved-calibration import/export, **Copy**, **Hide**, stair-pose editing, and
+  **Apply** preserve the record ID, version, physical setup, stair identity,
+  coordinate names, notes, creation time, sample count, and position/angle error.
 - Calibration progress is emitted no faster than every 100 ms so the target
   stream cannot dominate GUI work.
 
@@ -484,7 +497,7 @@ stateDiagram-v2
     PreflightBlocked --> Ready: Record Anyway with reason
     Preparing --> Ready: all required checks pass
     Ready --> Starting: Start recorder
-    Starting --> Recording: Start acknowledged or allowlist process starts
+    Starting --> Recording: Start acknowledged or exact-selection recorder starts
     Starting --> Failed: recorder operation fails
     Recording --> Stopping: Stop Session or emergency Stop
     Stopping --> Verifying: Stop acknowledged and file finalizes
@@ -519,6 +532,9 @@ stateDiagram-v2
     Running --> NeedsAttention: missing/incompatible data or read failure
     Running --> NeedsAttention: canceled by close
 ```
+
+The last diagram uses internal state names. The interface shows `Verified` as
+**Checked** and `VerifiedWithWarnings` as **Checked with warnings**.
 
 The file check runs away from the window thread and never changes the recording.
 It compares the recorded streams with the list saved before Start, then reports

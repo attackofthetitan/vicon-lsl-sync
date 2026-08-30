@@ -111,9 +111,10 @@ Record the result:
 8. Confirm the selected recorder policy is usable: remote control is enabled for
    **Record every visible stream**, or the packaged command-line recorder is
    present for exact selection.
-9. Discover streams and confirm each required role shows the intended source ID,
-   host, channel count, nominal/effective rate, coordinate frame, and freshness.
-10. Confirm the study folder exists and **Exact Recording Destination** shows the
+9. Select **Find LSL Streams** and confirm each required role shows the intended
+   source ID, host, channel count, expected and measured rate, coordinate name,
+   and sample age.
+10. Confirm the study folder exists and **Recording Destination** shows the
     intended final `.xdf` path without an unconfirmed existing file.
 11. Save the versioned session configuration or preset and a picture of the
     Unity Inspector wiring.
@@ -176,10 +177,10 @@ Save the full LSL description for every available stream and compare it with
 
 Keep the raw stream-description files, not only pictures.
 
-Also save the desktop identity-browser inventory. It must show the same name,
-type, source ID, host, session ID, channels, nominal rate, coordinate frame, and
-channel-layout result as the raw descriptions. Record any missing-details warning
-rather than treating a fallback as complete.
+Also save the desktop stream list. It must show the same name, type, source ID,
+host, session ID, channels, expected rate, coordinate name, and channel-layout
+result as the raw descriptions. Record any missing-details warning rather than
+treating a fallback as complete.
 
 ## Test 3: steady gaze timing and rate
 
@@ -195,7 +196,7 @@ rather than treating a fallback as complete.
 
 - Expected gaze rate is 90 Hz.
 - After the two-second rate window fills, the preview shows a rate based on clock-corrected sample times.
-- The dashboard separately shows nominal and effective rates, freshness, live
+- The dashboard separately shows expected and measured rates, sample age, live
   preview delay, skipped older input, and replaced display frames. Deliberately
   skipping old preview input must not be reported as source sample loss.
 - Under the same setup, the changed build has the same normal-rate or low-rate result as the known-good build. The current warning starts below 80% of the expected rate, which is 72 Hz for a 90 Hz stream.
@@ -316,24 +317,25 @@ Save example values for good and bad cases.
    and enough setup notes to reproduce the test, then select **Calibrate from
    Stair Target**.
 4. Hold still until 20 samples pass.
-5. Read the reported position and rotation RMS values.
+5. Read the reported position and angle error values.
 6. Look along known stair edges and compare the gaze ray with the physical and Vicon-aligned model.
-7. Select **Save Session Calibration**, export the profile, apply it, select
-   **Use Manual Transform**, then apply it again.
-8. Duplicate and retire the duplicate. Import the exported profile into a fresh
-   settings scope and confirm its setup identity and quality.
+7. Select **Save Session Calibration**, export the saved calibration, apply it,
+   select **Use Manual Transform**, then apply it again.
+8. Select **Copy**, then **Hide** for the copy. Import the exported calibration
+   into fresh settings and confirm its setup identity and quality.
 
 ### Expected result
 
 - Target loss, more than 20 mm of movement, or more than 3 degrees of rotation restarts collection.
-- A stable set of 20 samples within both RMS limits creates one session-only transform.
+- A stable set of 20 samples within both position and angle error limits creates
+  one session-only transform.
 - Automatic values are not saved until **Save Session Calibration** is chosen.
-- The saved profile includes ID/version, physical setup, stair model identity and
-  measured pose, gaze/target coordinate frames, transform, notes, creation time,
-  sample count, translation RMS, rotation RMS, and any confirmed missing-details
+- The saved calibration includes ID/version, physical setup, stair model identity
+  and measured pose, gaze/target coordinate frames, transform, notes, creation
+  time, sample count, position error, angle error, and any confirmed missing-details
   fallback.
-- Applying the profile is visible, reversible, and leaves its quality visible
-  while stream-health events continue. Duplicate, retirement, export, and import
+- Applying the saved calibration is visible, reversible, and leaves its quality
+  visible while stream-status events continue. Copy, Hide, export, and import
   preserve the scientific values.
 - **Use Manual Transform** restores the saved manual controls at once.
 - Stair direction and gaze match the known-good build. There is no X/Z mirror, 180-degree reversal, or metre/millimetre mistake.
@@ -350,11 +352,12 @@ Save example values for good and bad cases.
 
 - [ ] Picture or diagram of target placement.
 - [ ] Preview picture or video before and after alignment.
-- [ ] Sample count and both RMS values.
-- [ ] Exported profile JSON and a picture of its always-visible quality and stream-details
-  compatibility indicators.
-- [ ] Evidence that manual/profile switching is reversible and that retirement
-  hides the duplicate from normal selection without deleting the original.
+- [ ] Sample count and both error values.
+- [ ] Exported calibration JSON and a picture of its always-visible quality and
+  stream-details compatibility indicators.
+- [ ] Evidence that switching between manual and saved calibration is reversible
+  and that **Hide** removes the copy from normal selection without deleting the
+  original.
 - [ ] XDF file and its preview summary.
 - [ ] Passing simple axis-direction checks.
 - [ ] Overlay or side-by-side view of known-good and changed builds.
@@ -372,8 +375,9 @@ For a file marked `eye_tracker_space`:
 For a file with an empty gaze or target frame name:
 
 - [ ] The current old-data rule allows alignment when every other requirement passes.
-- [ ] Live calibration or saving a managed profile requires an explicit fallback
-  confirmation, and diagnostics record that confirmation.
+- [ ] Live calibration or saving a calibration requires explicit confirmation
+  when coordinate details are missing, and the session details record that
+  confirmation.
 
 For a file with two different nonempty frame names:
 
@@ -414,11 +418,12 @@ Changing the empty-name rule needs a separate compatibility plan and a review of
 ### Steps
 
 1. Start the packaged desktop app. First leave an external graphical recorder
-   running at the configured endpoint and confirm automatic launch does not
-   create a duplicate. Repeat with no endpoint and confirm the launched process
-   is shown as owned.
+   running at the configured address and confirm automatic launch does not
+   create a duplicate. Repeat with no recorder at that address and confirm the
+   launched process is shown as **Started here**. The first recorder should be
+   shown as **External**.
 2. Start Vicon and HoloLens streams after the graphical recorder is already open.
-   Discover them and bind required roles by source ID.
+   Select **Find LSL Streams** and bind required roles by source ID.
 3. Start a second harmless publisher with a duplicate display name but different
    source ID. Confirm the role becomes visibly ambiguous until an identity is
    selected or **Follow by name** is deliberately enabled.
@@ -441,28 +446,29 @@ Changing the empty-name rule needs a separate compatibility plan and a review of
 
 ### Expected result
 
-- Endpoint probing prevents duplicate recorder launch. Ownership remains correct
-  through launch failure, exit, reconnect, detach, and close.
+- Checking the recorder address prevents a duplicate launch. The displayed
+  start source remains correct through launch failure, exit, reconnect, detach,
+  and close.
 - All-visible Start sends `update`, `select all`, `filename`, and `start` in that
   order. Exact selection launches the packaged command-line recorder with only
   the frozen selected identities.
 - Duplicate names never produce an unexplained choice. Same-source recovery uses
   the newest instance; a source-ID collision across hosts remains distinct.
 - The saved filename exactly matches the final destination display and
-  diagnostics. Traversal, reserved names, unwritable paths, and unconfirmed
+  session details. Traversal, reserved names, unwritable paths, and unconfirmed
   collisions remain blocked.
 - A normal Stop reply arrives before state becomes `Stopped`.
 - Double Start and Stop produce one operation. Close cancels an unsent Start or
   makes one final Stop follow any Start that may have reached the server.
 - Closing remains responsive and shows the component delaying shutdown. The
   four-second bridge, two-second preview/file, and 15-second recorder limits are
-  diagnostic outcomes; the window does not destroy a still-running worker.
+  visible results; the window does not destroy a still-running worker.
 - Final close may end only a recorder process started by the desktop app and only
   after Stop settles or its deadline expires. An external process is never ended,
   including after connection loss.
 - The file check reports expected source and channel layout, time range, sample
-  count, duration, effective rate, gaps, clock corrections, and repaired
-  timestamps as **Verified**, **Verified with warnings**, or **Needs attention**.
+  count, duration, measured rate, gaps, clock corrections, and repaired
+  timestamps as **Checked**, **Checked with warnings**, or **Needs attention**.
   It never edits the XDF. Automatic run increment occurs only under the selected
   completion policy after the file exists.
 
@@ -473,10 +479,10 @@ Changing the empty-name rule needs a separate compatibility plan and a review of
   warning, and recovered-instance result.
 - [ ] Final XDF path, recorded stream list, and file-check report.
 - [ ] Setup-check required/warning/information results and the recorder-only or
-  override reason stored in diagnostics.
+  override reason stored in the session details.
 - [ ] Persistent dashboard pictures during Starting, Recording, Stopping, and
-  file check, including destination, ownership, rates, storage, and drop
-  counters.
+  file check, including destination, who started the recorder, rates, storage,
+  and drop counters.
 - [ ] Normal Stop and every pending-Start/close/disconnect result with component
   transition times and deadline outcomes.
 - [ ] Outside-process result proving the desktop app does not close a LabRecorder it did not start.
@@ -496,13 +502,14 @@ Changing the empty-name rule needs a separate compatibility plan and a review of
 - [ ] Tracker restart keeps resources and sessions separate.
 - [ ] Invalid gaze and target states keep fixed layouts and invalid values.
 - [ ] Live and recorded stair alignment match the known-good direction and scale.
-- [ ] A complete calibration profile and persistent quality evidence are saved.
+- [ ] A complete saved calibration and persistent quality evidence are saved.
 - [ ] Old, missing, and different coordinate names follow current rules.
 - [ ] Vicon reconnect and layout changes remain recordable.
 - [ ] Recorder command order, both selection policies, exact path, pending-Start
-  close, ownership, and time-limited shutdown behavior match the documented behavior.
+  close, who started the recorder, and time-limited shutdown behavior match the
+  documented behavior.
 - [ ] Setup-check and post-recording file-check evidence is included in the
-  diagnostic bundle.
+  session details.
 - [ ] Unity, desktop, and recorder logs contain no new unhandled errors.
 - [ ] XDF files, stream details, logs, calculations, and visual records are saved with the change.
 - [ ] No third-party submodule file or revision changed.

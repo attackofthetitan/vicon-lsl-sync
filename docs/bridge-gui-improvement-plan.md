@@ -22,7 +22,7 @@ The work focused on five goals:
 ## Settings
 
 One saved setup now covers the Vicon connection, stream names, preview inputs,
-recorder connection, recording choices, output folder, and calibration profile.
+recorder connection, recording choices, output folder, and saved calibration.
 Marker and segment preview inputs follow the bridge output names by default.
 Advanced users can point the preview at other streams.
 
@@ -103,13 +103,13 @@ stream was restarted during recording.
 
 ## Calibration
 
-A calibration profile records the physical setup, stair model, coordinate names,
-transform, notes, creation time, and measured quality. Profiles can be selected,
-copied, imported, exported, or retired.
+A saved calibration records the physical setup, stair model, coordinate names,
+transform, notes, creation time, and measured quality. Saved calibrations can be
+selected, copied, imported, exported, or hidden.
 
 A newly measured calibration applies only to the current session until the user
 saves it. Missing or different coordinate names require a warning and explicit
-confirmation before an older profile is used.
+confirmation before an older saved calibration is used.
 
 ## Stopping and checking the file
 
@@ -138,7 +138,7 @@ Needs attention. The check never changes or deletes the recording.
 ## Checks before release
 
 The automated checks cover repeated recorder commands, interrupted starts and
-stops, recorder timeouts, process ownership, safe closing, stream selection,
+stops, recorder timeouts, which recorders the app may close, stream selection,
 path errors, large and damaged files, preview limits, calibration results, and
 recording checks.
 

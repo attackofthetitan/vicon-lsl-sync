@@ -34,7 +34,8 @@ The old relay options `--no-hololens-gaze`, `--gaze-port`, and `--gaze-stream` r
 
 At startup, the app reports the chosen server, marker stream, and segment stream. It does not claim to relay gaze.
 
-Keep all option names, defaults, accepted values, exit codes, and HoloLens ownership unchanged.
+Keep all option names, defaults, accepted values, exit codes, and responsibility
+for publishing HoloLens data unchanged.
 
 ## Desktop bridge
 
@@ -192,7 +193,7 @@ Treat any of these as a stream change that needs its own move plan:
 - Default host: `localhost`.
 - Default port: `22345`.
 - A new connection request is rejected while Start, Stop, acknowledged recording,
-  or uncertain sent-Start work is active on a connected endpoint.
+  or uncertain sent-Start work is active on the current recorder connection.
 - Otherwise it stops both timers, fails active work, closes
   the old socket, sets recording state to unknown, and starts the new connection
   timeout. Reconnecting after connection loss preserves uncertain sent-Start
@@ -225,12 +226,13 @@ requests and keeps unrelated commands out of the Start sequence.
 
 The `update` and `select all` steps must run before Start so LabRecorder includes streams that appeared after its last refresh.
 
-The exact-selection mode does not pretend that the graphical remote-control
-protocol has an allowlist command. It launches the packaged `LabRecorderCLI`
-with the validated absolute output path and one query for each selected stream.
+The graphical recorder cannot select an exact set of streams through remote
+control. Exact-selection mode therefore starts the included `LabRecorderCLI`
+with the checked full output path and one search for each selected stream.
 The query uses source ID when available and otherwise constrains name by host.
 The selected discovery snapshot is fixed before launch. Pressing Stop writes the
-CLI terminator, and this CLI process is owned by the desktop app.
+CLI terminator. Because the desktop app started this process, it may close it
+during shutdown after recording has stopped.
 
 ### Filename fields
 
@@ -261,7 +263,7 @@ unless overwrite is explicitly enabled. Missing parent directories are created
 only for an accepted Start request. Low or unavailable storage is a visible
 warning at the configured threshold rather than a silent condition.
 
-The path shown in **Exact Recording Destination** must equal the path passed to
+The path shown in **Recording Destination** must equal the path passed to
 the recorder. **Find Next Run** searches at most 1,000 positive run values for a
 nonexistent destination. Optional automatic increment runs only after the file
 exists and the configured file-check completion rule is satisfied.
@@ -270,23 +272,24 @@ The default pattern is:
 
 `sub-%p/ses-%s/%m/sub-%p_ses-%s_task-%b_acq-%a_run-%r_%m.xdf`
 
-### LabRecorder process ownership
+### Starting and closing LabRecorder
 
-- Probe the configured endpoint before automatic launch. Use a valid
+- Check the configured recorder address before automatic launch. Use a valid
   user-selected program first; otherwise use `labrecorder/LabRecorder.exe`
   beside the desktop app when it exists.
 - Launch does not block the window, uses the program's directory as its working
-  directory, and distinguishes external, launching, owned-running,
-  owned-exited, launch-failed, and detached states.
+  directory, and records whether the recorder was already running, is starting
+  here, was started here, has stopped, failed to start, or was detached.
 - Retain at most 64 KiB of recorder output and send limited lines to the
   event log. A slow or failed launch never waits on the GUI thread.
 - Retry the remote connection every 250 ms for up to 15 seconds, but only while
   it is neither connected nor already connecting.
 - Disconnecting from or closing the app around an external process never ends
-  that process. Detach deliberately relinquishes ownership.
-- End an owned process during shutdown only after Stop settles or the 15-second
-  recorder deadline expires. Give termination one further second before the
-  owned process is force-ended.
+  that process. Detach leaves a recorder started here running and prevents the
+  desktop app from closing it later.
+- End a recorder started here during shutdown only after Stop settles or the
+  15-second recorder deadline expires. Give it one further second to close
+  before forcing it to end.
 
 ## Desktop app
 
@@ -302,15 +305,15 @@ The default pattern is:
   but not recording samples.
 - Recording controls use the connection, confirmed state, requested state,
   current operation, process, path, and setup-check result. The dashboard
-  shows `STARTING`, `RECORDING`, or `STOPPING`, elapsed time, exact destination,
-  run, endpoint, ownership, stream health, storage, skipped older input, and
-  replaced display-frame counts.
+  shows `STARTING`, `RECORDING`, or `STOPPING`, elapsed time, final destination,
+  run, recorder address, who started the recorder, stream health, storage,
+  skipped older input, and replaced display-frame counts.
 - A valid filename change is sent to a connected, non-recording LabRecorder 300 ms after typing stops.
 - **Start Session** guides bridge start, preview start, stream search, the setup
   check, and recording while leaving each independent control available.
   **Stop Session** reverses the safe order: recording, preview, bridge, then an
-  owned recorder when requested. Partial completion remains visible and
-  stoppable.
+  recorder started by the app when requested. Partial completion remains
+  visible and stoppable.
 - The setup check classifies bridge recency, recorder readiness, exact path,
   selected streams, sample age, channel layout, coordinate details, expected
   rate, stair model, and calibration as required, warning, or information.
@@ -363,7 +366,7 @@ window cleanup waits forever.
   these deliberate skips are not source data loss.
 - Automatic stair alignment starts only when requested, uses 20 stable target
   samples, and lasts only for the current desktop session until explicitly saved
-  as a managed profile. Manual controls stay saved.
+  as a saved calibration. Manual controls stay saved.
 
 ### Merged CSV files
 
@@ -422,18 +425,20 @@ runtime dependency.
   250 ms target. Progress covers reading, indexing, stream details, timestamps,
   calibration, and frame preparation. Live preview latency has a 100 ms target.
 
-### Managed calibration profiles
+### Saved calibrations
 
-A version-1 managed profile contains an ID and display name, physical setup ID,
-stair model path and identity, measured fixed Vicon stair pose, gaze transform,
-gaze and target coordinate frames, setup notes, creation time, sample count,
-translation and rotation RMS, confirmation for missing stream details, and retirement
-state. Profiles can be selected, applied, duplicated, retired, imported, and
-exported. Applying a profile is visible and reversible by choosing the manual
-transform. A new automatic solve remains session-only until **Save Session
-Calibration** is chosen. Collection progress, quality, rejection, and coordinate
-compatibility remain visible; missing coordinate details require an explicit
-fallback confirmation before a profile is complete.
+A version-1 saved-calibration record contains an ID and display name, setup
+name, stair model path and identity, measured fixed Vicon stair pose, gaze
+transform, gaze and target coordinate names, setup notes, creation time, sample
+count, position and angle error, confirmation for missing stream details, and a
+hidden flag. The stored error fields remain `translationRmsM` and
+`rotationRmsDegrees`, and the hidden flag remains `retired` for file
+compatibility. Saved calibrations can be selected, applied, copied, hidden,
+imported, and exported. Applying one is visible and reversible by choosing the
+manual transform. A new automatic result remains session-only until **Save
+Session Calibration** is chosen. Collection progress, quality, rejection, and
+coordinate compatibility remain visible; missing coordinate details require an
+explicit confirmation before a saved calibration is complete.
 
 ### Check the file after recording
 
@@ -441,7 +446,7 @@ After a confirmed Stop, wait for the exact destination to exist and inspect it
 away from the window thread. Compare the stream list saved before Start with the
 recorded name, source ID, host, channel layout, time range, sample count,
 measured rate, gaps, clock corrections, and repaired timestamps. The result is
-`Verified`, `Verified with warnings`, or `Needs attention`; a Stop
+`Checked`, `Checked with warnings`, or `Needs attention`; a Stop
 reply by itself is not presented as proof of saved data. The file check never
 edits or deletes the XDF. Findings are part of the session details and
 the file can be opened directly in playback.
@@ -454,7 +459,7 @@ The saved session setup is version-1 JSON at `session/configuration`;
 `session/configurationVersion` records the file-format version. It contains the
 bridge address and outputs, selected stream IDs and matching choice, preview
 limits, recorder address and selection, output path rules, session options, and
-selected calibration profile. Named presets and JSON Import/Export use the same
+selected saved calibration. Named presets and JSON Import/Export use the same
 format.
 
 The guided-session settings start at format version 1 and are stored as one JSON
@@ -463,8 +468,8 @@ Unsupported format versions are rejected instead of being guessed or rewritten.
 
 Machine/UI state is deliberately outside presets: `ui/windowGeometry`,
 `ui/mainSplitter`, active control and preview tabs, up to ten recent recordings,
-and recent preset/diagnostic directories. Managed calibration profiles are
-stored separately at `session/calibrationProfiles`.
+and recent preset/session-details directories. Saved calibrations are stored
+separately at `session/calibrationProfiles`.
 
 Changing the version-1 format requires an explicit format change and tests for
 both rejection and the new round trip.

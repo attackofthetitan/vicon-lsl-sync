@@ -21,7 +21,8 @@
 - [x] The current portable launcher extracts a good embedded ZIP, rejects a changed one, and handles extra certificate data added by Windows signing.
 - [x] Workflow YAML, PowerShell scripts, and Bash scripts parse successfully.
 - [x] Documentation links, generated files, whitespace, and third-party submodule revisions are clean.
-- [x] The code cleanup was reviewed as separate commits for generated HoloLens streams, native code ownership, package safety, and release documentation.
+- [x] The code cleanup was reviewed as separate commits for generated HoloLens
+  streams, native resource cleanup, package safety, and release documentation.
 - [x] The final hosted Windows and Linux build set passed.
 - [x] The hardware decision below was recorded before the tag.
 - [x] Version `1.10.5` remained the intended patch version.
@@ -63,7 +64,7 @@ Do not include any of these in normal patch-level code cleanup:
 - Dependency or framework updates.
 - Stream name, layout, time, or coordinate changes.
 - Saved Unity field changes.
-- Thread-ownership changes.
+- Changes to which thread creates or destroys an object.
 - Public command, source interface, setting, build target, or release filename changes.
 
 For one of these changes, write down the old and new behavior. Explain how existing users or files move forward and which checks prove the move is safe.
@@ -81,9 +82,9 @@ any later release that contains the guided desktop-session work.
 - [ ] Preset Reset/Save/Load/Import/Export preserves the recording setup, while
   window size, splitter, tabs, and recent paths remain outside
   presets.
-- [ ] A complete managed calibration profile round trips ID/version, physical
+- [ ] A complete saved calibration round trips ID/version, physical
   setup, stair identity/pose, coordinate frames, transform, notes, creation time,
-  quality, fallback confirmation, and retirement state.
+  quality, fallback confirmation, and hidden state.
 
 ### State, failure, and shutdown
 
@@ -123,9 +124,9 @@ any later release that contains the guided desktop-session work.
   100 ms latency target; file cancellation completes within 250 ms; latest-frame
   delivery remains one frame; the active recorder command, event log, and process
   output stay within their documented limits.
-- [ ] Short, one-hour, and multi-hour CSV/XDF checks respect the configured cache,
-  can seek beyond two hours, and keep exact file-check numbers even when the
-  preview draws fewer frames.
+- [ ] Short, one-hour, and multi-hour CSV/XDF checks respect the selected
+  playback memory limit, can seek beyond two hours, and keep exact file-check
+  numbers even when the preview draws fewer frames.
 - [ ] Small/default/scaled layouts keep controls reachable through scroll areas;
   label buddies, accessible names, keyboard focus and shortcuts pass; light,
   dark, and high-contrast rendering remains legible.
@@ -141,7 +142,8 @@ any later release that contains the guided desktop-session work.
   `LabRecorder.exe`, `LabRecorderCLI.exe`, local runtime libraries, stair model,
   launchers, and licenses at their established paths.
 - [ ] Packaged built-in GUI checks cover bundled/custom recorder lookup, an
-  existing external endpoint, portable extraction paths, settings isolation,
+  existing recorder at the configured address, portable extraction paths,
+  settings isolation,
   preview stopping, colors/layout/keyboard and screen-reader use, and preview-drawing
   operation.
 - [ ] Documentation links, whitespace, workflow/script parsing, generated files,

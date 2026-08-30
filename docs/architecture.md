@@ -12,7 +12,7 @@ Related guides:
 - [How services start, stop, and recover](runtime-state-machines.md)
 - [How time and coordinates work](time-and-coordinate-semantics.md)
 
-## Code owned by this project
+## Code in this project
 
 | Path | What it does | What it may use |
 | --- | --- | --- |
@@ -78,7 +78,8 @@ ViconLSLBridge -----------------> MarkerStream / SegmentStream
 
 Each class has one main job:
 
-- `ViconClient` turns Vicon SDK results into types owned by this project. SDK result values do not pass beyond this class, except as text in error messages.
+- `ViconClient` turns Vicon SDK results into the project's own types. SDK result
+  values do not pass beyond this class, except as text in error messages.
 - `ViconFrameMapper` keeps Vicon discovery order, decides whether values are valid, creates fixed-size invalid values, gathers errors, and keeps timestamps increasing.
 - `MarkerStream` and `SegmentStream` keep their existing public interfaces. A shared private helper creates the common LSL information, checks sample size, owns the output stream, and handles send errors.
 - `ViconLSLBridge` owns the connection loop, retries, layout checks, stream replacement, source IDs, status messages, and cleanup order.
@@ -90,16 +91,12 @@ stores the real session state directly instead of trying to read it back from
 label text.
 
 ```text
-SessionConfiguration -----> Bridge output names
-         |                 Selected preview streams
-         |                 Recorder choice and address
-         |                 Final filename
-         |                 Calibration profile selection
-         v
-SessionController -------> dashboard, setup check, shutdown, event log
-         ^
-         |
-GuiServices -------------> settings and preview-worker creation
+QSettings ----> SessionConfiguration ----> bridge, preview, recorder, filename
+                       |
+                       v
+BridgeWindow ----> SessionController ----> status, setup check, shutdown, event log
+     |
+     +----> BridgeWorker / PreviewStreamWorker / file workers
 ```
 
 The main desktop components are:
@@ -110,8 +107,9 @@ The main desktop components are:
   `SessionUiState` and are not part of presets.
 - `SessionController` stores the dashboard, setup-check result, limited event
   log, last error, and the stop result for each part of the app.
-- `GuiServices` holds the settings file and the one preview-worker factory used
-  by the interface check.
+- `BridgeWindow` owns the shared settings object and passes it to `PreviewPanel`.
+  The window and panel create their workers directly; no service wrapper or
+  worker factory is needed.
 - `BridgeWorker` runs one `ViconLSLBridge` away from the window thread and reports
   bridge state and status.
 - `PreviewStreamWorker` opens the selected LSL streams and keeps only the newest
@@ -197,7 +195,7 @@ Keep the existing header paths, names, and function signatures for:
 
 - `Config`, command-line results, and command-line parsing and formatting.
 - `ViconLSLBridge`, `BridgeState`, `BridgeStatus`, and the status callback.
-- `ViconClient` and its project-owned read results.
+- `ViconClient` and its local read-result types.
 - `MarkerStream`, `SegmentStream`, `StreamOutlet`, `StreamOutletFactory`, and `StreamPushResult`.
 - `StreamSchema`, sample types, frame mapping, discovery, and error-reporting types and functions.
 - Preview types and functions under `src/preview`.
@@ -246,15 +244,17 @@ The repository checks:
 - Stream creation and send failure, empty layouts, expected rates, and timestamp forwarding.
 - Recorder operation and requested/confirmed states, button rules, repeated
   commands, broken-up and malformed replies, timeouts, replacement connections,
-  closing during Start, process ownership, exact path rules, setup checks, file
-  checks, current settings format, and saved calibration profiles.
+  closing during Start, which recorder processes the app may close, exact path
+  rules, setup checks, file checks, current settings format, and saved
+  calibrations.
 - Memory limits for short, one-hour, and multi-hour previews; CSV/XDF
   cancellation and file limits; joining restarted streams; keeping only the
   newest live frame; playback seeking; drawing checks at small and scaled sizes;
   readable colors; keyboard and screen-reader labels; and preview stopping.
 - Packaged GUI layout, local LSL discovery, bundled/custom recorder lookup, portable paths, optional recorder startup, and stair assets.
 - HoloLens channel and pose encoding, coordinate conversion, time handling, queue rules, publishing, cancellation, and recovery without Unity or hardware.
-- Generated-file freshness, cross-platform builds, and Windows package contents.
+- Generated files being up to date, cross-platform builds, and Windows package
+  contents.
 
 Important gaps remain:
 

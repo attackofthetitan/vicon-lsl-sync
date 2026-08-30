@@ -41,13 +41,12 @@ The desktop app lets you:
 - Keep bridge, recorder, preview, calibration, path, storage, stream health,
   errors, and file-check results visible.
 - Open, seek, step, loop, and visually inspect merged CSV or XDF recordings.
-- Align HoloLens gaze with the Vicon world and manage identified calibration
-  profiles.
+- Align HoloLens gaze with the Vicon world and manage saved calibrations.
 - Connect to an external recorder or start an included recorder without freezing
   the window.
 
-By default, the preview's marker and segment roles stay bound to the bridge output
-names, while gaze and calibration use `HoloLensGaze` and
+By default, the marker and segment preview use the bridge output names, while
+gaze and calibration use `HoloLensGaze` and
 `HoloLensModelTargetPose`. The **Streams** tab shows name, type, source ID, host,
 session, channels, expected and measured rates, coordinate name, sample age, and
 warnings. When names are duplicated, the app does not silently choose one.
@@ -83,34 +82,37 @@ In the desktop preview:
 The result lasts only for the current desktop session. Select **Use Manual Transform** to return to the saved translation and rotation controls.
 
 An automatic solution stays session-only until you select **Save Session
-Calibration**. A managed profile records a physical setup ID, stair model and
-measured pose, coordinate frames, transform, notes, creation time, and
-translation/rotation quality. Profiles can be applied, duplicated, retired,
-imported, and exported. Confirm missing coordinate details deliberately; the
-quality and compatibility display remains visible after stream-health updates.
+Calibration**. A saved calibration records a setup name, stair model and
+measured pose, coordinate names, transform, notes, creation time, and position
+and angle error. Saved calibrations can be applied, copied, hidden, imported,
+and exported. Confirm missing coordinate details deliberately; quality and
+compatibility remain visible as stream status changes.
 
 Restarting the HoloLens app can create a new Unity world, so run the alignment again after a restart. If the physical stairs move, update the fixed Vicon stair pose before relying on the result.
 
-The gaze publisher keeps the original device capture time. It drops duplicate, old, invalid, or out-of-order readings. If processing falls more than 25 ms behind, it drops the older queued readings and keeps the newest one. This leaves a visible time gap instead of replaying old gaze data. See [How time and coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
+The Unity app keeps the original device capture time. It drops duplicate, old,
+invalid, or out-of-order readings. If processing falls more than 25 ms behind,
+it drops the older queued readings and keeps the newest one. This leaves a
+visible time gap instead of replaying old gaze data. See [How time and
+coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
 
 ## Record with LabRecorder
 
 The default recorder remote-control address is `localhost:22345`. Before
 automatic launch, the desktop app checks that address so it does not start a
-duplicate recorder. A recorder it launches is shown as owned; an already-running
-external recorder is shown as external and is never terminated by the desktop
-app. **Disconnect / Detach** disconnects or relinquishes ownership without
-ending an external process.
+duplicate recorder. A recorder started from the desktop app is shown as
+**Started here**; one that was already running is shown as **External** and is
+never closed by the desktop app. **Disconnect / Detach** disconnects without
+closing the recorder.
 
 1. Start the Vicon bridge.
 2. In **Recording**, choose the study folder and filename pattern.
 3. Fill in the participant, session, task, run, acquisition, and modality fields.
-4. In **Streams**, select **Discover LSL Streams**, review identity and health,
-   and mark the exact streams and required roles.
-5. Choose one recording policy:
+4. In **Streams**, select **Find LSL Streams**, review each source and its status,
+   and mark the streams that should be recorded or are required.
+5. Choose how to record:
 
-   - Exact selection (the default) uses the packaged command-line recorder with
-     one identity query per selected stream.
+   - The default uses the included recorder and saves only the selected streams.
    - **Use external graphical recorder** uses its remote-control connection and
      deliberately records everything visible after an immediate refresh.
 
@@ -120,13 +122,12 @@ ending an external process.
    preview, stream search, setup check, and recording steps.
 8. Select **Stop Recording** or **Stop Session** when finished.
 
-The **Exact Recording Destination** is the final full path shown in the window,
-checked by the app, sent to the recorder, and saved in the session details. The
+**Recording Destination** shows the final full path checked by the app, sent to
+the recorder, and saved in the session details. The
 app appends `.xdf` when needed and blocks paths that escape the study folder,
 reserved Windows names, unwritable paths, existing files that were not approved,
-and destinations outside the study root. **Find Next
-Run** finds an unused run number. Low storage is a visible warning at the chosen
-threshold.
+and destinations outside the study root. **Find Next Run** finds an unused run
+number. Low storage is a visible warning at the chosen threshold.
 
 Check these items before recording:
 
@@ -135,21 +136,20 @@ Check these items before recording:
   command.
 - Required streams are present, recent, have the expected channel layout, and
   use the expected coordinate names.
-- `ViconMarkers`, `ViconSegments`, and `HoloLensGaze` show healthy effective
+- `ViconMarkers`, `ViconSegments`, and `HoloLensGaze` show healthy measured
   rates when those roles are required.
 - The filename preview points to the intended `.xdf` file.
 
-An invalid folder, field, token, or selection explains the problem and how to fix
-it. A recorder error does not stop the Vicon bridge. Repeated Start or Stop
-requests are refused, and closing while Start is in progress either cancels it
-before it is sent or sends one final Stop.
+An invalid folder, value, filename pattern, or selection explains the problem
+and how to fix it. A recorder error does not stop the Vicon bridge. Repeated
+Start or Stop requests are refused, and closing while Start is in progress
+either cancels it before it is sent or sends one final Stop.
 
 After a successful Stop, the app waits for the XDF file and checks the selected
-streams, source IDs, channel layouts, time ranges, rates, gaps, time corrections,
-and repaired timestamps in the background. The run becomes **Verified**,
-**Verified with warnings**, or **Needs attention**. This check never rewrites
-the recording; use **Open Recording in Preview** for a visual review or export
-the report with the diagnostic bundle.
+streams, source IDs, channel layouts, time ranges, rates, gaps, and sample times
+in the background. The run becomes **Checked**, **Checked with warnings**, or
+**Needs attention**. This check never rewrites the recording; use **Open
+Recording in Preview** for a visual review or export the session details.
 
 ## Review a recording
 
@@ -159,10 +159,11 @@ and frame preparation run in the background with progress and cancellation. The
 previous usable source remains visible unless the new file finishes successfully.
 
 CSV and XDF share play/pause, a timeline, current time and frame position,
-single-frame steps, start/end and configurable-time jumps, speed, and an explicit
+single-frame steps, start/end and selected-time jumps, speed, and an explicit
 loop option. Long recordings use a configurable memory limit and draw fewer
 frames when needed; reported file timing remains exact. XDF files with several
-possible streams ask the user to choose the main timeline and the streams to use.
+possible streams ask the user to choose the main time source and the streams to
+use.
 Compatible pieces from a source that restarted are joined in a predictable way.
 
 ## Use the command line
