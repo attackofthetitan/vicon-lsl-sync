@@ -5,73 +5,30 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QPixmap>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QTimer>
 
 #include <memory>
-
-namespace {
-
-class TestSettings final : public vicon_lsl::gui::SessionSettingsService {
-public:
-    TestSettings() {
-        configuration_.recording_root = QDir::tempPath();
-        configuration_.recorder_host = "127.0.0.1";
-        configuration_.recorder_port = 1;
-        configuration_.recorder_automatic_launch = false;
-    }
-
-    vicon_lsl::gui::SessionConfiguration loadConfiguration() override {
-        return configuration_;
-    }
-
-    void saveConfiguration(
-        const vicon_lsl::gui::SessionConfiguration& configuration) override {
-        configuration_ = configuration;
-    }
-
-    vicon_lsl::gui::SessionUiState loadUiState() override { return {}; }
-    void saveUiState(const vicon_lsl::gui::SessionUiState&) override {}
-    QStringList presetNames() override { return {}; }
-
-    bool savePreset(const QString&,
-                    const vicon_lsl::gui::SessionConfiguration&,
-                    QString* error) override {
-        if (error) *error = "Not available in this check";
-        return false;
-    }
-
-    bool loadPreset(const QString&,
-                    vicon_lsl::gui::SessionConfiguration&,
-                    QString* error) override {
-        if (error) *error = "Not available in this check";
-        return false;
-    }
-
-    QVector<vicon_lsl::gui::ManagedCalibrationProfile>
-    loadCalibrationProfiles() override {
-        return {};
-    }
-
-    bool saveCalibrationProfiles(
-        const QVector<vicon_lsl::gui::ManagedCalibrationProfile>&,
-        QString* error) override {
-        if (error) error->clear();
-        return true;
-    }
-
-private:
-    vicon_lsl::gui::SessionConfiguration configuration_;
-};
-
-} // namespace
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Vicon LSL Bridge GUI Check");
 
+    QTemporaryDir settings_directory;
+    if (!settings_directory.isValid()) return 1;
+    auto settings = std::make_shared<QSettings>(
+        settings_directory.filePath("settings.ini"), QSettings::IniFormat);
+    vicon_lsl::gui::SessionConfiguration configuration;
+    configuration.recording_root = QDir::tempPath();
+    configuration.recorder_host = "127.0.0.1";
+    configuration.recorder_port = 1;
+    configuration.recorder_automatic_launch = false;
+    vicon_lsl::gui::SessionConfigurationStore::save(*settings, configuration);
+
     vicon_lsl::gui::GuiServices services =
         vicon_lsl::gui::defaultGuiServices();
-    services.settings = std::make_shared<TestSettings>();
+    services.settings = std::move(settings);
     BridgeWindow window(nullptr, true, std::move(services));
 
     QTimer::singleShot(0, [&app, &window]() {

@@ -604,8 +604,10 @@ bool BridgeWindow::passesInterfaceChecks() const {
 }
 
 void BridgeWindow::loadSettings() {
-    configuration_ = services_.settings->loadConfiguration();
-    ui_state_ = services_.settings->loadUiState();
+    configuration_ =
+        vicon_lsl::gui::SessionConfigurationStore::load(*services_.settings);
+    ui_state_ =
+        vicon_lsl::gui::SessionConfigurationStore::loadUiState(*services_.settings);
     applyConfigurationToUi();
     restoreUiState();
     refreshPresetList();
@@ -613,7 +615,8 @@ void BridgeWindow::loadSettings() {
 
 void BridgeWindow::saveSettings() {
     updateConfigurationFromUi();
-    services_.settings->saveConfiguration(configuration_);
+    vicon_lsl::gui::SessionConfigurationStore::save(
+        *services_.settings, configuration_);
     saveUiState();
 }
 
@@ -755,7 +758,8 @@ void BridgeWindow::saveUiState() {
     ui_state_.geometry = saveGeometry();
     ui_state_.splitter_state = ui_->main_splitter->saveState();
     ui_state_.active_control_tab = ui_->controls_tabs->currentIndex();
-    services_.settings->saveUiState(ui_state_);
+    vicon_lsl::gui::SessionConfigurationStore::saveUiState(
+        *services_.settings, ui_state_);
 }
 
 void BridgeWindow::refreshPresetList(const QString& select) {
@@ -763,7 +767,9 @@ void BridgeWindow::refreshPresetList(const QString& select) {
         ? ui_->preset_combo->currentText() : select;
     const QSignalBlocker blocker(ui_->preset_combo);
     ui_->preset_combo->clear();
-    ui_->preset_combo->addItems(services_.settings->presetNames());
+    ui_->preset_combo->addItems(
+        vicon_lsl::gui::SessionConfigurationStore::presetNames(
+            *services_.settings));
     ui_->preset_combo->setEditText(current);
 }
 
@@ -785,7 +791,8 @@ void BridgeWindow::onSavePreset() {
     updateConfigurationFromUi();
     const QString name = ui_->preset_combo->currentText().trimmed();
     QString error;
-    if (services_.settings->savePreset(name, configuration_, &error)) {
+    if (vicon_lsl::gui::SessionConfigurationStore::savePreset(
+            *services_.settings, name, configuration_, &error)) {
         refreshPresetList(name);
         appendEvent(SessionComponent::Application, EventSeverity::Information,
                     "Saved session preset " + name);
@@ -804,7 +811,8 @@ void BridgeWindow::onLoadPreset() {
     const QString name = ui_->preset_combo->currentText().trimmed();
     vicon_lsl::gui::SessionConfiguration loaded;
     QString error;
-    if (services_.settings->loadPreset(name, loaded, &error)) {
+    if (vicon_lsl::gui::SessionConfigurationStore::loadPreset(
+            *services_.settings, name, loaded, &error)) {
         configuration_ = std::move(loaded);
         stream_inventory_.clear();
         applyConfigurationToUi();
