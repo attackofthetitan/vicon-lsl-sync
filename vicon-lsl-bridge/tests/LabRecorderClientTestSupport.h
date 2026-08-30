@@ -58,7 +58,7 @@ void testMidCommandDisconnectReportsFailure();
 void testConnectionStateTracksIdleDisconnectAndReconnect();
 void testNormalizedPathPolicy();
 void testSessionConfiguration();
-void testSessionControllerStateModel();
+void testSessionEventLog();
 void testCalibrationProfileStore();
 void testRecorderAllowlistPolicy();
 void testRecorderDuplicateAndShutdownProtocol();

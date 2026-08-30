@@ -103,10 +103,6 @@ bool PreflightResult::hasWarnings() const {
     });
 }
 
-bool PreflightResult::canStart() const {
-    return !hasRequiredFailures() || (override_used && !override_reason.trimmed().isEmpty());
-}
-
 QString PreflightResult::summary() const {
     QStringList failures;
     for (const PreflightItem& item : items) {
@@ -132,7 +128,6 @@ QJsonObject PreflightResult::toJson() const {
     QJsonArray serialized_items;
     for (const PreflightItem& item : items) {
         serialized_items.push_back(QJsonObject{
-            {"id", item.id},
             {"component", SessionEventLog::componentText(item.component)},
             {"level", preflightLevelText(item.level)},
             {"passed", item.passed},
@@ -214,4 +209,43 @@ QString verificationStateText(RecordingVerificationState state) {
         case RecordingVerificationState::NeedsAttention: return "Needs attention";
     }
     return "Not checked";
+}
+
+QString vicon_lsl::gui::workflowStateText(SessionWorkflowState state) {
+    switch (state) {
+        case SessionWorkflowState::Idle: return "Idle";
+        case SessionWorkflowState::Preparing: return "Preparing";
+        case SessionWorkflowState::PreflightBlocked: return "Setup blocked";
+        case SessionWorkflowState::Ready: return "Ready";
+        case SessionWorkflowState::Starting: return "Starting";
+        case SessionWorkflowState::Recording: return "Recording";
+        case SessionWorkflowState::Stopping: return "Stopping";
+        case SessionWorkflowState::Verifying: return "Checking file";
+        case SessionWorkflowState::Complete: return "Complete";
+        case SessionWorkflowState::Failed: return "Needs attention";
+        case SessionWorkflowState::Closing: return "Closing";
+    }
+    return "Idle";
+}
+
+QString vicon_lsl::gui::calibrationStateText(SessionCalibrationState state) {
+    switch (state) {
+        case SessionCalibrationState::Manual: return "Manual";
+        case SessionCalibrationState::Collecting: return "Collecting";
+        case SessionCalibrationState::AutomaticSession: return "Current session";
+        case SessionCalibrationState::SavedProfile: return "Saved";
+        case SessionCalibrationState::Failed: return "Needs attention";
+    }
+    return "Manual";
+}
+
+QString vicon_lsl::gui::fileStateText(SessionFileState state) {
+    switch (state) {
+        case SessionFileState::None: return "No file loaded";
+        case SessionFileState::Loading: return "Loading";
+        case SessionFileState::Loaded: return "Loaded";
+        case SessionFileState::Canceled: return "Canceled";
+        case SessionFileState::Failed: return "Needs attention";
+    }
+    return "No file loaded";
 }

@@ -5,7 +5,7 @@
 #include "gui/PerformanceBudgets.h"
 #include "gui/RecorderProcessController.h"
 #include "gui/SessionConfiguration.h"
-#include "gui/SessionController.h"
+#include "gui/SessionState.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -42,29 +42,6 @@ bool hasIssue(const RecordingPathResult& result,
         }
     }
     return false;
-}
-
-vicon_lsl::gui::SessionPreflightInputs readyPreflight(
-    const QString& root) {
-    vicon_lsl::gui::SessionPreflightInputs inputs;
-    inputs.configuration = vicon_lsl::gui::SessionConfiguration();
-    inputs.configuration.recording_root = root;
-    inputs.configuration.recording_streams.clear();
-    inputs.bridge_state = ComponentLifecycleState::Running;
-    inputs.bridge_status_recent = true;
-    inputs.bridge_effective_rate = 120.0;
-    inputs.recorder_connection = RecorderConnectionState::Connected;
-    inputs.recorder_recording = RecorderRecordingState::Stopped;
-    inputs.recorder_operation = RecorderOperationState::Idle;
-    inputs.allowlist_recorder_available = true;
-    inputs.path = LabRecorderFilenamePolicy::validate(validFields(root));
-    vicon_lsl::gui::StreamIdentity selected;
-    selected.name = "Markers";
-    selected.source_id = "markers-source";
-    selected.present = true;
-    selected.selected = true;
-    inputs.streams = {selected};
-    return inputs;
 }
 
 } // namespace
@@ -268,139 +245,19 @@ void testSessionConfiguration() {
            "Follow by name chooses the deterministic stable identity and reports fallback");
 }
 
-void testSessionControllerStateModel() {
-    QTemporaryDir root;
-    expect(root.isValid(), "creates preflight path root");
-    if (!root.isValid()) return;
-    vicon_lsl::gui::SessionController controller;
+void testSessionEventLog() {
+    SessionEventLog log(3);
     const QDateTime injected_time =
         QDateTime::fromString("2026-08-24T10:11:12.345Z", Qt::ISODateWithMs);
-    controller.setClock([injected_time]() { return injected_time; });
-    auto inputs = readyPreflight(root.path());
-    PreflightResult passed = controller.runPreflight(inputs);
-    expect(!passed.hasRequiredFailures() && passed.canStart(),
-           "preflight passes a ready bridge, recorder, and exact path");
-    expect(passed.completed_at == injected_time &&
-               !controller.eventLog().entries().isEmpty() &&
-               controller.eventLog().entries().back().timestamp == injected_time,
-           "preflight and state events use the injected GUI clock");
-
-    inputs.path.issues.push_back({
-        RecordingPathIssueLevel::Warning,
-        "available storage",
-        "Available storage is below the configured warning threshold",
-        "Free storage before a long run",
-    });
-    const PreflightResult warning_only = controller.runPreflight(inputs);
-    expect(!warning_only.hasRequiredFailures() && warning_only.hasWarnings() &&
-               warning_only.canStart(),
-           "warning-only preflight remains startable while preserving the warning");
-
-    inputs.bridge_state = ComponentLifecycleState::Starting;
-    inputs.bridge_status_recent = false;
-    PreflightResult blocked = controller.runPreflight(inputs);
-    expect(blocked.hasRequiredFailures(),
-           "preflight blocks missing bridge readiness");
-    expect(!controller.overridePreflight("   "),
-           "preflight override rejects an empty reason");
-    expect(controller.overridePreflight("Recorder-only recovery run") &&
-               controller.lastPreflight().override_used &&
-               controller.lastPreflight().override_reason ==
-                   "Recorder-only recovery run",
-           "preflight accepts and persists a deliberate reasoned override");
-
-    inputs.configuration.recorder_only_mode = true;
-    PreflightResult recorder_only = controller.runPreflight(inputs);
-    expect(!recorder_only.hasRequiredFailures(),
-           "explicit recorder-only mode does not require the bridge");
-
-    inputs = readyPreflight(root.path());
-    inputs.configuration.record_every_visible_stream = false;
-    inputs.streams.clear();
-    PreflightResult no_allowlist = controller.runPreflight(inputs);
-    expect(no_allowlist.hasRequiredFailures(),
-           "exact allowlist preflight blocks an empty visible selection");
-
-    vicon_lsl::gui::StreamBinding required;
-    required.role = "gaze";
-    required.name = "Gaze";
-    required.source_id = "gaze-1";
-    required.required = true;
-    required.expected_channels = 21;
-    required.expected_nominal_rate = 90.0;
-    required.expected_coordinate_frame = "shared";
-    inputs.configuration.recording_streams = {required};
-    vicon_lsl::gui::StreamIdentity missing;
-    missing.role = "gaze";
-    missing.name = "Gaze";
-    missing.source_id = "gaze-1";
-    missing.channel_count = 21;
-    missing.coordinate_frame = "shared";
-    missing.present = false;
-    missing.selected = true;
-    missing.required = true;
-    inputs.streams = {missing};
-    expect(controller.runPreflight(inputs).hasRequiredFailures(),
-           "a previously selected but absent identity remains a blocking failure");
-    missing.present = true;
-    missing.metadata_complete = true;
-    missing.schema_compatible = true;
-    missing.nominal_rate = 90.0;
-    missing.freshness_ms = 0;
-    inputs.streams = {missing};
-    expect(!controller.runPreflight(inputs).hasRequiredFailures(),
-           "a fresh identity with matching schema satisfies required-stream checks");
-
-    controller.beginShutdown(1000, true, true, true, true, true);
-    expect(controller.shutdownStatus().result ==
-               vicon_lsl::gui::ShutdownResult::InProgress,
-           "shutdown enters one explicit in-progress state");
-    controller.beginShutdown(2000, false, false, false, false, false);
-    expect(controller.shutdownStatus().started_at_ms == 1000,
-           "repeated close cannot replace the active shutdown sequence");
-    const QStringList pending_shutdown =
-        controller.shutdownStatus().delayedComponents(2000);
-    expect(!pending_shutdown.isEmpty() &&
-               pending_shutdown.front().contains("remaining"),
-           "shutdown status exposes each pending component deadline countdown");
-    controller.updateShutdownDeadlines(
-        1000 + vicon_lsl::gui::PerformanceBudgets::RecorderStopDeadlineMs);
-    expect(controller.shutdownStatus().result ==
-               vicon_lsl::gui::ShutdownResult::DeadlineExceeded &&
-               controller.shutdownStatus().ownedRecorderMayBeEnded(
-                   1000 + vicon_lsl::gui::PerformanceBudgets::RecorderStopDeadlineMs),
-           "shutdown exposes deadline overrun and owned-recorder policy");
-    controller.updateShutdownComponent(SessionComponent::Bridge, true, {}, 17000);
-    controller.updateShutdownComponent(SessionComponent::Preview, true, {}, 17000);
-    controller.updateShutdownComponent(SessionComponent::Recorder, true, {}, 17000);
-    controller.updateShutdownComponent(SessionComponent::File, true, {}, 17000);
-    controller.updateShutdownComponent(SessionComponent::Verification, true, {}, 17000);
-    expect(controller.shutdownStatus().complete() &&
-               controller.shutdownStatus().result ==
-                   vicon_lsl::gui::ShutdownResult::Completed,
-           "shutdown completes only when all required components stop");
-
-    vicon_lsl::gui::SessionController lost_controller;
-    lost_controller.beginShutdown(20000, false, false, true, false, false);
-    lost_controller.markRecorderConnectionLostDuringShutdown(
-        20001, "Remote-control connection unavailable");
-    const qsizetype lost_event_count =
-        lost_controller.eventLog().entries().size();
-    lost_controller.markRecorderConnectionLostDuringShutdown(
-        20002, "Remote-control connection unavailable");
-    expect(lost_controller.shutdownStatus().result ==
-               vicon_lsl::gui::ShutdownResult::RecorderConnectionLost &&
-               lost_controller.eventLog().entries().size() == lost_event_count,
-           "repeated close polling records recorder connection loss exactly once");
-
-    SessionEventLog log(3);
+    log.setClock([injected_time]() { return injected_time; });
     log.append(SessionComponent::Bridge, EventSeverity::Error, "persistent error");
     log.append(SessionComponent::Bridge, EventSeverity::Information, "normal one");
     log.append(SessionComponent::Preview, EventSeverity::Information, "normal two");
     log.append(SessionComponent::Recorder, EventSeverity::Information, "normal three");
     expect(log.entries().size() == 3 &&
+               log.entries().back().timestamp == injected_time &&
                log.lastError() == "persistent error",
-           "bounded normal events never erase the persistent last error");
+           "keeps the latest events and the last error");
     log.acknowledgeLastError();
     expect(log.lastError().isEmpty(),
            "last error clears only on explicit acknowledgement");

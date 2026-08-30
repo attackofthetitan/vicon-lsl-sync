@@ -239,7 +239,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->preflight_override_button = new QPushButton("Record Anyway");
     ui->preflight_override_button->setToolTip(
         "Start recording after entering a reason for the failed check.");
-    override_row->addWidget(makeTooltipLabel("Override reason:",
+    override_row->addWidget(makeTooltipLabel("Reason:",
                                              ui->preflight_override_reason_edit,
                                              ui->preflight_override_reason_edit->toolTip()));
     override_row->addWidget(ui->preflight_override_reason_edit, 1);

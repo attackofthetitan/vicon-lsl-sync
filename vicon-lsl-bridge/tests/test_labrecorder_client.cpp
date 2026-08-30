@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     run("reconnect", testConnectionStateTracksIdleDisconnectAndReconnect);
     run("normalized path policy", testNormalizedPathPolicy);
     run("session configuration", testSessionConfiguration);
-    run("session controller", testSessionControllerStateModel);
+    run("session event log", testSessionEventLog);
     run("calibration profiles", testCalibrationProfileStore);
     run("recorder allowlist", testRecorderAllowlistPolicy);
     run("duplicate and shutdown protocol", testRecorderDuplicateAndShutdownProtocol);

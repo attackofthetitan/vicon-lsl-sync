@@ -42,6 +42,40 @@ enum class ComponentLifecycleState {
     Failed,
 };
 
+namespace vicon_lsl::gui {
+
+enum class SessionWorkflowState {
+    Idle,
+    Preparing,
+    PreflightBlocked,
+    Ready,
+    Starting,
+    Recording,
+    Stopping,
+    Verifying,
+    Complete,
+    Failed,
+    Closing,
+};
+
+enum class SessionCalibrationState {
+    Manual,
+    Collecting,
+    AutomaticSession,
+    SavedProfile,
+    Failed,
+};
+
+enum class SessionFileState {
+    None,
+    Loading,
+    Loaded,
+    Canceled,
+    Failed,
+};
+
+} // namespace vicon_lsl::gui
+
 enum class RecorderProcessState {
     External,
     Launching,
@@ -114,7 +148,6 @@ private:
 };
 
 struct PreflightItem {
-    QString id;
     SessionComponent component = SessionComponent::Application;
     PreflightLevel level = PreflightLevel::Information;
     bool passed = true;
@@ -130,7 +163,6 @@ struct PreflightResult {
 
     bool hasRequiredFailures() const;
     bool hasWarnings() const;
-    bool canStart() const;
     QString summary() const;
     QJsonObject toJson() const;
 };
@@ -142,9 +174,18 @@ QString componentLifecycleStateText(ComponentLifecycleState state);
 QString recorderProcessStateText(RecorderProcessState state);
 QString verificationStateText(RecordingVerificationState state);
 
+namespace vicon_lsl::gui {
+QString workflowStateText(SessionWorkflowState state);
+QString calibrationStateText(SessionCalibrationState state);
+QString fileStateText(SessionFileState state);
+} // namespace vicon_lsl::gui
+
 Q_DECLARE_METATYPE(RecorderConnectionState)
 Q_DECLARE_METATYPE(RecorderRecordingState)
 Q_DECLARE_METATYPE(RecorderOperationState)
 Q_DECLARE_METATYPE(ComponentLifecycleState)
 Q_DECLARE_METATYPE(RecorderProcessState)
 Q_DECLARE_METATYPE(RecordingVerificationState)
+Q_DECLARE_METATYPE(vicon_lsl::gui::SessionWorkflowState)
+Q_DECLARE_METATYPE(vicon_lsl::gui::SessionCalibrationState)
+Q_DECLARE_METATYPE(vicon_lsl::gui::SessionFileState)

@@ -3,7 +3,8 @@
 #include "ViconLSLBridge.h"
 #include "gui/LabRecorderFilenamePolicy.h"
 #include "gui/RecordingVerifier.h"
-#include "gui/SessionController.h"
+#include "gui/SessionConfiguration.h"
+#include "gui/SessionState.h"
 
 #include <QElapsedTimer>
 #include <QMetaType>
@@ -130,7 +131,7 @@ private:
                      EventSeverity severity,
                      const QString& message);
     void populatePreflight(const PreflightResult& result);
-    vicon_lsl::gui::SessionPreflightInputs preflightInputs() const;
+    PreflightResult runPreflight() const;
     void beginRecordingAfterPreflight();
     void completePendingRecordingStart();
     QVector<vicon_lsl::gui::StreamIdentity> selectedStreams() const;
@@ -157,14 +158,13 @@ private:
     bool bridgeStatusRecent() const;
     void beginClose();
     void updateShutdownStatus();
-    void finishCloseIfReady();
 
     std::shared_ptr<QSettings> settings_;
     std::unique_ptr<vicon_lsl::gui_detail::BridgeWindowUi> ui_;
-    vicon_lsl::gui::SessionController session_controller_;
-    vicon_lsl::gui::SessionDashboardState dashboard_;
     vicon_lsl::gui::SessionConfiguration configuration_;
     vicon_lsl::gui::SessionUiState ui_state_;
+    SessionEventLog event_log_;
+    PreflightResult preflight_;
     RecordingPathResult path_result_;
     QVector<vicon_lsl::gui::StreamIdentity> stream_inventory_;
     QVector<vicon_lsl::gui::StreamIdentity> recording_inventory_;
@@ -187,11 +187,19 @@ private:
     QElapsedTimer recording_elapsed_;
     QElapsedTimer verification_file_elapsed_;
 
+    vicon_lsl::gui::SessionWorkflowState workflow_ =
+        vicon_lsl::gui::SessionWorkflowState::Idle;
+    vicon_lsl::gui::SessionFileState file_state_ =
+        vicon_lsl::gui::SessionFileState::None;
     ComponentLifecycleState bridge_lifecycle_ = ComponentLifecycleState::Idle;
     bool have_previous_status_ = false;
     unsigned int previous_frames_ = 0;
     qint64 previous_status_ms_ = 0;
     double bridge_effective_rate_ = 0.0;
+    unsigned long long preview_replaced_frames_ = 0;
+    unsigned long long preview_coalesced_samples_ = 0;
+    qint64 preview_latency_ms_ = 0;
+    qint64 close_started_ms_ = -1;
     bool bridge_streaming_ = false;
     bool bridge_status_stale_ = false;
     bool startup_endpoint_probe_ = false;
@@ -204,5 +212,6 @@ private:
     bool close_pending_ = false;
     bool close_finalizing_ = false;
     bool owned_process_end_requested_ = false;
+    bool recorder_connection_loss_reported_ = false;
     QString pending_recording_path_;
 };

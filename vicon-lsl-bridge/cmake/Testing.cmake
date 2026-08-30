@@ -79,7 +79,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
         src/gui/RecorderProcessController.cpp
         src/gui/RecordingVerifier.cpp
         src/gui/SessionConfiguration.cpp
-        src/gui/SessionController.cpp
         src/gui/SessionState.cpp
     )
     target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)

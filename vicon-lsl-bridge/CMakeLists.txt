@@ -153,7 +153,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/RecorderProcessController.cpp
                 src/gui/RecordingVerifier.cpp
                 src/gui/SessionConfiguration.cpp
-                src/gui/SessionController.cpp
                 src/gui/SessionState.cpp
                 src/gui/StreamDiscoveryWorker.cpp
                 src/gui/PreviewPanel.cpp

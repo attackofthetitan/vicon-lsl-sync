@@ -5,7 +5,7 @@
 #include "gui/PreviewFileLoader.h"
 #include "gui/CalibrationProfileStore.h"
 #include "gui/SessionConfiguration.h"
-#include "gui/SessionController.h"
+#include "gui/SessionState.h"
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewPlaybackClock.h"
 
