@@ -94,13 +94,12 @@ private slots:
     void onExportDiagnostics();
     void onShowVerificationDetails();
     void syncFilenameToLabRecorder();
-    void onStatusStaleCheck();
+    void onHeartbeatTick();
     void onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
                         unsigned int frames, const QString& message);
     void onWorkerFinished();
     void onLabRecorderRetry();
     void onClosePoll();
-    void onDashboardTick();
     void onVerificationFilePoll();
 
 private:
@@ -180,8 +179,7 @@ private:
     QTimer* labrecorder_retry_timer_ = nullptr;
     QTimer* filename_sync_timer_ = nullptr;
     QTimer* close_poll_timer_ = nullptr;
-    QTimer* status_stale_timer_ = nullptr;
-    QTimer* dashboard_timer_ = nullptr;
+    QTimer* heartbeat_timer_ = nullptr;
     QTimer* verification_file_timer_ = nullptr;
     QElapsedTimer labrecorder_retry_elapsed_;
     QElapsedTimer monotonic_clock_;

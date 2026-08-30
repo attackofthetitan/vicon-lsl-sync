@@ -177,18 +177,15 @@ BridgeWindow::BridgeWindow(QWidget* parent,
     labrecorder_retry_timer_->setInterval(250);
     close_poll_timer_ = new QTimer(this);
     close_poll_timer_->setInterval(50);
-    status_stale_timer_ = new QTimer(this);
-    status_stale_timer_->setInterval(500);
-    dashboard_timer_ = new QTimer(this);
-    dashboard_timer_->setInterval(250);
+    heartbeat_timer_ = new QTimer(this);
+    heartbeat_timer_->setInterval(250);
     verification_file_timer_ = new QTimer(this);
     verification_file_timer_->setInterval(100);
 
     connectSignals();
     loadSettings();
     status_timer_.start();
-    status_stale_timer_->start();
-    dashboard_timer_->start();
+    heartbeat_timer_->start();
     validateRecordingPath();
     updateRecordingButtons();
     updateReadiness();
@@ -272,10 +269,8 @@ void BridgeWindow::connectSignals() {
             this, &BridgeWindow::onLabRecorderRetry);
     connect(close_poll_timer_, &QTimer::timeout,
             this, &BridgeWindow::onClosePoll);
-    connect(status_stale_timer_, &QTimer::timeout,
-            this, &BridgeWindow::onStatusStaleCheck);
-    connect(dashboard_timer_, &QTimer::timeout,
-            this, &BridgeWindow::onDashboardTick);
+    connect(heartbeat_timer_, &QTimer::timeout,
+            this, &BridgeWindow::onHeartbeatTick);
     connect(verification_file_timer_, &QTimer::timeout,
             this, &BridgeWindow::onVerificationFilePoll);
 
@@ -1031,7 +1026,17 @@ void BridgeWindow::updateDashboard() {
         !close_pending_ && recordingActiveOrPending());
 }
 
-void BridgeWindow::onDashboardTick() {
+void BridgeWindow::onHeartbeatTick() {
+    if (bridge_streaming_ && have_previous_status_ &&
+        !bridge_status_stale_ &&
+        status_timer_.elapsed() - previous_status_ms_ > kStatusStaleMs) {
+        bridge_status_stale_ = true;
+        bridge_effective_rate_ = 0.0;
+        ui_->frame_rate_label->setText("0.0 Hz");
+        appendEvent(SessionComponent::Bridge, EventSeverity::Warning,
+                    "Bridge has not reported an update for three seconds");
+        updateReadiness();
+    }
     updateDashboard();
     if (guided_start_pending_) advanceGuidedStart();
     if (guided_stop_pending_) advanceGuidedStop();
@@ -1386,20 +1391,6 @@ bool BridgeWindow::bridgeStatusRecent() const {
            status_timer_.elapsed() - previous_status_ms_ <= kStatusStaleMs;
 }
 
-void BridgeWindow::onStatusStaleCheck() {
-    if (!bridge_streaming_ || !have_previous_status_) return;
-    if (status_timer_.elapsed() - previous_status_ms_ <= kStatusStaleMs ||
-        bridge_status_stale_) {
-        return;
-    }
-    bridge_status_stale_ = true;
-    bridge_effective_rate_ = 0.0;
-    ui_->frame_rate_label->setText("0.0 Hz");
-    appendEvent(SessionComponent::Bridge, EventSeverity::Warning,
-                "Bridge has not reported an update for three seconds");
-    updateReadiness();
-    updateDashboard();
-}
 
 void BridgeWindow::onWorkerFinished() {
     BridgeWorker* completed = worker_;
