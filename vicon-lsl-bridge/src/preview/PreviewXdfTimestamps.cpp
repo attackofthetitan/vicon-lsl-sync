@@ -73,7 +73,7 @@ double resolveSampleTimestamp(const std::optional<double>& encoded_timestamp,
     } else {
         if (!previous_timestamp || !std::isfinite(nominal_srate) || nominal_srate <= 0.0) {
             throw std::runtime_error(
-                "Cannot reconstruct implicit XDF timestamp without a preceding timestamp and positive nominal_srate");
+                "Cannot restore an XDF sample time without an earlier time and a positive expected rate");
         }
         timestamp = *previous_timestamp + 1.0 / nominal_srate;
     }

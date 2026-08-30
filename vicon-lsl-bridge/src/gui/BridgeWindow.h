@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ViconLSLBridge.h"
-#include "gui/GuiServices.h"
 #include "gui/LabRecorderFilenamePolicy.h"
 #include "gui/RecordingVerifier.h"
 #include "gui/SessionController.h"
@@ -18,6 +17,7 @@
 class QCloseEvent;
 class QComboBox;
 class QJsonObject;
+class QSettings;
 
 class LabRecorderClient;
 
@@ -31,23 +31,16 @@ struct BridgeWindowUi;
 }
 }
 
-enum class BridgeExitResult {
-    Stopped,
-    Failed,
-};
-
 class BridgeWorker : public QThread {
     Q_OBJECT
 public:
     explicit BridgeWorker(const Config& config, QObject* parent = nullptr);
     void stopBridge();
-    ComponentLifecycleState lifecycleState() const { return lifecycle_state_.load(); }
 
 signals:
     void statusUpdate(int state, unsigned long long markers, unsigned long long segments,
                       unsigned int frames, const QString& message);
     void lifecycleChanged(ComponentLifecycleState state, QString detail);
-    void terminal(BridgeExitResult result, const QString& message);
 
 protected:
     void run() override;
@@ -66,7 +59,7 @@ public:
     explicit BridgeWindow(
         QWidget* parent = nullptr,
         bool enable_preview = true,
-        vicon_lsl::gui::GuiServices services = vicon_lsl::gui::defaultGuiServices());
+        std::shared_ptr<QSettings> settings = {});
     ~BridgeWindow() override;
 
     bool passesInterfaceChecks() const;
@@ -167,7 +160,7 @@ private:
     void updateShutdownStatus();
     void finishCloseIfReady();
 
-    vicon_lsl::gui::GuiServices services_;
+    std::shared_ptr<QSettings> settings_;
     std::unique_ptr<vicon_lsl::gui_detail::BridgeWindowUi> ui_;
     vicon_lsl::gui::SessionController session_controller_;
     vicon_lsl::gui::SessionDashboardState dashboard_;
@@ -215,5 +208,3 @@ private:
     bool owned_process_end_requested_ = false;
     QString pending_recording_path_;
 };
-
-Q_DECLARE_METATYPE(BridgeExitResult)

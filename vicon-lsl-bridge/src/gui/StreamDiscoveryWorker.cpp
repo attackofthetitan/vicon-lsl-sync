@@ -99,14 +99,14 @@ void StreamDiscoveryWorker::run() {
             QStringList identity_warnings;
             if (!identity.metadata_complete) {
                 identity_warnings.push_back(
-                    identity.name + " has incomplete identity or channel metadata");
+                    identity.name + " is missing source or channel details");
             }
             if (!identity.schema_compatible) {
                 identity_warnings.push_back(
-                    identity.name + " has an incompatible channel schema");
+                    identity.name + " has an unexpected channel layout");
             }
             identity_warnings.push_back(
-                identity.name + " sample freshness has not yet been measured");
+                identity.name + " sample age has not yet been measured");
             identity.warning = identity_warnings.join("; ");
             warnings.append(identity_warnings);
             result.push_back(std::move(identity));
@@ -117,7 +117,8 @@ void StreamDiscoveryWorker::run() {
                 if (candidate.name == result[left].name) ++duplicate_count;
             }
             if (duplicate_count > 1) {
-                result[left].warning = "Duplicate stream name; bind by source ID or enable Follow by name";
+                result[left].warning =
+                    "Several streams share this name; choose one by source ID or select Follow by name";
                 warnings.push_back(result[left].name + " has " +
                                    QString::number(duplicate_count) + " visible identities");
             }

@@ -491,7 +491,7 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
                 identity.warning = state->identity.warning;
                 if (identity.freshness_ms > kStaleSampleMs) {
                     if (!identity.warning.isEmpty()) identity.warning += "; ";
-                    identity.warning += "Latest sample is stale";
+                    identity.warning += "Latest sample has not updated recently";
                 }
             }
         }
@@ -529,7 +529,7 @@ QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 n
     } else if (!state.have_sample) {
         status = state.requested_name + ": connected";
     } else if (!streamIsFresh(state, now_ms)) {
-        status = state.requested_name + ": stale (" +
+        status = state.requested_name + ": not recently updated (" +
                QString::number(static_cast<double>(now_ms - state.last_sample_ms) / 1000.0,
                                'f', 1) +
                "s)";
@@ -545,7 +545,7 @@ QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 n
                                    state.rate_tracker.belowNominalRate(
                                        state.nominal_rate, kGazeLowRateFraction);
         if (low_gaze_rate) {
-            status += " LOW RATE (nominal " +
+            status += " LOW RATE (expected " +
                       QString::number(state.nominal_rate, 'f', 1) + "Hz)";
         }
     }

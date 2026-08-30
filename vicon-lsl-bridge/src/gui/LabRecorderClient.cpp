@@ -52,7 +52,7 @@ void LabRecorderClient::connectToServer(const QString& host,
     command_timeout_.setInterval((std::max)(1, command_timeout_ms));
     setRecordingState(RecorderRecordingState::Unknown);
     setConnectionState(RecorderConnectionState::Connecting,
-                       "Connecting to LabRecorder RCS...");
+                       "Connecting to LabRecorder remote control...");
     socket_.connectToHost(host, port);
     if (connection_state_ == RecorderConnectionState::Connecting) {
         connection_timeout_.start();
@@ -99,21 +99,6 @@ bool LabRecorderClient::shutdownSettledSafely() const {
 
 QString LabRecorderClient::activeOperation() const {
     return have_active_batch_ ? active_batch_.operation : QString();
-}
-
-QString LabRecorderClient::activeCommand() const {
-    if (!have_active_batch_ || active_batch_.next_command >= active_batch_.commands.size()) {
-        return {};
-    }
-    return active_batch_.commands.at(active_batch_.next_command);
-}
-
-int LabRecorderClient::activeCommandNumber() const {
-    return have_active_batch_ ? static_cast<int>(active_batch_.next_command + 1) : 0;
-}
-
-int LabRecorderClient::activeCommandCount() const {
-    return have_active_batch_ ? static_cast<int>(active_batch_.commands.size()) : 0;
 }
 
 bool LabRecorderClient::sendCommand(const QString& command) {
@@ -182,11 +167,12 @@ bool LabRecorderClient::beginBatch(CommandKind kind,
         return false;
     }
     if (!isConnected()) {
-        emit commandFinished(operation, false, "LabRecorder RCS is not connected");
+        emit commandFinished(operation, false,
+                             "LabRecorder remote control is not connected");
         return false;
     }
     if (commands.isEmpty()) {
-        emit commandFinished(operation, false, "LabRecorder command batch is empty");
+        emit commandFinished(operation, false, "No LabRecorder commands were provided");
         return false;
     }
 
@@ -231,7 +217,7 @@ void LabRecorderClient::writeNextCommand() {
         return;
     }
     if (active_batch_.next_command >= active_batch_.commands.size()) {
-        finishActiveBatch(true, "Command acknowledged");
+        finishActiveBatch(true, "Recorder confirmed the command");
         return;
     }
 
@@ -349,7 +335,7 @@ void LabRecorderClient::onConnected() {
     connection_timeout_.stop();
     setConnectionState(
         RecorderConnectionState::Connected,
-        "Connected to LabRecorder RCS; recording state is unknown until Start or Stop is acknowledged");
+        "Connected to LabRecorder remote control; the recorder must confirm Start or Stop before its state is known");
     setRecordingState(RecorderRecordingState::Unknown);
 }
 
@@ -409,12 +395,12 @@ void LabRecorderClient::onReadyRead() {
 
 void LabRecorderClient::onConnectionTimeout() {
     if (connection_state_ == RecorderConnectionState::Connecting) {
-        failActiveConnection("Timed out connecting to LabRecorder RCS");
+        failActiveConnection("Timed out connecting to LabRecorder remote control");
     }
 }
 
 void LabRecorderClient::onCommandTimeout() {
     if (have_active_batch_) {
-        failActiveConnection("Timed out waiting for LabRecorder command acknowledgement");
+        failActiveConnection("Timed out waiting for a LabRecorder reply");
     }
 }

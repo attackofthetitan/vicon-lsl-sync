@@ -316,7 +316,7 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
     }
     if (result.normalized_fields.run.isEmpty()) {
         addIssue(result, RecordingPathIssueLevel::Error, "run",
-                 "The run value is empty.", "Enter a positive run identifier.");
+                 "The run value is empty.", "Enter a positive run number.");
     } else {
         bool run_ok = false;
         const int run = result.normalized_fields.run.toInt(&run_ok);
@@ -392,7 +392,7 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
                  "The resolved path is " + QString::number(result.absolute_path.size()) +
                      " characters, above the configured practical limit of " +
                      QString::number(options.practical_path_length) + ".",
-                 "Shorten the root, metadata values, or template.");
+                 "Shorten the study folder, recording details, or file template.");
     }
 
     const QFileInfo destination(result.absolute_path);

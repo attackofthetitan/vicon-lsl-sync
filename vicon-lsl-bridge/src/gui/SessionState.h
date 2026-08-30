@@ -102,7 +102,6 @@ public:
     QString toText(EventSeverity minimum = EventSeverity::Information,
                    const QVector<SessionComponent>& components = {}) const;
     QJsonArray toJson() const;
-    std::size_t maximumEntries() const { return maximum_entries_; }
 
     static QString componentText(SessionComponent component);
     static QString severityText(EventSeverity severity);

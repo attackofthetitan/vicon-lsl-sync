@@ -28,7 +28,6 @@ public:
     bool ownsRunningProcess() const;
     bool allowlistRecording() const;
     QByteArray boundedOutput() const { return output_buffer_; }
-    QString executable() const { return executable_; }
 
     bool launchGraphicalRecorder(const QString& executable, QString* error = nullptr);
     bool launchAllowlistRecorder(const QString& executable,
@@ -73,7 +72,6 @@ private:
     RecorderProcessKind kind_ = RecorderProcessKind::None;
     QByteArray output_buffer_;
     QByteArray partial_line_;
-    QString executable_;
     bool stop_requested_ = false;
     bool ending_owned_process_ = false;
     bool detached_ = false;

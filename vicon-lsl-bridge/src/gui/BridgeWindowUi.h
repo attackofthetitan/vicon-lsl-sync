@@ -2,7 +2,6 @@
 
 #include <memory>
 
-#include "gui/GuiServices.h"
 #include "gui/LabRecorderFilenamePolicy.h"
 
 class QLabel;
@@ -10,6 +9,7 @@ class QCheckBox;
 class QComboBox;
 class QPlainTextEdit;
 class QProgressBar;
+class QSettings;
 class QLineEdit;
 class QPushButton;
 class QSplitter;
@@ -131,13 +131,12 @@ struct BridgeWindowUi {
 
     LabRecorderFilenameFields filenameFields() const;
     void setBridgeInputsEnabled(bool enabled) const;
-    bool configurableTooltipsPresent() const;
-    bool accessibilityContractSatisfied() const;
+    bool passesInterfaceChecks() const;
 };
 
 std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     QWidget* window,
     bool enable_preview,
-    const gui::GuiServices& services = gui::defaultGuiServices());
+    const std::shared_ptr<QSettings>& settings);
 
 } // namespace vicon_lsl::gui_detail

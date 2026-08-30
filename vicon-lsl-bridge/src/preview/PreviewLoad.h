@@ -10,7 +10,7 @@ namespace vicon_lsl {
 enum class PreviewLoadStage {
     Reading,
     Indexing,
-    Metadata,
+    StreamDetails,
     Timestamps,
     Calibration,
     FramePreparation,

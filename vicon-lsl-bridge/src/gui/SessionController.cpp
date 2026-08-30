@@ -11,15 +11,6 @@ namespace {
 constexpr qint64 kFreshStreamLimitMs = 2000;
 constexpr double kMinimumRateFraction = 0.8;
 
-bool identityMatchesBinding(const StreamIdentity& identity,
-                            const StreamBinding& binding) {
-    if (!binding.source_id.trimmed().isEmpty() &&
-        binding.reconnection == StreamReconnectionMode::SourceIdentity) {
-        return identity.source_id == binding.source_id;
-    }
-    return identity.name == binding.name;
-}
-
 QString bindingDescription(const StreamBinding& binding) {
     QString result = binding.role + " stream " + binding.name;
     if (!binding.source_id.isEmpty()) result += " [" + binding.source_id + "]";
@@ -35,10 +26,6 @@ void addItem(PreflightResult& result,
              QString action = {}) {
     result.items.push_back({std::move(id), component, level, passed,
                             std::move(message), std::move(action)});
-}
-
-QString workflowText(SessionWorkflowState state) {
-    return SessionController::workflowStateText(state);
 }
 
 } // namespace
@@ -128,13 +115,13 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
             recorder_only || inputs.bridge_state == ComponentLifecycleState::Running,
             recorder_only ? "Recorder-only mode does not require the Vicon bridge"
                           : "Vicon bridge is running",
-            "Start the bridge or enable Recorder-only mode with a documented reason.");
+            "Start the bridge or choose Record without the Vicon bridge and enter a reason.");
     if (!recorder_only) {
         addItem(result, "bridge-fresh", SessionComponent::Bridge,
                 PreflightLevel::Required, inputs.bridge_status_recent,
                 inputs.bridge_status_recent
-                    ? "Vicon bridge status is recent"
-                    : "Vicon bridge status is stale",
+                    ? "Vicon bridge has updated recently"
+                    : "Vicon bridge has not updated recently",
                 "Restore Vicon frame delivery before recording.");
     }
 
@@ -146,11 +133,11 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
             inputs.configuration.record_every_visible_stream
                 ? (recorder_ready ? "Remote recorder is connected"
                                   : "Remote recorder is not connected")
-                : (recorder_ready ? "Allowlist recorder is available"
-                                  : "Allowlist recorder executable is unavailable"),
+                : (recorder_ready ? "Selected-stream recorder is available"
+                                  : "Selected-stream recorder is unavailable"),
             inputs.configuration.record_every_visible_stream
-                ? "Connect the configured recorder endpoint."
-                : "Install or select the bundled command-line recorder.");
+                ? "Connect to the configured recorder address."
+                : "Install or select the included recorder.");
     const bool recorder_idle = inputs.recorder_operation == RecorderOperationState::Idle &&
                                inputs.recorder_recording != RecorderRecordingState::Recording;
     addItem(result, "recorder-idle", SessionComponent::Recorder,
@@ -172,36 +159,37 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
         }
     }
 
-    QVector<StreamBinding> bindings = inputs.configuration.recording_streams;
-    for (const StreamBinding& binding : bindings) {
+    for (const StreamBinding& binding : inputs.configuration.recording_streams) {
         if (!binding.required) continue;
-        QVector<StreamIdentity> matches;
+        const StreamIdentity* match = nullptr;
+        int match_count = 0;
         for (const StreamIdentity& identity : inputs.streams) {
-            if (identity.present && identityMatchesBinding(identity, binding)) {
-                matches.push_back(identity);
+            if (identity.present && binding.matches(identity)) {
+                if (!match) match = &identity;
+                ++match_count;
             }
         }
         const QString prefix = "stream-" + binding.role + "-" + binding.name;
         addItem(result, prefix + "-present", SessionComponent::Streams,
-                PreflightLevel::Required, !matches.isEmpty(),
-                !matches.isEmpty() ? bindingDescription(binding) + " is visible"
-                                   : bindingDescription(binding) + " is missing",
-                "Start the publisher or select the correct stream identity.");
-        if (matches.isEmpty()) continue;
+                PreflightLevel::Required, match != nullptr,
+                match ? bindingDescription(binding) + " is visible"
+                      : bindingDescription(binding) + " is missing",
+                "Start the stream source or select the correct one.");
+        if (!match) continue;
 
-        const StreamIdentity& identity = matches.front();
+        const StreamIdentity& identity = *match;
         if (identity.freshness_ms < 0) {
             addItem(result, prefix + "-fresh", SessionComponent::Streams,
                     PreflightLevel::Warning, false,
                     bindingDescription(binding) +
-                        " sample freshness has not been measured",
+                        " sample age has not been measured",
                     "Start preview or confirm current source samples before recording.");
         } else {
             const bool fresh = identity.freshness_ms <= kFreshStreamLimitMs;
             addItem(result, prefix + "-fresh", SessionComponent::Streams,
                     PreflightLevel::Required, fresh,
-                    fresh ? bindingDescription(binding) + " is fresh"
-                          : bindingDescription(binding) + " is stale",
+                    fresh ? bindingDescription(binding) + " is updating"
+                          : bindingDescription(binding) + " has stopped updating",
                     "Restore current samples before recording.");
         }
         const bool channels_ok = binding.expected_channels <= 0 ||
@@ -212,25 +200,25 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
                 PreflightLevel::Required,
                 identity.schema_compatible && channels_ok && frame_ok,
                 identity.schema_compatible && channels_ok && frame_ok
-                    ? bindingDescription(binding) + " schema is compatible"
-                    : bindingDescription(binding) + " schema or coordinate frame is incompatible",
-                "Use a publisher matching the saved channel and coordinate contract.");
+                    ? bindingDescription(binding) + " channel layout and coordinates match"
+                    : bindingDescription(binding) + " channel layout or coordinates do not match",
+                "Use a stream source with the saved channels and coordinate name.");
         addItem(result, prefix + "-metadata", SessionComponent::Streams,
                 PreflightLevel::Warning, identity.metadata_complete,
                 identity.metadata_complete
-                    ? bindingDescription(binding) + " identity metadata is complete"
-                    : bindingDescription(binding) + " has incomplete source, channel, or coordinate metadata",
-                "Publish complete source identity, channel, and coordinate metadata or document the fallback.");
+                    ? bindingDescription(binding) + " source and channel details are complete"
+                    : bindingDescription(binding) + " is missing source, channel, or coordinate details",
+                "Publish the missing stream details or record why they are unavailable.");
         if (binding.expected_nominal_rate > 0.0 && identity.nominal_rate > 0.0) {
             const bool rate_ok = identity.nominal_rate >=
                                  binding.expected_nominal_rate * kMinimumRateFraction;
             addItem(result, prefix + "-rate", SessionComponent::Streams,
                     PreflightLevel::Warning, rate_ok,
-                    rate_ok ? bindingDescription(binding) + " nominal rate is healthy"
-                            : bindingDescription(binding) + " nominal rate is below the expected range",
+                    rate_ok ? bindingDescription(binding) + " rate is within the expected range"
+                            : bindingDescription(binding) + " rate is below the expected range",
                     "Check the source device and network load.");
         }
-        if (matches.size() > 1 && binding.source_id.isEmpty()) {
+        if (match_count > 1 && binding.source_id.isEmpty()) {
             addItem(result, prefix + "-duplicate", SessionComponent::Streams,
                     PreflightLevel::Warning, false,
                     "Multiple visible streams match " + bindingDescription(binding),
@@ -247,8 +235,8 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
         addItem(result, "allowlist-selection", SessionComponent::Streams,
                 PreflightLevel::Required, any_selected,
                 any_selected ? "At least one visible stream is selected for exact recording"
-                             : "No visible stream is selected for the recording allowlist",
-                "Select one or more visible identities in the Streams table.");
+                             : "No visible stream is selected for exact recording",
+                "Select one or more visible streams in the Streams table.");
     }
 
     if (inputs.configuration.calibration_required) {
@@ -256,7 +244,7 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
                 PreflightLevel::Required, inputs.stair_model_loaded,
                 inputs.stair_model_loaded ? "Stair model is loaded"
                                           : "Required stair model is not loaded",
-                "Load the stair model selected by the calibration profile.");
+                "Load the stair model selected by the saved calibration.");
         const bool calibration_ready =
             inputs.calibration_state == SessionCalibrationState::AutomaticSession ||
             inputs.calibration_state == SessionCalibrationState::SavedProfile;
@@ -264,13 +252,13 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
                 PreflightLevel::Required, calibration_ready,
                 calibration_ready ? "Calibration is applied"
                                   : "The selected workflow requires calibration",
-                "Collect a stable calibration or apply a compatible saved profile.");
+                "Collect a stable calibration or apply a matching saved calibration.");
         addItem(result, "calibration-metadata", SessionComponent::Calibration,
                 PreflightLevel::Warning, inputs.calibration_metadata_compatible,
                 inputs.calibration_metadata_compatible
-                    ? "Calibration coordinate metadata is compatible"
-                    : "Calibration is using missing or fallback coordinate metadata",
-                "Confirm the coordinate setup or select a matching profile.");
+                    ? "Calibration coordinate details match"
+                    : "Calibration coordinate details are missing or do not match",
+                "Confirm the coordinate setup or select a matching saved calibration.");
     }
 
     addItem(result, "stream-inventory", SessionComponent::Streams,
@@ -278,11 +266,11 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
             QString::number(std::count_if(
                 inputs.streams.cbegin(), inputs.streams.cend(),
                 [](const StreamIdentity& identity) { return identity.present; })) +
-                " visible stream(s) inventoried");
+                " visible stream(s) found");
     if (inputs.bridge_effective_rate > 0.0) {
         addItem(result, "bridge-rate", SessionComponent::Bridge,
                 PreflightLevel::Information, true,
-                "Bridge effective rate is " +
+                "Bridge measured rate is " +
                     QString::number(inputs.bridge_effective_rate, 'f', 1) + " Hz");
     }
 
@@ -290,8 +278,8 @@ PreflightResult SessionController::runPreflight(const SessionPreflightInputs& in
     event_log_.append(SessionComponent::Application,
                       result.hasRequiredFailures() ? EventSeverity::Warning
                                                    : EventSeverity::Information,
-                      result.hasRequiredFailures() ? "Preflight blocked recording"
-                                                   : "Preflight passed");
+                      result.hasRequiredFailures() ? "Setup check blocked recording"
+                                                   : "Setup check passed");
     return last_preflight_;
 }
 
@@ -301,7 +289,7 @@ bool SessionController::overridePreflight(const QString& reason) {
     last_preflight_.override_used = true;
     last_preflight_.override_reason = normalized;
     event_log_.append(SessionComponent::Application, EventSeverity::Warning,
-                      "Preflight override accepted: " + normalized);
+                      "Failed setup check accepted with reason: " + normalized);
     return true;
 }
 
@@ -406,7 +394,7 @@ QJsonObject SessionController::toJson(const SessionDashboardState& dashboard,
         streams.push_back(identity.toJson());
     }
     return QJsonObject{
-        {"workflow", workflowText(dashboard.workflow)},
+        {"workflow", workflowStateText(dashboard.workflow)},
         {"bridge", componentLifecycleStateText(dashboard.bridge)},
         {"preview", componentLifecycleStateText(dashboard.preview)},
         {"recorderConnection", recorderConnectionStateText(dashboard.recorder_connection)},
@@ -436,7 +424,7 @@ QString SessionController::workflowStateText(SessionWorkflowState state) {
     switch (state) {
         case SessionWorkflowState::Idle: return "Idle";
         case SessionWorkflowState::Preparing: return "Preparing";
-        case SessionWorkflowState::PreflightBlocked: return "Preflight blocked";
+        case SessionWorkflowState::PreflightBlocked: return "Setup blocked";
         case SessionWorkflowState::Ready: return "Ready";
         case SessionWorkflowState::Starting: return "Starting";
         case SessionWorkflowState::Recording: return "Recording";
@@ -454,7 +442,7 @@ QString SessionController::calibrationStateText(SessionCalibrationState state) {
         case SessionCalibrationState::Manual: return "Manual";
         case SessionCalibrationState::Collecting: return "Collecting";
         case SessionCalibrationState::AutomaticSession: return "Automatic (session only)";
-        case SessionCalibrationState::SavedProfile: return "Saved profile";
+        case SessionCalibrationState::SavedProfile: return "Saved calibration";
         case SessionCalibrationState::Failed: return "Failed";
     }
     return "Manual";

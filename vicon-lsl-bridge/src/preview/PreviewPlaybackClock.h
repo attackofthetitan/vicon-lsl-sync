@@ -22,8 +22,6 @@ public:
     double position(double monotonic_seconds) const;
     double duration() const;
     bool atEnd(double monotonic_seconds) const;
-    bool isPlaying() const { return playing_; }
-    bool isLooping() const { return looping_; }
 
 private:
     bool timelineEmpty() const;

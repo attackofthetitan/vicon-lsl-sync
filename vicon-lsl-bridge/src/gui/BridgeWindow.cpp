@@ -31,6 +31,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QScrollBar>
+#include <QSettings>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTableWidget>
@@ -44,7 +45,6 @@
 
 namespace {
 
-using vicon_lsl::gui::GuiServices;
 using vicon_lsl::gui::RecorderProcessKind;
 using vicon_lsl::gui::SessionCalibrationState;
 using vicon_lsl::gui::SessionFileState;
@@ -57,13 +57,10 @@ constexpr int kFilenameSyncDelayMs = 300;
 constexpr int kStatusStaleMs = 3000;
 constexpr int kVerificationFileTimeoutMs = 15000;
 
-GuiServices normalizedServices(GuiServices services) {
-    GuiServices defaults = vicon_lsl::gui::defaultGuiServices();
-    if (!services.settings) services.settings = std::move(defaults.settings);
-    if (!services.create_preview_worker) {
-        services.create_preview_worker = std::move(defaults.create_preview_worker);
-    }
-    return services;
+std::shared_ptr<QSettings> sessionSettings(
+    std::shared_ptr<QSettings> settings) {
+    if (settings) return settings;
+    return std::make_shared<QSettings>("ViconLSL", "ViconLSLBridge");
 }
 QString preflightLevelText(PreflightLevel level) {
     switch (level) {
@@ -100,15 +97,6 @@ QJsonArray streamInventoryJson(const QVector<StreamIdentity>& streams) {
     QJsonArray result;
     for (const StreamIdentity& stream : streams) result.push_back(stream.toJson());
     return result;
-}
-
-bool identityMatchesBinding(const StreamIdentity& identity,
-                            const StreamBinding& binding) {
-    if (binding.reconnection == StreamReconnectionMode::SourceIdentity &&
-        !binding.source_id.trimmed().isEmpty()) {
-        return identity.source_id == binding.source_id;
-    }
-    return identity.name == binding.name;
 }
 
 QString stateDetail(RecorderConnectionState connection,
@@ -152,15 +140,12 @@ void BridgeWorker::run() {
         setLifecycleState(ComponentLifecycleState::Stopped,
                           stop_requested_.load() ? "Bridge stopped on request"
                                                  : "Bridge run completed");
-        emit terminal(BridgeExitResult::Stopped, {});
     } catch (const std::exception& ex) {
         const QString message = QString::fromUtf8(ex.what());
         setLifecycleState(ComponentLifecycleState::Failed, message);
-        emit terminal(BridgeExitResult::Failed, message);
     } catch (...) {
         const QString message = "Unknown bridge worker failure";
         setLifecycleState(ComponentLifecycleState::Failed, message);
-        emit terminal(BridgeExitResult::Failed, message);
     }
 }
 
@@ -175,14 +160,13 @@ void BridgeWorker::stopBridge() {
 
 BridgeWindow::BridgeWindow(QWidget* parent,
                            bool enable_preview,
-                           GuiServices services)
-    : QWidget(parent), services_(normalizedServices(std::move(services))) {
+                           std::shared_ptr<QSettings> settings)
+    : QWidget(parent), settings_(sessionSettings(std::move(settings))) {
     monotonic_clock_.start();
-    qRegisterMetaType<BridgeExitResult>("BridgeExitResult");
     qRegisterMetaType<vicon_lsl::gui::RecordingVerificationReport>(
         "vicon_lsl::gui::RecordingVerificationReport");
     ui_ = vicon_lsl::gui_detail::buildBridgeWindowUi(
-        this, enable_preview, services_);
+        this, enable_preview, settings_);
     labrecorder_client_ = new LabRecorderClient(this);
     recorder_process_ = new vicon_lsl::gui::RecorderProcessController(this);
 
@@ -433,7 +417,7 @@ void BridgeWindow::connectSignals() {
                     dashboard_.recording_started_at = QDateTime::currentDateTimeUtc();
                     recording_elapsed_.restart();
                     appendEvent(SessionComponent::Recorder, EventSeverity::Information,
-                                "Recorder acknowledged Recording");
+                                "Recorder confirmed that recording started");
                 } else if (state == RecorderRecordingState::Stopped &&
                            dashboard_.workflow == SessionWorkflowState::Stopping) {
                     requestVerification();
@@ -461,7 +445,7 @@ void BridgeWindow::connectSignals() {
                 ui_->labrecorder_operation_progress->setFormat(
                     QString("%1 %2/%3").arg(operation).arg(number).arg(count));
                 ui_->labrecorder_operation_label->setText(
-                    operation + ": awaiting acknowledgement for " + command);
+                    operation + ": waiting for a reply to " + command);
             });
     connect(labrecorder_client_, &LabRecorderClient::commandFinished,
             this, [this](const QString& operation, bool ok, const QString& message) {
@@ -599,15 +583,14 @@ void BridgeWindow::connectSignals() {
 }
 
 bool BridgeWindow::passesInterfaceChecks() const {
-    return ui_->configurableTooltipsPresent() &&
-           ui_->accessibilityContractSatisfied();
+    return ui_->passesInterfaceChecks();
 }
 
 void BridgeWindow::loadSettings() {
     configuration_ =
-        vicon_lsl::gui::SessionConfigurationStore::load(*services_.settings);
+        vicon_lsl::gui::SessionConfigurationStore::load(*settings_);
     ui_state_ =
-        vicon_lsl::gui::SessionConfigurationStore::loadUiState(*services_.settings);
+        vicon_lsl::gui::SessionConfigurationStore::loadUiState(*settings_);
     applyConfigurationToUi();
     restoreUiState();
     refreshPresetList();
@@ -616,7 +599,7 @@ void BridgeWindow::loadSettings() {
 void BridgeWindow::saveSettings() {
     updateConfigurationFromUi();
     vicon_lsl::gui::SessionConfigurationStore::save(
-        *services_.settings, configuration_);
+        *settings_, configuration_);
     saveUiState();
 }
 
@@ -759,7 +742,7 @@ void BridgeWindow::saveUiState() {
     ui_state_.splitter_state = ui_->main_splitter->saveState();
     ui_state_.active_control_tab = ui_->controls_tabs->currentIndex();
     vicon_lsl::gui::SessionConfigurationStore::saveUiState(
-        *services_.settings, ui_state_);
+        *settings_, ui_state_);
 }
 
 void BridgeWindow::refreshPresetList(const QString& select) {
@@ -769,7 +752,7 @@ void BridgeWindow::refreshPresetList(const QString& select) {
     ui_->preset_combo->clear();
     ui_->preset_combo->addItems(
         vicon_lsl::gui::SessionConfigurationStore::presetNames(
-            *services_.settings));
+            *settings_));
     ui_->preset_combo->setEditText(current);
 }
 
@@ -792,7 +775,7 @@ void BridgeWindow::onSavePreset() {
     const QString name = ui_->preset_combo->currentText().trimmed();
     QString error;
     if (vicon_lsl::gui::SessionConfigurationStore::savePreset(
-            *services_.settings, name, configuration_, &error)) {
+            *settings_, name, configuration_, &error)) {
         refreshPresetList(name);
         appendEvent(SessionComponent::Application, EventSeverity::Information,
                     "Saved session preset " + name);
@@ -812,7 +795,7 @@ void BridgeWindow::onLoadPreset() {
     vicon_lsl::gui::SessionConfiguration loaded;
     QString error;
     if (vicon_lsl::gui::SessionConfigurationStore::loadPreset(
-            *services_.settings, name, loaded, &error)) {
+            *settings_, name, loaded, &error)) {
         configuration_ = std::move(loaded);
         stream_inventory_.clear();
         applyConfigurationToUi();
@@ -875,8 +858,8 @@ void BridgeWindow::onBrowseStudyRoot() {
 
 void BridgeWindow::onBrowseLabRecorder() {
     const QString path = QFileDialog::getOpenFileName(
-        this, "Select Recorder Executable",
-        ui_->labrecorder_executable_edit->text(), "Executable (*.exe);;All files (*)");
+        this, "Select Recorder Program",
+        ui_->labrecorder_executable_edit->text(), "Programs (*.exe);;All files (*)");
     if (!path.isEmpty()) {
         ui_->labrecorder_executable_edit->setText(
             QDir::toNativeSeparators(path));
@@ -1027,11 +1010,11 @@ void BridgeWindow::updateDashboard() {
         QString::number(configuration_.recorder_port));
     ui_->storage_label->setText(gibText(path_result_.available_storage_bytes));
     ui_->drop_label->setText(
-        "Display replacements " +
+        "Skipped preview frames " +
         QString::number(dashboard.preview_replaced_frames) +
-        "; input backlog discarded " +
+        "; discarded queued samples " +
         QString::number(dashboard.preview_coalesced_input_samples) +
-        "; latency " + QString::number(dashboard.preview_latency_ms) + " ms");
+        "; delay " + QString::number(dashboard.preview_latency_ms) + " ms");
     ui_->verification_details_button->setEnabled(
         verification_report_.state != RecordingVerificationState::NotRun);
     ui_->open_verified_recording_button->setEnabled(
@@ -1292,7 +1275,7 @@ void BridgeWindow::updateReadiness() {
         ? "bridge not required"
         : (bridge_streaming_ && !bridge_status_stale_
             ? "bridge streaming at " + ui_->frame_rate_label->text()
-            : "bridge unavailable or stale");
+            : "bridge unavailable or not recently updated");
     const QString recorder_text = configuration_.record_every_visible_stream
         ? recorderConnectionStateText(labrecorder_client_->connectionState())
         : (resolveAllowlistExecutable().isEmpty()
@@ -1331,19 +1314,13 @@ void BridgeWindow::onStart() {
                             state == ComponentLifecycleState::Failed
                                 ? EventSeverity::Error : EventSeverity::Information,
                             detail);
+                if (state == ComponentLifecycleState::Failed) {
+                    dashboard_.workflow = SessionWorkflowState::Failed;
+                }
                 updateDashboard();
                 if (guided_start_pending_) advanceGuidedStart();
                 if (guided_stop_pending_) advanceGuidedStop();
                 if (close_pending_) updateShutdownStatus();
-            });
-    connect(worker_, &BridgeWorker::terminal,
-            this, [this](BridgeExitResult result, const QString& message) {
-                if (result == BridgeExitResult::Failed) {
-                    dashboard_.workflow =
-                        SessionWorkflowState::Failed;
-                    appendEvent(SessionComponent::Bridge, EventSeverity::Error,
-                                message);
-                }
             });
     connect(worker_, &QThread::finished,
             this, &BridgeWindow::onWorkerFinished);
@@ -1419,7 +1396,7 @@ void BridgeWindow::onStatusStaleCheck() {
     bridge_effective_rate_ = 0.0;
     ui_->frame_rate_label->setText("0.0 Hz");
     appendEvent(SessionComponent::Bridge, EventSeverity::Warning,
-                "Bridge status became stale after three seconds without an update");
+                "Bridge has not reported an update for three seconds");
     updateReadiness();
     updateDashboard();
 }
@@ -1513,7 +1490,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
                             configuration_.recording_streams.cbegin(),
                             configuration_.recording_streams.cend(),
                             [&identity](const StreamBinding& binding) {
-                                return identityMatchesBinding(identity, binding);
+                                return binding.matches(identity);
                             });
                         if (configured != configuration_.recording_streams.cend()) {
                             identity.selected = true;
@@ -1537,7 +1514,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
                         missing.present = false;
                         missing.freshness_ms = -1;
                         missing.warning =
-                            "Previously selected identity is not currently visible";
+                            "Previously selected stream is not currently visible";
                         reconciled.push_back(std::move(missing));
                     }
                 }
@@ -2026,7 +2003,7 @@ void BridgeWindow::requestVerification() {
     verification_file_elapsed_.restart();
     verification_file_timer_->start();
     appendEvent(SessionComponent::Verification, EventSeverity::Information,
-                "Waiting for the recorder to finalize the exact output before verification");
+                "Waiting for the recorder to finish writing the file before checking it");
     onVerificationFilePoll();
 }
 
@@ -2094,7 +2071,7 @@ void BridgeWindow::startVerifier() {
         if (close_pending_) updateShutdownStatus();
     });
     appendEvent(SessionComponent::Verification, EventSeverity::Information,
-                "Background recording verification started");
+                "Recording file check started");
     started->start();
 }
 
@@ -2119,7 +2096,7 @@ void BridgeWindow::finishVerification(
         output_exists && policy_passed) {
         ui_->run_spin->setValue(ui_->run_spin->value() + 1);
         appendEvent(SessionComponent::Path, EventSeverity::Information,
-                    "Run incremented after completed recording verification");
+                    "Run incremented after a successful file check");
     }
     updateDashboard();
     if (guided_stop_pending_) advanceGuidedStop();
@@ -2205,7 +2182,7 @@ void BridgeWindow::onExportDiagnostics() {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         appendEvent(SessionComponent::Application, EventSeverity::Error,
-                    "Could not export diagnostics: " + file.errorString());
+                    "Could not export session details: " + file.errorString());
         return;
     }
     const QByteArray bytes =
@@ -2231,7 +2208,7 @@ void BridgeWindow::onShowVerificationDetails() {
             (finding.corrective_action.isEmpty()
                 ? QString() : "\n  Action: " + finding.corrective_action));
     }
-    QMessageBox::information(this, "Recording Verification",
+    QMessageBox::information(this, "Recording File Check",
                              lines.join("\n\n"));
 }
 
@@ -2347,7 +2324,7 @@ void BridgeWindow::updateShutdownStatus() {
         now_ms);
     session_controller_.updateShutdownComponent(
         SessionComponent::Verification, verification_done,
-        verification_done ? "Stopped" : "Canceling verification",
+        verification_done ? "Stopped" : "Canceling file check",
         now_ms);
 
     const bool recorder_deadline =

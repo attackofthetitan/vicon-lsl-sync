@@ -1,5 +1,4 @@
 #include "gui/BridgeWindow.h"
-#include "gui/GuiServices.h"
 
 #include <QApplication>
 #include <QDir>
@@ -26,10 +25,7 @@ int main(int argc, char* argv[]) {
     configuration.recorder_automatic_launch = false;
     vicon_lsl::gui::SessionConfigurationStore::save(*settings, configuration);
 
-    vicon_lsl::gui::GuiServices services =
-        vicon_lsl::gui::defaultGuiServices();
-    services.settings = std::move(settings);
-    BridgeWindow window(nullptr, true, std::move(services));
+    BridgeWindow window(nullptr, true, std::move(settings));
 
     QTimer::singleShot(0, [&app, &window]() {
         const QSize target_size(800, 600);

@@ -4,7 +4,6 @@
 #include "gui/PreviewWidget.h"
 #include "gui/PreviewFileLoader.h"
 #include "gui/CalibrationProfileStore.h"
-#include "gui/GuiServices.h"
 #include "gui/SessionConfiguration.h"
 #include "gui/SessionController.h"
 #include "preview/PreviewCalibration.h"
@@ -13,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QWidget>
 
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -23,6 +23,7 @@ class QPushButton;
 class QSpinBox;
 class QTimer;
 class QProgressBar;
+class QSettings;
 class QSlider;
 class QCheckBox;
 class QComboBox;
@@ -35,13 +36,11 @@ class PreviewPanel : public QWidget {
     Q_OBJECT
 
 public:
-    explicit PreviewPanel(QWidget* parent = nullptr,
-                          gui::GuiServices services = gui::defaultGuiServices());
+    PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings);
     ~PreviewPanel() override;
 
     bool stairModelLoaded() const { return stair_model_loaded_; }
-    bool configurableTooltipsPresent() const;
-    bool accessibilityContractSatisfied() const;
+    bool passesInterfaceChecks() const;
     ComponentLifecycleState lifecycleState() const { return lifecycle_state_; }
     QVector<vicon_lsl::gui::StreamIdentity> streamInventory() const;
     void applySessionConfiguration(const vicon_lsl::gui::SessionConfiguration& configuration);
@@ -53,7 +52,6 @@ public:
     QString calibrationQualityText() const;
     bool calibrationMetadataCompatible() const { return calibration_metadata_compatible_; }
     PreviewDeliveryMetrics deliveryMetrics() const;
-    QString currentRecordingPath() const { return current_recording_path_; }
     void openRecording(const QString& path);
 
 public slots:
@@ -99,6 +97,7 @@ private slots:
     void updateMeasuredStairPose();
 
 private:
+    bool controlsHaveTooltips() const;
     PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
@@ -204,8 +203,7 @@ private:
     bool calibration_metadata_compatible_ = true;
     QElapsedTimer calibration_progress_throttle_;
     PreviewDeliveryMetrics last_delivery_metrics_;
-    QString current_recording_path_;
-    gui::GuiServices services_;
+    std::shared_ptr<QSettings> settings_;
 };
 
 } // namespace vicon_lsl

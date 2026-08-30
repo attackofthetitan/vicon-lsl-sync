@@ -145,7 +145,7 @@ void RecordingVerifier::run() {
     report.started_at = now_utc();
     report.state = RecordingVerificationState::Running;
     emit lifecycleChanged(ComponentLifecycleState::Starting,
-                          "Opening recorded XDF for verification");
+                          "Opening the recorded XDF for a file check");
     try {
         PreviewLoadOptions options;
         options.maximum_file_bytes = PerformanceBudgets::MaximumXdfFileBytes;
@@ -168,10 +168,10 @@ void RecordingVerifier::run() {
                                  percent, QString::fromStdString(progress.detail));
         };
         emit lifecycleChanged(ComponentLifecycleState::Running,
-                              "Verifying stream headers and timestamps");
+                              "Checking streams and sample times");
         const XdfLoadResult loaded = loadXdfNumericStreams(request_.path.toStdString(), options);
         if (cancel_requested_.load() || isInterruptionRequested()) {
-            throw std::runtime_error("Recording verification canceled");
+            throw std::runtime_error("Recording file check canceled");
         }
 
         report.file_size_bytes = static_cast<qint64>(loaded.file_size_bytes);
@@ -214,30 +214,30 @@ void RecordingVerifier::run() {
             if (stream.sample_count == 0) {
                 addFinding(report, EventSeverity::Error, "empty-stream", label,
                            label + " contains no samples",
-                           "Confirm the publisher was producing data during the run.");
+                           "Confirm the stream source was sending data during the run.");
             }
             if (stream.repaired_timestamp_count > 0) {
                 addFinding(report, EventSeverity::Warning, "timestamp-repair", label,
                            label + " required " +
                                QString::number(stream.repaired_timestamp_count) +
                                " timestamp repair(s)",
-                           "Inspect the source clock and XDF footer diagnostics.");
+                           "Check the source clock and XDF file details.");
             }
             if (stream.large_gap_count > 0) {
                 addFinding(report, EventSeverity::Warning, "sample-gaps", label,
                            label + " contains " + QString::number(stream.large_gap_count) +
                                " large sample gap(s); maximum " +
                                QString::number(stream.maximum_sample_gap, 'f', 3) + " s",
-                           "Check source connectivity and publisher health.");
+                           "Check the stream source and its connection.");
             }
             if (stream.nominal_srate > 0.0 && item.effective_rate > 0.0 &&
                 item.effective_rate < stream.nominal_srate * 0.8) {
                 addFinding(report, EventSeverity::Warning, "effective-rate", label,
-                           label + " effective rate " +
+                           label + " measured rate " +
                                QString::number(item.effective_rate, 'f', 1) +
-                               " Hz is below nominal " +
+                               " Hz is below the expected " +
                                QString::number(stream.nominal_srate, 'f', 1) + " Hz",
-                           "Compare with the preflight rate and source drop counters.");
+                           "Compare this with the rate shown before recording and the source's dropped-sample count.");
             }
         }
         if (std::isfinite(earliest) && std::isfinite(latest) && latest >= earliest) {
@@ -264,15 +264,15 @@ void RecordingVerifier::run() {
                            expected.name + " recorded " +
                                QString::number(found->channel_count) + " channels; expected " +
                                QString::number(expected.expected_channels),
-                           "Use the compatible publisher schema.");
+                           "Use a stream source with the expected channel layout.");
             }
             if (!expected.expected_coordinate_frame.isEmpty() &&
                 QString::fromStdString(found->coordinate_frame) !=
                     expected.expected_coordinate_frame) {
                 addFinding(report, EventSeverity::Error, "coordinate-frame-mismatch",
                            expected.name,
-                           expected.name + " coordinate frame does not match the session preset",
-                           "Select a compatible calibration and publisher.");
+                           expected.name + " coordinate name does not match the saved session",
+                           "Select a matching saved calibration and stream source.");
             }
         }
 
@@ -286,9 +286,9 @@ void RecordingVerifier::run() {
                 addFinding(report, expected.required ? EventSeverity::Error
                                                      : EventSeverity::Warning,
                            "preflight-selection-missing", expected.name,
-                           "A stream selected at preflight is absent from the recording: " +
+                           "A stream selected during the setup check is absent from the recording: " +
                                expected.displayText(),
-                           "Compare stream recovery identity and recorder selection.");
+                           "Check which stream source reconnected and what the recorder selected.");
             }
         }
 
@@ -318,10 +318,10 @@ void RecordingVerifier::run() {
         report.completed_at = now_utc();
         report.state = RecordingVerificationState::NeedsAttention;
         addFinding(report, EventSeverity::Error, "verification-failure", {},
-                   "Unknown recording verification failure");
+                   "Unknown recording file-check failure");
         emit verificationFinished(report);
         emit lifecycleChanged(ComponentLifecycleState::Failed,
-                              "Unknown recording verification failure");
+                              "Unknown recording file-check failure");
     }
 }
 

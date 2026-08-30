@@ -75,7 +75,8 @@ void RecorderProcessController::endOwnedProcess() {
 
 void RecorderProcessController::detach() {
     if (!process_ || process_->state() == QProcess::NotRunning) {
-        setState(RecorderProcessState::Detached, "No running child process remains attached");
+        setState(RecorderProcessState::Detached,
+                 "No recorder started here is still connected to the app");
         return;
     }
     QProcess* detached_process = process_;
@@ -88,7 +89,7 @@ void RecorderProcessController::detach() {
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             detached_process, &QObject::deleteLater);
     setState(RecorderProcessState::Detached,
-             "Process detached and will not be ended by this application");
+             "Recorder disconnected from the app and will keep running");
     kind_ = RecorderProcessKind::None;
 }
 
@@ -121,7 +122,7 @@ QStringList RecorderProcessController::allowlistArguments(
     QString* error) {
     const QFileInfo output(absolute_output_path);
     if (!output.isAbsolute()) {
-        if (error) *error = "Allowlist recording requires an absolute output path";
+        if (error) *error = "Exact recording requires an absolute output path";
         return {};
     }
     QStringList arguments{QDir::toNativeSeparators(output.absoluteFilePath())};
@@ -145,7 +146,7 @@ QStringList RecorderProcessController::allowlistArguments(
         arguments.push_back(query);
     }
     if (arguments.size() < 2) {
-        if (error) *error = "Select at least one visible stream for allowlist recording";
+        if (error) *error = "Select at least one visible stream for exact recording";
         return {};
     }
     if (error) error->clear();
@@ -161,8 +162,8 @@ void RecorderProcessController::drainOutput() {
 void RecorderProcessController::onStarted() {
     setState(RecorderProcessState::OwnedRunning,
              kind_ == RecorderProcessKind::AllowlistRecorder
-                 ? "Allowlist recorder started"
-                 : "Recorder process started");
+                 ? "Selected-stream recorder started"
+                 : "Recorder started");
     if (kind_ == RecorderProcessKind::AllowlistRecorder) {
         emit recordingStateChanged(RecorderRecordingState::Recording);
     }
@@ -188,7 +189,7 @@ void RecorderProcessController::onFinished(int exit_code,
         emit recordingStateChanged(RecorderRecordingState::Stopped);
     }
     setState(RecorderProcessState::OwnedExited,
-             QString("Recorder process exited with code %1%2")
+             QString("Recorder stopped with code %1%2")
                  .arg(exit_code)
                  .arg(status == QProcess::CrashExit ? " after a crash" : ""));
     emit processExited(exit_code, expected, finished_kind);
@@ -206,7 +207,7 @@ void RecorderProcessController::onTerminateDeadline() {
     if (!process_ || process_->state() == QProcess::NotRunning) return;
     process_->kill();
     emit outputLine(EventSeverity::Warning,
-                    "Owned recorder did not exit after termination and was ended forcibly");
+                    "Recorder did not stop in time and was forced to close");
 }
 
 bool RecorderProcessController::startProcess(RecorderProcessKind kind,
@@ -215,13 +216,13 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind,
                                              QString* error) {
     const QFileInfo info(executable);
     if (!info.exists() || !info.isFile()) {
-        const QString message = "Recorder executable does not exist: " + executable;
+        const QString message = "Recorder program was not found: " + executable;
         if (error) *error = message;
         setState(RecorderProcessState::LaunchFailed, message);
         return false;
     }
     if (process_ && process_->state() != QProcess::NotRunning) {
-        if (error) *error = "An owned recorder process is already running";
+        if (error) *error = "A recorder started by this app is already running";
         return false;
     }
     if (process_) {
@@ -243,7 +244,6 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &RecorderProcessController::onFinished);
     kind_ = kind;
-    executable_ = QDir::toNativeSeparators(info.absoluteFilePath());
     stop_requested_ = false;
     ending_owned_process_ = false;
     detached_ = false;
@@ -251,9 +251,10 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind,
     partial_line_.clear();
     setState(RecorderProcessState::Launching,
              kind == RecorderProcessKind::AllowlistRecorder
-                 ? "Launching allowlist recorder"
-                 : "Launching recorder");
-    process_->start(executable_, arguments, QIODevice::ReadWrite);
+                 ? "Starting selected-stream recorder"
+                 : "Starting recorder");
+    process_->start(QDir::toNativeSeparators(info.absoluteFilePath()),
+                    arguments, QIODevice::ReadWrite);
     if (error) error->clear();
     return true;
 }
@@ -297,7 +298,7 @@ void RecorderProcessController::appendOutput(const QByteArray& bytes,
 QString RecorderProcessController::queryLiteral(const QString& value,
                                                 QString* error) {
     if (value.contains('\n') || value.contains('\r')) {
-        if (error) *error = "Stream identity contains a line break";
+        if (error) *error = "Stream source contains a line break";
         return {};
     }
     if (!value.contains('\'')) {
@@ -308,7 +309,7 @@ QString RecorderProcessController::queryLiteral(const QString& value,
         if (error) error->clear();
         return "\"" + value + "\"";
     }
-    if (error) *error = "Stream identity contains both quote styles and cannot form a safe query";
+    if (error) *error = "Stream source contains both quote styles and cannot be selected safely";
     return {};
 }
 

@@ -122,7 +122,7 @@ void boundPreviewRecordingCache(PreviewRecording& recording,
             recording.estimated_memory_bytes > maximum_memory_bytes)) {
         if (recording.frames.size() <= 2) {
             throw std::runtime_error(
-                "Preview cache budget is too small for two decoded frames");
+                "The preview memory limit is too small to load two frames");
         }
         compactFrames(recording);
         recording.estimated_memory_bytes = estimatePreviewRecordingBytes(recording);
@@ -251,9 +251,10 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
 
     std::ostringstream summary;
     summary << recording.source_frame_count << " source frame(s), "
-            << recording.frames.size() << " cached frame(s) at stride "
-            << recording.stored_frame_stride << ", " << labels.size() << " column(s), "
-            << recording.estimated_memory_bytes / (1024 * 1024) << " MiB estimated cache";
+            << recording.frames.size() << " loaded frame(s), showing every "
+            << recording.stored_frame_stride << " frame(s), " << labels.size()
+            << " column(s), "
+            << recording.estimated_memory_bytes / (1024 * 1024) << " MiB memory";
     recording.summary = summary.str();
     reportProgress(options, PreviewLoadStage::Complete, file_size, file_size, recording.summary);
     return recording;

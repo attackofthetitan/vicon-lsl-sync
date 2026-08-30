@@ -94,8 +94,8 @@ QDoubleSpinBox* makeQuaternionSpin(double value = 0.0) {
 
 } // namespace
 
-PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
-    : QWidget(parent), services_(std::move(services)) {
+PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
+    : QWidget(parent), settings_(std::move(settings)) {
     qRegisterMetaType<vicon_lsl::PreviewFrame>("vicon_lsl::PreviewFrame");
     qRegisterMetaType<vicon_lsl::CalibrationTargetPose>("vicon_lsl::CalibrationTargetPose");
     setAcceptDrops(true);
@@ -165,8 +165,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
                            1, 0);
     stream_grid->addWidget(gaze_stream_edit_, 1, 1);
     stream_grid->addWidget(makeTooltipLabel(
-                               "Match tol. (s):", tolerance_spin_,
-                               "Maximum timestamp gap, in seconds, when matching preview samples."),
+                               "Max time gap (s):", tolerance_spin_,
+                               "Largest time difference allowed when matching preview samples."),
                            1, 2);
     stream_grid->addWidget(tolerance_spin_, 1, 3);
     stream_grid->addWidget(makeTooltipLabel(
@@ -185,8 +185,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
                            3, 0);
     stream_grid->addWidget(calibration_stream_edit_, 3, 1);
     stream_grid->addWidget(makeTooltipLabel(
-                               "Playback cache:", cache_megabytes_spin_,
-                               "Maximum memory retained by each indexed or decoded playback cache."),
+                               "Playback memory:", cache_megabytes_spin_,
+                               "Maximum memory used while reading and displaying a recording."),
                            3, 2);
     stream_grid->addWidget(cache_megabytes_spin_, 3, 3);
     stream_grid->setColumnStretch(1, 1);
@@ -236,26 +236,26 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     calibration_row->addStretch(1);
     alignment_layout->addLayout(calibration_row);
 
-    auto* profiles_group = new QGroupBox("Managed Calibration Profile");
+    auto* profiles_group = new QGroupBox("Saved Calibration");
     auto* profiles_layout = new QVBoxLayout(profiles_group);
     auto* profile_form = new QFormLayout();
     calibration_profile_combo_ = new QComboBox();
     calibration_profile_combo_->setToolTip(
-        "Saved calibration setup. Automatic solutions remain session-only until explicitly saved.");
+        "Saved calibration setup. Automatic results remain available only for this session until saved.");
     calibration_profile_name_edit_ = new QLineEdit();
-    calibration_profile_name_edit_->setToolTip("Human-readable calibration profile name.");
+    calibration_profile_name_edit_->setToolTip("Name shown for this saved calibration.");
     calibration_setup_id_edit_ = new QLineEdit();
     calibration_setup_id_edit_->setToolTip(
-        "Stable identifier for the physical stair, room, and tracker arrangement.");
+        "Name used to identify this stair, room, and tracker arrangement.");
     calibration_notes_edit_ = new QLineEdit();
     calibration_notes_edit_->setToolTip("Setup notes needed to reproduce the physical alignment.");
     gaze_frame_edit_ = new QLineEdit("hololens_stationary_shared_with_gaze");
     target_frame_edit_ = new QLineEdit("hololens_stationary_shared_with_gaze");
-    gaze_frame_edit_->setToolTip("Coordinate-frame identifier expected on the gaze stream.");
-    target_frame_edit_->setToolTip("Coordinate-frame identifier expected on the stair-target stream.");
-    profile_form->addRow("Profile:", calibration_profile_combo_);
+    gaze_frame_edit_->setToolTip("Coordinate name expected on the gaze stream.");
+    target_frame_edit_->setToolTip("Coordinate name expected on the stair-target stream.");
+    profile_form->addRow("Saved calibration:", calibration_profile_combo_);
     profile_form->addRow("Name:", calibration_profile_name_edit_);
-    profile_form->addRow("Physical setup ID:", calibration_setup_id_edit_);
+    profile_form->addRow("Setup name:", calibration_setup_id_edit_);
     profile_form->addRow("Setup notes:", calibration_notes_edit_);
     profile_form->addRow("Gaze frame:", gaze_frame_edit_);
     profile_form->addRow("Target frame:", target_frame_edit_);
@@ -289,18 +289,18 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     auto* profile_buttons = new QHBoxLayout();
     auto* apply_profile_button = new QPushButton("Apply");
     auto* save_profile_button = new QPushButton("Save Session Calibration");
-    auto* duplicate_profile_button = new QPushButton("Duplicate");
-    auto* retire_profile_button = new QPushButton("Retire");
+    auto* duplicate_profile_button = new QPushButton("Copy");
+    auto* retire_profile_button = new QPushButton("Hide");
     auto* import_profile_button = new QPushButton("Import");
     auto* export_profile_button = new QPushButton("Export");
-    apply_profile_button->setToolTip("Apply the selected saved profile to live preview and diagnostics.");
+    apply_profile_button->setToolTip("Apply the selected saved calibration to the live preview and session details.");
     save_profile_button->setToolTip(
-        "Persist the current session calibration with physical setup and quality metadata.");
-    duplicate_profile_button->setToolTip("Duplicate the selected profile with a new stable ID.");
+        "Save the current calibration with its physical setup and quality details.");
+    duplicate_profile_button->setToolTip("Copy the selected calibration with a separate ID.");
     retire_profile_button->setToolTip(
-        "Hide the selected profile from normal selection without deleting its history.");
-    import_profile_button->setToolTip("Import a versioned calibration profile JSON file.");
-    export_profile_button->setToolTip("Export the selected calibration profile as JSON.");
+        "Hide the selected calibration without deleting it from past session records.");
+    import_profile_button->setToolTip("Import a saved calibration file.");
+    export_profile_button->setToolTip("Export the selected calibration to a file.");
     profile_buttons->addWidget(apply_profile_button);
     profile_buttons->addWidget(save_profile_button);
     profile_buttons->addWidget(duplicate_profile_button);
@@ -311,7 +311,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     calibration_quality_label_ = new QLabel("Quality: not calibrated");
     calibration_quality_label_->setObjectName("calibrationQuality");
     calibration_quality_label_->setWordWrap(true);
-    calibration_metadata_label_ = new QLabel("Coordinate metadata: not observed");
+    calibration_metadata_label_ = new QLabel("Coordinate details: not observed");
     calibration_metadata_label_->setWordWrap(true);
     profiles_layout->addWidget(calibration_quality_label_);
     profiles_layout->addWidget(calibration_metadata_label_);
@@ -343,9 +343,9 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     status_label_ = new QLabel("Preview stopped");
     status_label_->setWordWrap(true);
     delivery_metrics_label_ = new QLabel(
-        "display replacements 0 | input backlog discarded 0 | latency 0 ms");
+        "skipped preview frames 0 | discarded queued samples 0 | delay 0 ms");
     delivery_metrics_label_->setToolTip(
-        "Frames intentionally replaced before display and latest-frame display latency.");
+        "Older preview updates are skipped so the display stays current.");
     auto* fit_view_button = new QPushButton("Fit View");
     auto* reset_camera_button = new QPushButton("Reset Camera");
     auto* export_image_button = new QPushButton("Export Image");
@@ -367,7 +367,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
 
     auto* load_row = new QHBoxLayout();
     file_state_label_ = new QLabel("No recording loaded");
-    memory_label_ = new QLabel("cache 0 MiB");
+    memory_label_ = new QLabel("memory 0 MiB");
     load_progress_ = new QProgressBar();
     load_progress_->setRange(0, 100);
     load_progress_->setValue(0);
@@ -401,12 +401,12 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     jump_forward_button->setAccessibleName("Jump forward by selected time");
     step_forward_button->setAccessibleName("Step one frame forward");
     jump_end_button->setAccessibleName("Jump to recording end");
-    jump_start_button->setToolTip("Seek to the first cached frame.");
-    step_back_button->setToolTip("Seek one cached frame backward.");
+    jump_start_button->setToolTip("Go to the first loaded frame.");
+    step_back_button->setToolTip("Go back one loaded frame.");
     jump_back_button->setToolTip("Seek backward by the selected time interval.");
     jump_forward_button->setToolTip("Seek forward by the selected time interval.");
-    step_forward_button->setToolTip("Seek one cached frame forward.");
-    jump_end_button->setToolTip("Seek to the final cached frame.");
+    step_forward_button->setToolTip("Go forward one loaded frame.");
+    jump_end_button->setToolTip("Go to the final loaded frame.");
     timeline_slider_ = new QSlider(Qt::Horizontal);
     timeline_slider_->setRange(0, 10000);
     timeline_slider_->setEnabled(false);
@@ -465,10 +465,10 @@ PreviewPanel::PreviewPanel(QWidget* parent, gui::GuiServices services)
     status_label_->setAccessibleName("Preview status");
     delivery_metrics_label_->setAccessibleName("Preview delivery health");
     file_state_label_->setAccessibleName("Recording file load state");
-    memory_label_->setAccessibleName("Playback cache memory estimate");
+    memory_label_->setAccessibleName("Playback memory estimate");
     playback_position_label_->setAccessibleName("Playback time and frame position");
-    calibration_quality_label_->setAccessibleName("Persistent calibration quality");
-    calibration_metadata_label_->setAccessibleName("Calibration metadata compatibility");
+    calibration_quality_label_->setAccessibleName("Saved calibration quality");
+    calibration_metadata_label_->setAccessibleName("Calibration coordinate details");
 
     connect(start_button_, &QPushButton::clicked, this, &PreviewPanel::startPreview);
     connect(stop_button_, &QPushButton::clicked, this, &PreviewPanel::stopPreview);
@@ -685,7 +685,7 @@ void PreviewPanel::exportPreviewImage() {
     setStatus("Exported preview image to " + QDir::toNativeSeparators(normalized));
 }
 
-bool PreviewPanel::configurableTooltipsPresent() const {
+bool PreviewPanel::controlsHaveTooltips() const {
     const QWidget* const controls[] = {
         marker_stream_edit_,
         segment_stream_edit_,
@@ -760,7 +760,7 @@ void PreviewPanel::startPreview() {
     config.vicon_transform.scale = 0.001;
     config.gaze_transform = gazeTransform();
 
-    worker_ = services_.create_preview_worker(std::move(config), this);
+    worker_ = new PreviewStreamWorker(std::move(config), this);
     worker_stopping_ = false;
     PreviewStreamWorker* const started_worker = worker_;
     connect(worker_, &PreviewStreamWorker::targetPoseReady, this, &PreviewPanel::handleTargetPose);
@@ -802,8 +802,8 @@ void PreviewPanel::startPreview() {
                     calibrationCoordinateFramesCompatible(gaze_frame.toStdString(),
                                                           target_frame.toStdString());
                 calibration_metadata_label_->setText(calibration_metadata_compatible_
-                    ? "Coordinate metadata: compatible (" + gaze_frame + ")"
-                    : "Coordinate metadata: missing, fallback, or incompatible");
+                    ? "Coordinate details: matching (" + gaze_frame + ")"
+                    : "Coordinate details: missing or do not match");
                 emit streamInventoryChanged(latest_stream_inventory_);
                 emit calibrationStateChanged(sessionCalibrationState(),
                                              calibrationQualityText(),
@@ -831,14 +831,15 @@ void PreviewPanel::startPreview() {
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
-    setStatus("Preview resolving configured LSL streams; stair calibration is ready on request...");
+    setStatus("Finding the selected LSL streams; stair calibration is ready when requested...");
     lifecycle_state_ = ComponentLifecycleState::Starting;
-    emit lifecycleChanged(lifecycle_state_, "Resolving configured streams");
+    emit lifecycleChanged(lifecycle_state_, "Finding selected streams");
     live_render_timer_->start();
     worker_->start();
 }
 
-bool PreviewPanel::accessibilityContractSatisfied() const {
+bool PreviewPanel::passesInterfaceChecks() const {
+    if (!controlsHaveTooltips()) return false;
     if (!widget_ || widget_->accessibleName().trimmed().isEmpty() ||
         !timeline_slider_ || timeline_slider_->accessibleName().trimmed().isEmpty()) {
         return false;
@@ -873,7 +874,7 @@ void PreviewPanel::stopPreview() {
     stop_button_->setEnabled(false);
     open_csv_button_->setEnabled(false);
     open_xdf_button_->setEnabled(false);
-    setStatus("Preview stopping asynchronously...");
+    setStatus("Preview stopping in the background...");
 }
 
 void PreviewPanel::displayLatestLiveFrame() {
@@ -890,17 +891,17 @@ void PreviewPanel::displayLatestLiveFrame() {
     const bool late = metrics.display_latency_ms >
         gui::PerformanceBudgets::MaximumLivePreviewLatencyMs;
     delivery_metrics_label_->setText(
-        QString(late ? "PREVIEW LATE | display replacements "
-                     : "display replacements ") +
+        QString(late ? "PREVIEW DELAYED | skipped preview frames "
+                     : "skipped preview frames ") +
         QString::number(metrics.replaced_before_display) +
-        " | input backlog discarded " +
+        " | discarded queued samples " +
         QString::number(metrics.coalesced_input_samples) +
-        " | latency " + QString::number(metrics.display_latency_ms) + " ms");
+        " | delay " + QString::number(metrics.display_latency_ms) + " ms");
     delivery_metrics_label_->setToolTip(
-        late ? "Display latency exceeds the documented live-preview budget of " +
+        late ? "Preview delay is above the " +
                    QString::number(gui::PerformanceBudgets::MaximumLivePreviewLatencyMs) +
-                   " ms; source-rate measurements remain independent."
-             : "Latest-frame delivery is within the live-preview latency budget.");
+                   " ms target; source-rate measurements are unaffected."
+             : "Preview updates are arriving within the delay target.");
     emit deliveryMetricsChanged(metrics);
 }
 
@@ -911,14 +912,14 @@ void PreviewPanel::beginCalibration() {
     }
     if (!calibration_metadata_compatible_) {
         const auto answer = QMessageBox::warning(
-            this, "Coordinate metadata unavailable",
-            "Gaze and stair-target coordinate metadata is missing or incompatible. "
-            "Continue with fallback compatibility for this session?",
+            this, "Coordinate details unavailable",
+            "Gaze and stair-target coordinate details are missing or do not match. "
+            "Continue for this session anyway?",
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (answer != QMessageBox::Yes) {
             updateCalibrationPersistentStatus(
                 gui::SessionCalibrationState::Failed,
-                "Calibration rejected: coordinate metadata was not confirmed", false);
+                "Calibration canceled because the coordinate details were not confirmed", false);
             return;
         }
     }
@@ -995,7 +996,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     calibration_samples_.clear();
     if (!solution) {
         calibration_rejection_reason_ =
-            "Translation or rotation RMS exceeded the selected profile limits";
+            "Position or angle error exceeded the selected limits";
         setStatus("Calibration failed: " + calibration_rejection_reason_);
         updateCalibrationPersistentStatus(gui::SessionCalibrationState::Failed,
             "Quality: rejected — " + calibration_rejection_reason_,
@@ -1012,17 +1013,16 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         worker_->setGazeTransform(gazeTransform());
     }
     widget_->requestViewRefit();
-    setStatus("Stair-target calibration " + QString::fromStdString(profile.id) +
-              " applied for this session (RMS " +
+    setStatus("Stair-target calibration applied for this session (position error " +
               QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
-              " mm, " + QString::number(solution->quality.rotation_rms_degrees, 'f', 2) +
-              " deg)");
+              " mm, angle error " +
+              QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg)");
     updateCalibrationPersistentStatus(
         gui::SessionCalibrationState::AutomaticSession,
         "Quality: " + QString::number(solution->quality.sample_count) +
-            " samples, translation RMS " +
+            " samples, position error " +
             QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) +
-            " mm, rotation RMS " +
+            " mm, angle error " +
             QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg",
         calibration_metadata_compatible_);
 }
@@ -1149,13 +1149,13 @@ void PreviewPanel::applyLoadedRecording(PreviewFileLoader* loader,
     widget_->setFrame(csv_frames_.front());
     play_csv_button_->setEnabled(true);
     timeline_slider_->setEnabled(true);
-    memory_label_->setText("cache " + QString::number(
+    memory_label_->setText("memory " + QString::number(
         static_cast<double>(loaded->estimated_memory_bytes) / (1024.0 * 1024.0), 'f', 1) +
         " MiB");
     file_state_label_->setText("Loaded " + QFileInfo(loader->path()).fileName());
-    current_recording_path_ = QDir::toNativeSeparators(
+    const QString recording_path = QDir::toNativeSeparators(
         QFileInfo(loader->path()).absoluteFilePath());
-    emit fileStateChanged(gui::SessionFileState::Loaded, current_recording_path_);
+    emit fileStateChanged(gui::SessionFileState::Loaded, recording_path);
     rememberRecentFile(loader->path());
     updatePlaybackDisplay();
     setStatus("Loaded " + QFileInfo(loader->path()).fileName() + " (" + summary + ")");
@@ -1166,7 +1166,7 @@ void PreviewPanel::requestRecordedStreamMapping(
     const XdfMappingAnalysis& analysis) {
     if (file_loader_ != loader) return;
     QDialog dialog(this);
-    dialog.setWindowTitle("Map recorded streams");
+    dialog.setWindowTitle("Choose Recorded Streams");
     auto* layout = new QVBoxLayout(&dialog);
     auto* explanation = new QLabel(QString::fromStdString(analysis.explanation));
     explanation->setWordWrap(true);
@@ -1446,24 +1446,24 @@ PreviewTransformProfile PreviewPanel::stairTransform() const {
 
 void PreviewPanel::loadCalibrationProfiles() {
     calibration_profiles_ =
-        gui::CalibrationProfileStore::load(*services_.settings);
+        gui::CalibrationProfileStore::load(*settings_);
     const gui::SessionConfiguration configuration =
-        gui::SessionConfigurationStore::load(*services_.settings);
+        gui::SessionConfigurationStore::load(*settings_);
     refreshCalibrationProfileUi(configuration.calibration_profile_id);
 }
 
 void PreviewPanel::saveCalibrationProfiles() {
     QString error;
     if (!gui::CalibrationProfileStore::save(
-            *services_.settings, calibration_profiles_, &error)) {
-        setStatus("Could not save calibration profiles: " + error);
+            *settings_, calibration_profiles_, &error)) {
+        setStatus("Could not save calibrations: " + error);
         return;
     }
     gui::SessionConfiguration configuration =
-        gui::SessionConfigurationStore::load(*services_.settings);
+        gui::SessionConfigurationStore::load(*settings_);
     configuration.calibration_profile_id =
         calibration_profile_combo_->currentData().toString();
-    gui::SessionConfigurationStore::save(*services_.settings, configuration);
+    gui::SessionConfigurationStore::save(*settings_, configuration);
 }
 
 void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
@@ -1513,9 +1513,9 @@ void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
     if (profile->quality.sample_count > 0) {
         calibration_quality_label_->setText(
             "Saved quality: " + QString::number(profile->quality.sample_count) +
-            " samples, translation RMS " +
+            " samples, position error " +
             QString::number(profile->quality.translation_rms_m * 1000.0, 'f', 1) +
-            " mm, rotation RMS " +
+            " mm, angle error " +
             QString::number(profile->quality.rotation_rms_degrees, 'f', 2) + " deg");
     }
 }
@@ -1558,7 +1558,7 @@ void PreviewPanel::applySelectedCalibrationProfile() {
     if (!profile) return;
     QString reason;
     if (!profile->complete(&reason)) {
-        setStatus("Calibration profile is incomplete: " + reason);
+        setStatus("Saved calibration is incomplete: " + reason);
         return;
     }
     bool metadata_matches = true;
@@ -1575,12 +1575,12 @@ void PreviewPanel::applySelectedCalibrationProfile() {
     if ((!calibration_metadata_compatible_ || !metadata_matches) &&
         !profile->metadata_fallback_confirmed) {
         const auto answer = QMessageBox::warning(
-            this, "Calibration metadata mismatch",
-            "The live coordinate metadata is missing or differs from this profile. "
-            "Apply the profile using fallback compatibility?",
+            this, "Calibration coordinates do not match",
+            "The live coordinate details are missing or differ from this saved calibration. "
+            "Apply it for this session anyway?",
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (answer != QMessageBox::Yes) {
-            setStatus("Calibration profile was not applied because metadata was not confirmed");
+            setStatus("Saved calibration was not applied because the coordinate details were not confirmed");
             return;
         }
         profile->metadata_fallback_confirmed = true;
@@ -1595,19 +1595,19 @@ void PreviewPanel::applySelectedCalibrationProfile() {
     updateCalibrationPersistentStatus(
         gui::SessionCalibrationState::SavedProfile,
         profile->quality.sample_count > 0
-            ? "Quality: saved translation RMS " +
+            ? "Quality: saved position error " +
                   QString::number(profile->quality.translation_rms_m * 1000.0, 'f', 1) +
-                  " mm, rotation RMS " +
+                  " mm, angle error " +
                   QString::number(profile->quality.rotation_rms_degrees, 'f', 2) + " deg"
-            : "Quality: saved profile has no measured RMS values",
+            : "Quality: saved calibration has no measured error values",
         calibration_metadata_compatible_ && metadata_matches);
-    setStatus("Applied calibration profile " + profile->display_name);
+    setStatus("Applied saved calibration " + profile->display_name);
 }
 
 void PreviewPanel::saveSessionCalibrationProfile() {
     if (calibration_state_ != CalibrationState::AutomaticSession &&
         calibration_state_ != CalibrationState::SavedProfile) {
-        setStatus("Solve or apply a calibration before saving a managed profile");
+        setStatus("Complete or apply a calibration before saving it");
         return;
     }
     gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
@@ -1638,7 +1638,7 @@ void PreviewPanel::saveSessionCalibrationProfile() {
     profile.metadata_fallback_confirmed = !calibration_metadata_compatible_;
     QString reason;
     if (!profile.complete(&reason)) {
-        setStatus("Cannot save calibration profile: " + reason);
+        setStatus("Cannot save calibration: " + reason);
         return;
     }
     if (create_new) {
@@ -1652,7 +1652,7 @@ void PreviewPanel::saveSessionCalibrationProfile() {
     updateCalibrationPersistentStatus(gui::SessionCalibrationState::SavedProfile,
                                       calibrationQualityText(),
                                       calibration_metadata_compatible_);
-    setStatus("Saved calibration profile " + profile.display_name);
+    setStatus("Saved calibration " + profile.display_name);
 }
 
 void PreviewPanel::duplicateCalibrationProfile() {
@@ -1663,7 +1663,7 @@ void PreviewPanel::duplicateCalibrationProfile() {
     calibration_profiles_.push_back(duplicate);
     saveCalibrationProfiles();
     refreshCalibrationProfileUi(duplicate.id);
-    setStatus("Duplicated calibration profile as " + duplicate.display_name);
+    setStatus("Copied calibration as " + duplicate.display_name);
 }
 
 void PreviewPanel::retireCalibrationProfile() {
@@ -1671,25 +1671,25 @@ void PreviewPanel::retireCalibrationProfile() {
     if (!selected) return;
     const QString id = selected->id;
     const auto answer = QMessageBox::question(
-        this, "Retire calibration profile",
-        "Stop using " + selected->display_name + "? Past session records keep its ID.",
+        this, "Hide saved calibration",
+        "Hide " + selected->display_name + " from the list? Past session records will keep it.",
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes) return;
     if (gui::CalibrationProfileStore::retire(calibration_profiles_, id)) {
         saveCalibrationProfiles();
         refreshCalibrationProfileUi();
-        setStatus("Calibration profile retired");
+        setStatus("Saved calibration hidden");
     }
 }
 
 void PreviewPanel::importCalibrationProfile() {
     const QString path = QFileDialog::getOpenFileName(
-        this, "Import calibration profile", QString(), "JSON files (*.json)");
+        this, "Import saved calibration", QString(), "Calibration files (*.json)");
     if (path.isEmpty()) return;
     gui::ManagedCalibrationProfile profile;
     QString error;
     if (!gui::CalibrationProfileStore::importProfile(path, profile, &error)) {
-        setStatus("Could not import calibration profile: " + error);
+        setStatus("Could not import calibration: " + error);
         return;
     }
     if (std::any_of(calibration_profiles_.begin(), calibration_profiles_.end(),
@@ -1700,22 +1700,22 @@ void PreviewPanel::importCalibrationProfile() {
     calibration_profiles_.push_back(profile);
     saveCalibrationProfiles();
     refreshCalibrationProfileUi(profile.id);
-    setStatus("Imported calibration profile " + profile.display_name);
+    setStatus("Imported calibration " + profile.display_name);
 }
 
 void PreviewPanel::exportCalibrationProfile() {
     const gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
     if (!profile) return;
     const QString path = QFileDialog::getSaveFileName(
-        this, "Export calibration profile", profile->id + ".json",
-        "JSON files (*.json)");
+        this, "Export saved calibration", profile->id + ".json",
+        "Calibration files (*.json)");
     if (path.isEmpty()) return;
     QString error;
     if (!gui::CalibrationProfileStore::exportProfile(path, *profile, &error)) {
-        setStatus("Could not export calibration profile: " + error);
+        setStatus("Could not export calibration: " + error);
         return;
     }
-    setStatus("Exported calibration profile to " + QDir::toNativeSeparators(path));
+    setStatus("Exported calibration to " + QDir::toNativeSeparators(path));
 }
 
 void PreviewPanel::updateMeasuredStairPose() {
@@ -1740,7 +1740,7 @@ void PreviewPanel::updateCalibrationPersistentStatus(
 
 void PreviewPanel::loadSettings() {
     gui::SessionConfiguration configuration =
-        gui::SessionConfigurationStore::load(*services_.settings);
+        gui::SessionConfigurationStore::load(*settings_);
     applySessionConfiguration(configuration);
     resetCalibrationSession();
     QString stair_model = configuration.stair_model_path.trimmed();
@@ -1750,7 +1750,7 @@ void PreviewPanel::loadSettings() {
     stair_model_edit_->setText(stair_model);
     const QStringList recent_files =
         gui::SessionConfigurationStore::loadUiState(
-            *services_.settings).recent_recordings;
+            *settings_).recent_recordings;
     recent_files_combo_->clear();
     for (const QString& path : recent_files) {
         if (!path.trimmed().isEmpty()) {
@@ -1761,17 +1761,17 @@ void PreviewPanel::loadSettings() {
 
 void PreviewPanel::saveSettings() const {
     gui::SessionConfiguration configuration =
-        gui::SessionConfigurationStore::load(*services_.settings);
+        gui::SessionConfigurationStore::load(*settings_);
     updateSessionConfiguration(configuration);
-    gui::SessionConfigurationStore::save(*services_.settings, configuration);
+    gui::SessionConfigurationStore::save(*settings_, configuration);
     gui::SessionUiState ui_state =
-        gui::SessionConfigurationStore::loadUiState(*services_.settings);
+        gui::SessionConfigurationStore::loadUiState(*settings_);
     QStringList recent_files;
     for (int index = 0; index < recent_files_combo_->count(); ++index) {
         recent_files.push_back(recent_files_combo_->itemData(index).toString());
     }
     ui_state.recent_recordings = recent_files;
-    gui::SessionConfigurationStore::saveUiState(*services_.settings, ui_state);
+    gui::SessionConfigurationStore::saveUiState(*settings_, ui_state);
 }
 
 QString PreviewPanel::defaultStairModelPath() const {

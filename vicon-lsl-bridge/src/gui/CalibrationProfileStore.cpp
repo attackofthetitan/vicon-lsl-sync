@@ -92,13 +92,13 @@ bool ManagedCalibrationProfile::complete(QString* reason) const {
         if (reason) *reason = text;
         return false;
     };
-    if (id.trimmed().isEmpty()) return fail("Profile ID is required");
-    if (display_name.trimmed().isEmpty()) return fail("Display name is required");
-    if (physical_setup_id.trimmed().isEmpty()) return fail("Physical setup ID is required");
-    if (stair_model_identity.trimmed().isEmpty()) return fail("Stair-model identity is required");
+    if (id.trimmed().isEmpty()) return fail("Saved calibration ID is required");
+    if (display_name.trimmed().isEmpty()) return fail("Calibration name is required");
+    if (physical_setup_id.trimmed().isEmpty()) return fail("Setup name is required");
+    if (stair_model_identity.trimmed().isEmpty()) return fail("Stair model file is required");
     if (gaze_coordinate_frame.trimmed().isEmpty() ||
         target_coordinate_frame.trimmed().isEmpty()) {
-        return fail("Gaze and target coordinate frames are required");
+        return fail("Gaze and target coordinate names are required");
     }
     if (!finiteRigid(vicon_from_target)) return fail("Measured Vicon stair pose is invalid");
     if (!created_at.isValid()) return fail("Creation time is invalid");
@@ -144,7 +144,7 @@ ManagedCalibrationProfile ManagedCalibrationProfile::fromJson(
     ManagedCalibrationProfile result;
     const int stored_version = object.value("version").toInt(0);
     if (stored_version != CurrentVersion) {
-        if (error) *error = "Unsupported calibration profile version";
+        if (error) *error = "This saved calibration file version is not supported";
         return {};
     }
     result.version = CurrentVersion;
@@ -212,7 +212,7 @@ bool CalibrationProfileStore::save(
     settings.setValue("session/calibrationProfiles",
                       QJsonDocument(serialized).toJson(QJsonDocument::Compact));
     if (settings.status() != QSettings::NoError) {
-        if (error) *error = "Could not save calibration profiles";
+        if (error) *error = "Could not save calibrations";
         return false;
     }
     if (error) error->clear();
@@ -307,7 +307,7 @@ bool CalibrationProfileStore::importProfile(
     QJsonParseError parse_error;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parse_error);
     if (parse_error.error != QJsonParseError::NoError || !document.isObject()) {
-        if (error) *error = "Invalid calibration profile JSON: " + parse_error.errorString();
+        if (error) *error = "Could not read the calibration file: " + parse_error.errorString();
         return false;
     }
     profile = ManagedCalibrationProfile::fromJson(document.object(), error);

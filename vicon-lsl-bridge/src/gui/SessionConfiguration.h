@@ -57,6 +57,7 @@ struct StreamBinding {
     double expected_nominal_rate = 0.0;
     QString expected_coordinate_frame;
 
+    bool matches(const StreamIdentity& identity) const;
     QJsonObject toJson() const;
     static StreamBinding fromJson(const QJsonObject& object);
 };
@@ -152,7 +153,6 @@ public:
                            const QString& name,
                            SessionConfiguration& configuration,
                            QString* error = nullptr);
-    static bool removePreset(QSettings& settings, const QString& name);
     static bool exportConfiguration(const QString& path,
                                     const SessionConfiguration& configuration,
                                     QString* error = nullptr);

@@ -119,11 +119,11 @@ QString PreflightResult::summary() const {
         }
     }
     if (failures.isEmpty()) {
-        return "Preflight passed";
+        return "Setup check passed";
     }
     QString result = failures.join("\n");
     if (override_used) {
-        result += "\nOverride: " + override_reason;
+        result += "\nRecorded anyway because: " + override_reason;
     }
     return result;
 }
@@ -196,22 +196,22 @@ QString componentLifecycleStateText(ComponentLifecycleState state) {
 QString recorderProcessStateText(RecorderProcessState state) {
     switch (state) {
         case RecorderProcessState::External: return "External";
-        case RecorderProcessState::Launching: return "Launching";
-        case RecorderProcessState::OwnedRunning: return "Owned running";
-        case RecorderProcessState::OwnedExited: return "Owned exited";
-        case RecorderProcessState::LaunchFailed: return "Launch failed";
-        case RecorderProcessState::Detached: return "Detached";
+        case RecorderProcessState::Launching: return "Starting";
+        case RecorderProcessState::OwnedRunning: return "Started here";
+        case RecorderProcessState::OwnedExited: return "Started here, now stopped";
+        case RecorderProcessState::LaunchFailed: return "Could not start";
+        case RecorderProcessState::Detached: return "Disconnected from app";
     }
     return "External";
 }
 
 QString verificationStateText(RecordingVerificationState state) {
     switch (state) {
-        case RecordingVerificationState::NotRun: return "Not verified";
-        case RecordingVerificationState::Running: return "Verifying";
-        case RecordingVerificationState::Verified: return "Verified";
-        case RecordingVerificationState::VerifiedWithWarnings: return "Verified with warnings";
+        case RecordingVerificationState::NotRun: return "Not checked";
+        case RecordingVerificationState::Running: return "Checking";
+        case RecordingVerificationState::Verified: return "Checked";
+        case RecordingVerificationState::VerifiedWithWarnings: return "Checked with warnings";
         case RecordingVerificationState::NeedsAttention: return "Needs attention";
     }
-    return "Not verified";
+    return "Not checked";
 }

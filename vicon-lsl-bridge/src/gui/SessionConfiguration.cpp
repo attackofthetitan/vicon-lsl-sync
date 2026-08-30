@@ -125,11 +125,13 @@ StreamIdentity StreamIdentity::fromJson(const QJsonObject& object) {
     identity.nominal_rate = readDouble(object, "nominalRate", 0.0);
     identity.effective_rate = readDouble(object, "effectiveRate", 0.0);
     identity.coordinate_frame = readString(object, "coordinateFrame");
-    identity.metadata_complete = readBool(object, "metadataComplete", false);
-    identity.schema_compatible = readBool(object, "schemaCompatible", true);
-    identity.present = readBool(object, "present", true);
-    identity.selected = readBool(object, "selected", true);
-    identity.required = readBool(object, "required", false);
+    identity.metadata_complete = readBool(
+        object, "metadataComplete", identity.metadata_complete);
+    identity.schema_compatible = readBool(
+        object, "schemaCompatible", identity.schema_compatible);
+    identity.present = readBool(object, "present", identity.present);
+    identity.selected = readBool(object, "selected", identity.selected);
+    identity.required = readBool(object, "required", identity.required);
     identity.freshness_ms = static_cast<qint64>(readDouble(object, "freshnessMs", -1));
     identity.discovered_at = QDateTime::fromString(readString(object, "discoveredAt"),
                                                    Qt::ISODateWithMs);
@@ -186,7 +188,7 @@ StreamIdentitySelection selectStreamIdentity(
         if (binding.reconnection == StreamReconnectionMode::SourceIdentity) {
             return {-1, false, false,
                     "Selected source ID " + required_source +
-                        " is unavailable; no name-only fallback was used"};
+                        " is unavailable; the app did not switch to another stream with the same name"};
         }
     }
 
@@ -201,7 +203,15 @@ StreamIdentitySelection selectStreamIdentity(
     return {matches.front(), false, fallback,
             fallback
                 ? "Follow by name selected the first matching source"
-                : "Selected the only matching stream identity"};
+                : "Selected the only matching stream"};
+}
+
+bool StreamBinding::matches(const StreamIdentity& identity) const {
+    if (!source_id.trimmed().isEmpty() &&
+        reconnection == StreamReconnectionMode::SourceIdentity) {
+        return identity.source_id == source_id;
+    }
+    return identity.name == name;
 }
 
 QJsonObject StreamBinding::toJson() const {
@@ -220,7 +230,7 @@ StreamBinding StreamBinding::fromJson(const QJsonObject& object) {
     binding.name = readString(object, "name");
     binding.source_id = readString(object, "sourceId");
     binding.reconnection = parseReconnection(readString(object, "reconnection"));
-    binding.required = readBool(object, "required", false);
+    binding.required = readBool(object, "required", binding.required);
     binding.expected_channels = readInt(object, "expectedChannels", 0);
     binding.expected_nominal_rate = readDouble(object, "expectedNominalRate", 0.0);
     binding.expected_coordinate_frame = readString(object, "expectedCoordinateFrame");
@@ -309,7 +319,8 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& object, Q
     result.segment_output_name = readString(vicon, "segmentOutput", result.segment_output_name);
 
     const QJsonObject preview = object.value("preview").toObject();
-    result.preview_external_streams = readBool(preview, "externalStreams", false);
+    result.preview_external_streams = readBool(
+        preview, "externalStreams", result.preview_external_streams);
     if (preview.value("markers").isObject()) result.preview_markers = StreamBinding::fromJson(preview.value("markers").toObject());
     if (preview.value("segments").isObject()) result.preview_segments = StreamBinding::fromJson(preview.value("segments").toObject());
     if (preview.value("gaze").isObject()) result.preview_gaze = StreamBinding::fromJson(preview.value("gaze").toObject());
@@ -337,8 +348,10 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& object, Q
     result.recorder_host = readString(recorder, "host", result.recorder_host);
     result.recorder_port = std::clamp(readInt(recorder, "port", result.recorder_port), 1, 65535);
     result.recorder_executable = readString(recorder, "executable");
-    result.recorder_automatic_launch = readBool(recorder, "automaticLaunch", true);
-    result.record_every_visible_stream = readBool(recorder, "recordEveryVisible", true);
+    result.recorder_automatic_launch = readBool(
+        recorder, "automaticLaunch", result.recorder_automatic_launch);
+    result.record_every_visible_stream = readBool(
+        recorder, "recordEveryVisible", result.record_every_visible_stream);
     if (recorder.value("streams").isArray()) {
         result.recording_streams.clear();
         for (const QJsonValue& value : recorder.value("streams").toArray()) {
@@ -356,17 +369,24 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& object, Q
     result.acquisition = readString(recording, "acquisition", result.acquisition);
     result.modality = readString(recording, "modality", result.modality);
     result.storage_warning_gib = (std::max)(0.0, readDouble(recording, "storageWarningGiB", result.storage_warning_gib));
-    result.automatic_run_increment = readBool(recording, "automaticRunIncrement", false);
+    result.automatic_run_increment = readBool(
+        recording, "automaticRunIncrement", result.automatic_run_increment);
     result.increment_run_after_verified_only =
-        readBool(recording, "incrementAfterVerifiedOnly", true);
-    result.allow_overwrite = readBool(recording, "allowOverwrite", false);
-    result.allow_outside_study_root = readBool(recording, "allowOutsideStudyRoot", false);
+        readBool(recording, "incrementAfterVerifiedOnly",
+                 result.increment_run_after_verified_only);
+    result.allow_overwrite = readBool(
+        recording, "allowOverwrite", result.allow_overwrite);
+    result.allow_outside_study_root = readBool(
+        recording, "allowOutsideStudyRoot", result.allow_outside_study_root);
 
     const QJsonObject calibration = object.value("calibration").toObject();
     result.stair_model_path = readString(calibration, "stairModel");
     result.calibration_profile_id = readString(calibration, "profileId");
-    result.calibration_required = readBool(calibration, "required", false);
-    result.recorder_only_mode = readBool(object.value("workflow").toObject(), "recorderOnly", false);
+    result.calibration_required = readBool(
+        calibration, "required", result.calibration_required);
+    result.recorder_only_mode = readBool(
+        object.value("workflow").toObject(), "recorderOnly",
+        result.recorder_only_mode);
     result.version = CurrentVersion;
     result.bindPreviewOutputs();
     if (error) error->clear();
@@ -466,12 +486,6 @@ bool SessionConfigurationStore::loadPreset(QSettings& settings,
     configuration = loaded;
     if (error) error->clear();
     return true;
-}
-
-bool SessionConfigurationStore::removePreset(QSettings& settings, const QString& name) {
-    settings.remove("sessionPresets/" + name.trimmed());
-    settings.sync();
-    return settings.status() == QSettings::NoError;
 }
 
 bool SessionConfigurationStore::exportConfiguration(

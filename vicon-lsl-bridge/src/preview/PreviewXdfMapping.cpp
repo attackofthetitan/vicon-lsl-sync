@@ -238,9 +238,9 @@ XdfMappingAnalysis analyzeXdfStreamMapping(const XdfLoadResult& xdf) {
     if (groups.empty()) {
         analysis.explanation = "The XDF contains no supported marker, segment, or gaze preview stream.";
     } else if (analysis.requires_explicit_mapping) {
-        analysis.explanation = "Multiple incompatible candidates exist for at least one preview role; choose the intended identity and master timeline.";
+        analysis.explanation = "Several streams could fill the same preview role. Choose the streams and main time source to use.";
     } else {
-        analysis.explanation = "Compatible recovered stream instances will be stitched by source identity and schema.";
+        analysis.explanation = "Matching pieces from restarted streams will be joined automatically.";
     }
     return analysis;
 }

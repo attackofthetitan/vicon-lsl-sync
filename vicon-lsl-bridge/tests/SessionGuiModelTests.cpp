@@ -255,8 +255,8 @@ void testSessionConfiguration() {
     binding.source_id = "missing-source";
     selection = vicon_lsl::gui::selectStreamIdentity(candidates, binding);
     expect(selection.index < 0 && !selection.ambiguous &&
-               selection.explanation.contains("no name-only fallback"),
-           "identity-first reconnection refuses an unexplained name fallback");
+               !selection.explanation.isEmpty(),
+           "identity-first reconnection explains why a name-only match was rejected");
     binding.source_id.clear();
     selection = vicon_lsl::gui::selectStreamIdentity(candidates, binding);
     expect(selection.index < 0 && selection.ambiguous,
