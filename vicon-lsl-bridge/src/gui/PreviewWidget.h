@@ -2,7 +2,7 @@
 
 #include "preview/PreviewTypes.h"
 
-#include <QWidget>
+#include <QOpenGLWidget>
 #include <QPoint>
 
 #include <deque>
@@ -12,7 +12,7 @@
 
 namespace vicon_lsl {
 
-class PreviewWidget : public QWidget {
+class PreviewWidget : public QOpenGLWidget {
     Q_OBJECT
 
 public:
@@ -25,11 +25,10 @@ public:
 
 public slots:
     void setFrame(vicon_lsl::PreviewFrame frame);
-    void fitView();
-    void resetCamera();
 
 protected:
-    void paintEvent(QPaintEvent* event) override;
+    void initializeGL() override;
+    void paintGL() override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
@@ -49,7 +48,6 @@ private:
     Bounds currentSceneBounds() const;
     void resetViewFit();
     void lockViewToCurrentScene();
-    void expandViewToInclude(const Bounds& bounds);
     void includePoint(Bounds& bounds, const PreviewVec3& point) const;
     std::optional<PreviewVec3> gazeEndpoint(const PreviewGazeRay& ray, const Bounds& bounds) const;
 

@@ -7,8 +7,6 @@
 namespace vicon_lsl {
 
 void PreviewPlaybackClock::setTimeline(const std::vector<double>& timestamps) {
-    frame_timeline_ = nullptr;
-    frame_timeline_origin_ = 0.0;
     timeline_.clear();
     if (timestamps.empty()) {
         reset();
@@ -24,51 +22,12 @@ void PreviewPlaybackClock::setTimeline(const std::vector<double>& timestamps) {
         }
         const double relative = timestamp - first;
         if (!timeline_.empty() && relative < previous) {
-            throw std::invalid_argument("Playback times must always increase");
+            throw std::invalid_argument("Playback timeline is not monotonic");
         }
         timeline_.push_back(relative);
         previous = relative;
     }
     reset();
-}
-
-void PreviewPlaybackClock::setFrameTimeline(const std::vector<PreviewFrame>& frames) {
-    timeline_.clear();
-    frame_timeline_ = nullptr;
-    frame_timeline_origin_ = 0.0;
-    if (frames.empty()) {
-        reset();
-        return;
-    }
-    const double first = frames.front().timestamp;
-    double previous = 0.0;
-    for (const PreviewFrame& frame : frames) {
-        if (!std::isfinite(frame.timestamp)) {
-            throw std::invalid_argument("Playback timeline contains a non-finite timestamp");
-        }
-        const double relative = frame.timestamp - first;
-        if (relative < previous) {
-            throw std::invalid_argument("Playback times must always increase");
-        }
-        previous = relative;
-    }
-    frame_timeline_ = &frames;
-    frame_timeline_origin_ = first;
-    reset();
-}
-
-bool PreviewPlaybackClock::timelineEmpty() const {
-    return frame_timeline_ ? frame_timeline_->empty() : timeline_.empty();
-}
-
-std::size_t PreviewPlaybackClock::timelineSize() const {
-    return frame_timeline_ ? frame_timeline_->size() : timeline_.size();
-}
-
-double PreviewPlaybackClock::relativeTimestamp(std::size_t index) const {
-    return frame_timeline_
-        ? frame_timeline_->at(index).timestamp - frame_timeline_origin_
-        : timeline_.at(index);
 }
 
 void PreviewPlaybackClock::reset() {
@@ -78,7 +37,7 @@ void PreviewPlaybackClock::reset() {
 }
 
 void PreviewPlaybackClock::play(double monotonic_seconds) {
-    if (playing_ || timelineEmpty()) {
+    if (playing_ || timeline_.empty()) {
         return;
     }
     anchor_monotonic_seconds_ = monotonic_seconds;
@@ -104,66 +63,30 @@ void PreviewPlaybackClock::setSpeed(double speed, double monotonic_seconds) {
     speed_ = speed;
 }
 
-void PreviewPlaybackClock::setLooping(bool looping, double monotonic_seconds) {
-    if (playing_) {
-        paused_position_ = position(monotonic_seconds);
-        anchor_monotonic_seconds_ = monotonic_seconds;
-    }
-    looping_ = looping;
-}
-
-void PreviewPlaybackClock::seek(double position_seconds, double monotonic_seconds) {
-    if (!std::isfinite(position_seconds)) {
-        throw std::invalid_argument("Playback position must be finite");
-    }
-    paused_position_ = std::clamp(position_seconds, 0.0, duration());
-    anchor_monotonic_seconds_ = monotonic_seconds;
-}
-
 double PreviewPlaybackClock::position(double monotonic_seconds) const {
-    if (timelineEmpty()) {
+    if (timeline_.empty()) {
         return 0.0;
     }
     double current = paused_position_;
     if (playing_) {
         current += (std::max)(0.0, monotonic_seconds - anchor_monotonic_seconds_) * speed_;
     }
-    const double duration = relativeTimestamp(timelineSize() - 1);
-    if (looping_ && duration > 0.0 && current > duration) {
+    const double duration = timeline_.back();
+    if (duration > 0.0 && current > duration) {
         current = std::fmod(current, duration);
-    } else {
-        current = std::clamp(current, 0.0, duration);
     }
     return current;
 }
 
-double PreviewPlaybackClock::duration() const {
-    return timelineEmpty() ? 0.0 : relativeTimestamp(timelineSize() - 1);
-}
-
-bool PreviewPlaybackClock::atEnd(double monotonic_seconds) const {
-    return !timelineEmpty() && !looping_ &&
-           position(monotonic_seconds) >= duration();
-}
-
 std::size_t PreviewPlaybackClock::frameIndex(double monotonic_seconds) const {
-    if (timelineEmpty()) {
+    if (timeline_.empty()) {
         return 0;
     }
     const double current = position(monotonic_seconds);
-    std::size_t first = 0;
-    std::size_t count = timelineSize();
-    while (count > 0) {
-        const std::size_t step = count / 2;
-        const std::size_t candidate = first + step;
-        if (relativeTimestamp(candidate) <= current) {
-            first = candidate + 1;
-            count -= step + 1;
-        } else {
-            count = step;
-        }
-    }
-    return first == 0 ? 0 : first - 1;
+    const auto upper = std::upper_bound(timeline_.begin(), timeline_.end(), current);
+    return upper == timeline_.begin()
+               ? 0
+               : static_cast<std::size_t>(std::distance(timeline_.begin(), upper) - 1);
 }
 
 } // namespace vicon_lsl

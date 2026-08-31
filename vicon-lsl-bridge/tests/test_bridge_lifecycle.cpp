@@ -2,14 +2,11 @@
 #include "ViconLSLBridgeInternal.h"
 
 #include <chrono>
-#include <condition_variable>
 #include <functional>
 #include <iostream>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -32,14 +29,12 @@ public:
     bool expose_marker = false;
     bool expose_segment = false;
     std::function<void(int)> on_get_frame;
-    std::function<void()> on_connect;
     int connect_calls = 0;
     int disconnect_calls = 0;
     int get_frame_calls = 0;
 
     bool connect() override {
         ++connect_calls;
-        if (on_connect) on_connect();
         connected_ = connect_result;
         return connected_;
     }
@@ -321,81 +316,12 @@ void testStopDuringFrameReadStillCleansUp() {
            "stop destroys marker then segment outlets before disconnecting");
 }
 
-void testStopDuringConnectionSkipsRetryAndFrameWork() {
-    auto client = std::make_shared<FakeViconClient>();
-    client->connect_result = false;
-    auto outlets = std::make_shared<OutletState>();
-    int waits = 0;
-
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [&waits](std::chrono::milliseconds) { ++waits; };
-    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
-    client->on_connect = [raw_bridge = bridge.get()]() { raw_bridge->stop(); };
-    bridge->run();
-
-    expect(client->connect_calls == 1 && client->get_frame_calls == 0,
-           "stop during connection prevents frame and stream initialization work");
-    expect(waits == 0,
-           "stop during connection prevents a new reconnect wait");
-    expect(outlets->created == 0,
-           "stop during connection creates no LSL outlets");
-}
-
-void testStopDuringNonCancellableSdkDelayKeepsCallerResponsive() {
-    auto client = std::make_shared<FakeViconClient>();
-    client->available_frames = 0;
-    auto outlets = std::make_shared<OutletState>();
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool entered = false;
-    bool release = false;
-    client->on_get_frame = [&](int) {
-        std::unique_lock<std::mutex> lock(mutex);
-        entered = true;
-        condition.notify_all();
-        condition.wait(lock, [&release]() { return release; });
-    };
-
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [](std::chrono::milliseconds) {};
-    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
-    std::thread worker([&bridge]() { bridge->run(); });
-    {
-        std::unique_lock<std::mutex> lock(mutex);
-        condition.wait(lock, [&entered]() { return entered; });
-    }
-    const auto started = std::chrono::steady_clock::now();
-    bridge->stop();
-    const auto stop_elapsed = std::chrono::steady_clock::now() - started;
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        release = true;
-    }
-    condition.notify_all();
-    worker.join();
-
-    expect(stop_elapsed < std::chrono::milliseconds(50),
-           "stop request returns promptly while the SDK call remains isolated on its worker thread");
-    expect(client->get_frame_calls == 1 && outlets->created == 0,
-           "worker settles after the delayed SDK call without starting a new session");
-}
-
 } // namespace
 
 int main() {
     testInitialFrameFailureReconnectsWithoutDelay();
     testOutletFailureResetsAStreamingSession();
     testStopDuringFrameReadStillCleansUp();
-    testStopDuringConnectionSkipsRetryAndFrameWork();
-    testStopDuringNonCancellableSdkDelayKeepsCallerResponsive();
     if (failures != 0) {
         std::cerr << failures << " test failure(s)" << std::endl;
         return 1;

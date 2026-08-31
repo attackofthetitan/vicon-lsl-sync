@@ -8,7 +8,6 @@
 #include <iterator>
 #include <limits>
 #include <optional>
-#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -48,36 +47,31 @@ std::optional<std::size_t> nearestSampleIndex(const XdfStreamData& stream,
     return best;
 }
 
-const XdfStreamData* chooseMasterStream(const std::vector<XdfStreamData>& streams,
-                                        std::uint32_t preferred_stream_id) {
-    auto usable = [](const XdfStreamData& stream) {
-        return stream.numeric && !stream.timestamps.empty() && !stream.samples.empty() &&
-               (stream.role == PreviewStreamRole::ViconMarkers ||
-                stream.role == PreviewStreamRole::ViconSegments ||
-                stream.role == PreviewStreamRole::HoloLensGaze);
-    };
-    if (preferred_stream_id != 0) {
-        for (const auto& stream : streams) {
-            if (stream.stream_id == preferred_stream_id && usable(stream)) return &stream;
-        }
-        throw std::runtime_error("Selected XDF master timeline is not a supported preview stream");
-    }
+const XdfStreamData* uniqueStream(const std::vector<XdfStreamData>& streams,
+                                  PreviewStreamRole role) {
+    const XdfStreamData* match = nullptr;
     for (const auto& stream : streams) {
-        if (usable(stream) && stream.role == PreviewStreamRole::ViconMarkers) {
-            return &stream;
+        if (stream.role != role || !stream.numeric || stream.timestamps.empty() ||
+            stream.samples.empty()) {
+            continue;
         }
-    }
-    for (const auto& stream : streams) {
-        if (usable(stream) && stream.role == PreviewStreamRole::ViconSegments) {
-            return &stream;
+        if (match) {
+            throw std::runtime_error(
+                "XDF has more than one stream for the same preview input");
         }
+        match = &stream;
     }
-    for (const auto& stream : streams) {
-        if (usable(stream) && stream.role == PreviewStreamRole::HoloLensGaze) {
-            return &stream;
-        }
+    return match;
+}
+
+const XdfStreamData* chooseMasterStream(const std::vector<XdfStreamData>& streams) {
+    if (const auto* markers = uniqueStream(streams, PreviewStreamRole::ViconMarkers)) {
+        return markers;
     }
-    return nullptr;
+    if (const auto* segments = uniqueStream(streams, PreviewStreamRole::ViconSegments)) {
+        return segments;
+    }
+    return uniqueStream(streams, PreviewStreamRole::HoloLensGaze);
 }
 
 void appendStreamSample(PreviewFrame& frame,
@@ -119,14 +113,9 @@ std::string roleName(PreviewStreamRole role) {
 
 std::string buildSummary(const XdfLoadResult& xdf,
                          std::size_t frame_count,
-                         bool automatically_calibrated,
-                         bool tracker_local_gaze,
-                         const XdfStreamData* target_stream) {
+                         bool automatically_calibrated) {
     std::ostringstream summary;
     summary << xdf.streams.size() << " stream(s), " << frame_count << " frame(s)";
-    summary << "; used " << xdf.estimated_memory_bytes / (1024 * 1024)
-            << " MiB while reading a " << xdf.file_size_bytes / (1024 * 1024)
-            << " MiB file";
     if (xdf.truncated_tail_ignored) {
         summary << "; incomplete final chunk ignored";
     }
@@ -139,8 +128,6 @@ std::string buildSummary(const XdfLoadResult& xdf,
     }
     if (automatically_calibrated) {
         summary << "; stair-target calibration applied";
-    } else if (tracker_local_gaze && target_stream) {
-        summary << "; legacy tracker-local gaze shown without stair calibration";
     }
     for (const auto& stream : xdf.streams) {
         summary << "; "
@@ -148,14 +135,7 @@ std::string buildSummary(const XdfLoadResult& xdf,
                         ? "stream_" + std::to_string(stream.stream_id)
                         : stream.name)
                 << ": " << stream.sample_count << " sample(s), "
-                << stream.samples.size() << " loaded, keeping every "
-                << stream.stored_sample_stride << " sample(s), "
-                << stream.channel_count << " channel(s), " << roleName(stream.role)
-                << ", source " << (stream.source_id.empty() ? "<missing>" : stream.source_id)
-                << ", range " << stream.start_timestamp << ".." << stream.end_timestamp
-                << ", max gap " << stream.maximum_sample_gap
-                << ", " << stream.clock_offsets.size()
-                << " clock correction point(s)";
+                << stream.channel_count << " channel(s), " << roleName(stream.role);
     }
     return summary.str();
 }
@@ -166,36 +146,31 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                                    const PreviewTransformProfile& vicon_transform,
                                    const PreviewTransformProfile& gaze_transform,
                                    double match_tolerance_seconds,
-                                   std::uint32_t preferred_master_stream_id,
-                                   const PreviewLoadOptions& options) {
-    const XdfStreamData* master = chooseMasterStream(xdf.streams, preferred_master_stream_id);
+                                   const PreviewCancel& cancel) {
+    const XdfStreamData* master = chooseMasterStream(xdf.streams);
     if (!master) {
-        throw std::runtime_error("XDF contains no supported marker, segment, or gaze preview stream");
+        throw std::runtime_error("XDF contains no numeric streams with samples");
     }
 
-    const XdfStreamData* gaze_stream = nullptr;
-    const XdfStreamData* target_stream = nullptr;
-    for (const auto& stream : xdf.streams) {
-        if (!gaze_stream && stream.role == PreviewStreamRole::HoloLensGaze) {
-            gaze_stream = &stream;
-        } else if (!target_stream &&
-                   stream.role == PreviewStreamRole::HoloLensCalibrationTarget) {
-            target_stream = &stream;
-        }
-    }
+    const XdfStreamData* gaze_stream =
+        uniqueStream(xdf.streams, PreviewStreamRole::HoloLensGaze);
+    const XdfStreamData* target_stream =
+        uniqueStream(xdf.streams, PreviewStreamRole::HoloLensCalibrationTarget);
 
     PreviewTransformProfile resolved_gaze_transform = gaze_transform;
     bool automatically_calibrated = false;
-    bool tracker_local_gaze = false;
-    if (gaze_stream) {
-        tracker_local_gaze = lowerAscii(gaze_stream->coordinate_frame) == "eye_tracker_space";
-    }
-    if (gaze_stream && target_stream &&
-        calibrationCoordinateFramesCompatible(gaze_stream->coordinate_frame,
-                                              target_stream->coordinate_frame)) {
+    if (gaze_stream && target_stream) {
+        if (!calibrationCoordinateFramesCompatible(gaze_stream->coordinate_frame,
+                                                   target_stream->coordinate_frame)) {
+            throw std::runtime_error(
+                "Gaze and calibration target use different coordinate systems");
+        }
         std::vector<CalibrationTargetPose> target_poses;
         target_poses.reserve(target_stream->samples.size());
         for (const auto& sample : target_stream->samples) {
+            if (cancel && cancel()) {
+                throw std::runtime_error("Loading canceled");
+            }
             const auto pose = parseCalibrationTargetPose(target_stream->channel_labels, sample);
             if (pose) {
                 target_poses.push_back(*pose);
@@ -226,12 +201,10 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
         });
 
     PreviewRecording recording;
-    recording.source_frame_count = master->sample_count;
-    recording.stored_frame_stride = master->stored_sample_stride;
-    recording.source_start_timestamp = master->start_timestamp;
-    recording.source_end_timestamp = master->end_timestamp;
-    std::map<std::uint32_t, std::size_t> matched_samples;
     for (std::size_t master_index = 0; master_index < master->samples.size(); ++master_index) {
+        if ((master_index % 256) == 0 && cancel && cancel()) {
+            throw std::runtime_error("Loading canceled");
+        }
         const double absolute_timestamp = master->timestamps[master_index];
         PreviewFrame frame;
         frame.timestamp = absolute_timestamp - master->timestamps.front();
@@ -251,7 +224,6 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                     stream, absolute_timestamp, match_tolerance_seconds);
             }
             if (sample_index && *sample_index < stream.samples.size()) {
-                ++matched_samples[stream.stream_id];
                 appendStreamSample(frame,
                                    stream,
                                    stream.samples[*sample_index],
@@ -260,33 +232,12 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
             }
         }
 
-        appendBoundedPreviewFrame(recording, std::move(frame),
-                                  options.maximum_preview_frames,
-                                  options.maximum_memory_bytes);
+        recording.frames.push_back(std::move(frame));
     }
-
-    boundPreviewRecordingCache(recording, options.maximum_preview_frames,
-                               options.maximum_memory_bytes);
 
     recording.summary = buildSummary(xdf,
                                      recording.frames.size(),
-                                     automatically_calibrated,
-                                     tracker_local_gaze,
-                                     target_stream);
-    for (const XdfStreamData& stream : xdf.streams) {
-        if (&stream == master || stream.samples.empty()) continue;
-        const double matched = static_cast<double>(matched_samples[stream.stream_id]);
-        const double total = static_cast<double>(master->samples.size());
-        const double unmatched_percent = total > 0.0 ? 100.0 * (1.0 - matched / total) : 0.0;
-        std::ostringstream mapping_summary;
-        mapping_summary << "; " << roleName(stream.role) << " unmatched "
-                        << unmatched_percent << "%";
-        recording.summary += mapping_summary.str();
-    }
-    recording.summary += "; " +
-        std::to_string(recording.estimated_memory_bytes / (1024 * 1024)) +
-        " MiB loaded, showing every " +
-        std::to_string(recording.stored_frame_stride) + " frame(s)";
+                                     automatically_calibrated);
     return recording;
 }
 

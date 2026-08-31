@@ -33,34 +33,21 @@ bool LabRecorderRuntimePolicy::shouldAttemptConnection(
 
 bool LabRecorderRuntimePolicy::canRefreshStreams(
     RecorderConnectionState connection_state,
-    RecorderRecordingState recording_state,
-    RecorderOperationState operation_state,
-    bool shutdown_requested) {
+    RecorderRecordingState recording_state) {
     return connection_state == RecorderConnectionState::Connected &&
-           recording_state != RecorderRecordingState::Recording &&
-           operation_state == RecorderOperationState::Idle &&
-           !shutdown_requested;
+           recording_state != RecorderRecordingState::Recording;
 }
 
 bool LabRecorderRuntimePolicy::canStartRecording(
     RecorderConnectionState connection_state,
-    RecorderRecordingState recording_state,
-    RecorderOperationState operation_state,
-    bool shutdown_requested) {
+    RecorderRecordingState recording_state) {
     return connection_state == RecorderConnectionState::Connected &&
-           recording_state != RecorderRecordingState::Recording &&
-           operation_state == RecorderOperationState::Idle &&
-           !shutdown_requested;
+           recording_state != RecorderRecordingState::Recording;
 }
 
 bool LabRecorderRuntimePolicy::canStopRecording(
     RecorderConnectionState connection_state,
-    RecorderRecordingState recording_state,
-    RecorderOperationState operation_state,
-    bool shutdown_requested) {
+    RecorderRecordingState recording_state) {
     return connection_state == RecorderConnectionState::Connected &&
-           recording_state != RecorderRecordingState::Stopped &&
-           operation_state != RecorderOperationState::Stopping &&
-           operation_state != RecorderOperationState::ShuttingDown &&
-           !shutdown_requested;
+           recording_state != RecorderRecordingState::Stopped;
 }

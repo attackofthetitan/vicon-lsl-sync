@@ -1,5 +1,5 @@
 #include "LabRecorderClientTestSupport.h"
-#include "gui/LabRecorderClient.h"
+#include "gui/LabRecorderFilenamePolicy.h"
 
 namespace labrecorder_client_tests {
 
@@ -66,16 +66,14 @@ void testStartRecordingCommands() {
     fields.participant = "P002";
     fields.task = "Walk";
 
-    QStringList without_select =
-        LabRecorderFilenamePolicy::startRecordingCommands(fields, false);
+    QStringList without_select = LabRecorderFilenamePolicy::startRecordingCommands(fields, false);
     expect(without_select.size() == 2, "start command sequence without select-all has two commands");
     expect(without_select.value(0) ==
                "filename {root:/tmp/data} {template:sub-%p_task-%b.xdf} {participant:P002} {task:Walk}",
            "start command sequence includes filename command first");
     expect(without_select.value(1) == "start", "start command sequence starts recording last");
 
-    QStringList with_select =
-        LabRecorderFilenamePolicy::startRecordingCommands(fields, true);
+    QStringList with_select = LabRecorderFilenamePolicy::startRecordingCommands(fields, true);
     expect(with_select.size() == 4, "start command sequence with select-all has four commands");
     expect(with_select.value(0) == "update",
            "start command sequence refreshes newly available streams first");

@@ -68,10 +68,6 @@ TEST_CASE("Preview preserves raw eye-tracker basis and rejects world calibration
     REQUIRE(near(rays.front().direction.z, 1.0));
     REQUIRE(!vicon_lsl::calibrationCoordinateFramesCompatible(
         "eye_tracker_space", "hololens_stationary_shared_with_gaze"));
-    REQUIRE(vicon_lsl::calibrationCoordinateFramesCompatible(
-        "", "hololens_stationary_shared_with_gaze"));
-    REQUIRE(vicon_lsl::calibrationCoordinateFramesCompatible(
-        "hololens_stationary_shared_with_gaze", ""));
 }
 
 TEST_CASE("Preview recognizes the HoloLens stair target stream") {

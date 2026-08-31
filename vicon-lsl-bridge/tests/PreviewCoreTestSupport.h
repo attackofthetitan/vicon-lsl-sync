@@ -9,29 +9,14 @@
 #include <system_error>
 #include <vector>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 namespace preview_core_test_support {
-
-inline long currentProcessId() {
-#ifdef _WIN32
-    return static_cast<long>(_getpid());
-#else
-    return static_cast<long>(getpid());
-#endif
-}
 
 class TemporaryFilePath {
 public:
     explicit TemporaryFilePath(const char* suffix) {
         static std::atomic<unsigned long long> sequence{0};
         path_ = std::filesystem::temp_directory_path() /
-                ("vicon_lsl_preview_test_" + std::to_string(currentProcessId()) +
-                 "_" + std::to_string(++sequence) + suffix);
+                ("vicon_lsl_preview_test_" + std::to_string(++sequence) + suffix);
     }
 
     ~TemporaryFilePath() {

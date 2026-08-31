@@ -1,14 +1,10 @@
 #pragma once
 
 #include "preview/PreviewCsv.h"
-#include "preview/PreviewXdfMapping.h"
-#include "gui/SessionState.h"
 
-#include <QMutex>
+#include <QString>
 #include <QThread>
-#include <QWaitCondition>
 
-#include <atomic>
 #include <optional>
 
 namespace vicon_lsl {
@@ -18,7 +14,7 @@ enum class PreviewFileType {
     Xdf,
 };
 
-class PreviewFileLoader : public QThread {
+class PreviewFileLoader final : public QThread {
     Q_OBJECT
 
 public:
@@ -27,43 +23,23 @@ public:
                       PreviewTransformProfile vicon_transform,
                       PreviewTransformProfile gaze_transform,
                       double match_tolerance_seconds,
-                      PreviewLoadOptions options,
                       QObject* parent = nullptr);
-    ~PreviewFileLoader() override;
 
-    void cancel();
-    void provideMapping(const XdfStreamMapping& mapping);
     std::optional<PreviewRecording> takeRecording();
+    QString error() const { return error_; }
     QString path() const { return path_; }
-
-signals:
-    void progressChanged(QString stage, int percent, QString detail);
-    void mappingRequired(vicon_lsl::XdfMappingAnalysis analysis);
-    void loadSucceeded(QString summary);
-    void loadFailed(QString error, bool canceled);
-    void lifecycleChanged(ComponentLifecycleState state, QString detail);
 
 protected:
     void run() override;
 
 private:
-    bool canceled() const { return cancel_requested_.load(); }
-    XdfStreamMapping awaitMapping(const XdfMappingAnalysis& analysis);
-
     PreviewFileType type_;
     QString path_;
     PreviewTransformProfile vicon_transform_;
     PreviewTransformProfile gaze_transform_;
-    double match_tolerance_seconds_ = 0.05;
-    PreviewLoadOptions options_;
-    std::atomic<bool> cancel_requested_{false};
-    QMutex mutex_;
-    QWaitCondition mapping_available_;
-    bool have_mapping_ = false;
-    XdfStreamMapping mapping_;
+    double match_tolerance_seconds_;
     std::optional<PreviewRecording> recording_;
+    QString error_;
 };
 
 } // namespace vicon_lsl
-
-Q_DECLARE_METATYPE(vicon_lsl::XdfMappingAnalysis)

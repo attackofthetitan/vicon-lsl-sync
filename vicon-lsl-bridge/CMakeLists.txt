@@ -49,13 +49,11 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/preview/PreviewCsv.cpp
     src/preview/PreviewFrameAssembler.cpp
     src/preview/PreviewMath.cpp
-    src/preview/PreviewLoad.cpp
     src/preview/PreviewRate.cpp
     src/preview/PreviewPlaybackClock.cpp
     src/preview/PreviewParsing.cpp
     src/preview/PreviewXdf.cpp
     src/preview/PreviewXdfMetadata.cpp
-    src/preview/PreviewXdfMapping.cpp
     src/preview/PreviewXdfReader.cpp
     src/preview/PreviewXdfRecording.cpp
     src/preview/PreviewXdfTimestamps.cpp
@@ -141,39 +139,31 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     target_link_libraries(vicon-lsl-bridge PRIVATE vicon-lsl-bridge-runtime)
 
     if(VICON_LSL_BRIDGE_BUILD_GUI)
-        find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
+        find_package(Qt6 COMPONENTS Core Widgets Network OpenGLWidgets QUIET)
         if(Qt6_FOUND)
-            add_library(vicon-lsl-bridge-gui-components STATIC
+            add_executable(vicon-lsl-bridge-gui
+                src/gui/main_gui.cpp
                 src/gui/BridgeWindow.cpp
+                src/gui/BridgeWindowSettings.cpp
                 src/gui/BridgeWindowUi.cpp
                 src/gui/LabRecorderClient.cpp
                 src/gui/LabRecorderFilenamePolicy.cpp
                 src/gui/LabRecorderRuntimePolicy.cpp
-                src/gui/CalibrationProfileStore.cpp
-                src/gui/RecorderProcessController.cpp
-                src/gui/RecordingVerifier.cpp
-                src/gui/SessionConfiguration.cpp
-                src/gui/SessionState.cpp
-                src/gui/StreamDiscoveryWorker.cpp
                 src/gui/PreviewPanel.cpp
                 src/gui/PreviewFileLoader.cpp
                 src/gui/PreviewStreamWorker.cpp
                 src/gui/PreviewWidget.cpp
             )
-            set_target_properties(vicon-lsl-bridge-gui-components PROPERTIES
-                AUTOMOC ON)
+            set_target_properties(vicon-lsl-bridge-gui PROPERTIES AUTOMOC ON)
 
-            target_link_libraries(vicon-lsl-bridge-gui-components PUBLIC
+            target_link_libraries(vicon-lsl-bridge-gui PRIVATE
                 vicon-lsl-bridge-runtime
                 Qt6::Core
                 Qt6::Widgets
                 Qt6::Network
+                Qt6::OpenGLWidgets
             )
-            target_include_directories(vicon-lsl-bridge-gui-components PUBLIC src)
-
-            add_executable(vicon-lsl-bridge-gui src/gui/main_gui.cpp)
-            target_link_libraries(vicon-lsl-bridge-gui PRIVATE
-                vicon-lsl-bridge-gui-components)
+            target_include_directories(vicon-lsl-bridge-gui PRIVATE src)
             target_compile_definitions(vicon-lsl-bridge-gui PRIVATE
                 VICON_LSL_BRIDGE_VERSION="${PROJECT_VERSION}"
             )

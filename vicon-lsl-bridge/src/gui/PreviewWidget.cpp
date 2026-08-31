@@ -47,11 +47,9 @@ double radians(double degrees) {
 
 } // namespace
 
-PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
+PreviewWidget::PreviewWidget(QWidget* parent) : QOpenGLWidget(parent) {
     setMinimumSize(420, 320);
     setMouseTracking(true);
-    setFocusPolicy(Qt::StrongFocus);
-    setAccessibleName("Motion and gaze preview");
 }
 
 void PreviewWidget::setStairMesh(const PreviewMesh& mesh, const PreviewTransformProfile& transform) {
@@ -80,19 +78,6 @@ void PreviewWidget::requestViewRefit() {
     refit_on_next_frame_ = true;
 }
 
-void PreviewWidget::fitView() {
-    resetViewFit();
-    lockViewToCurrentScene();
-    update();
-}
-
-void PreviewWidget::resetCamera() {
-    azimuth_degrees_ = -64.0;
-    elevation_degrees_ = 24.0;
-    zoom_ = 1.0;
-    fitView();
-}
-
 void PreviewWidget::setFrame(PreviewFrame frame) {
     const bool rewound = have_previous_frame_timestamp_
         && std::isfinite(frame.timestamp)
@@ -103,17 +88,6 @@ void PreviewWidget::setFrame(PreviewFrame frame) {
         });
 
     frame_ = std::move(frame);
-    if (frame_.marker_stream_present) {
-        std::map<std::string, bool> current_names;
-        for (const auto& marker : frame_.markers) current_names[marker.name] = true;
-        for (auto it = marker_trails_.begin(); it != marker_trails_.end();) {
-            if (current_names.find(it->first) == current_names.end()) {
-                it = marker_trails_.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
     for (const auto& marker : frame_.markers) {
         if (!marker.valid || !isFinite(marker.position)) {
             continue;
@@ -137,16 +111,17 @@ void PreviewWidget::setFrame(PreviewFrame frame) {
     update();
 }
 
-void PreviewWidget::paintEvent(QPaintEvent*) {
+void PreviewWidget::initializeGL() {
+}
+
+void PreviewWidget::paintGL() {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    const QColor background = palette().color(QPalette::Window);
-    const QColor foreground = palette().color(QPalette::WindowText);
-    painter.fillRect(rect(), background);
+    painter.fillRect(rect(), QColor("#0e1419"));
 
     const Bounds bounds = view_bounds_.valid ? view_bounds_ : currentSceneBounds();
     if (!bounds.valid) {
-        painter.setPen(foreground);
+        painter.setPen(QColor("#b8c1cc"));
         painter.drawText(rect(), Qt::AlignCenter, "Preview waiting for LSL stream samples");
         return;
     }
@@ -226,29 +201,13 @@ void PreviewWidget::paintEvent(QPaintEvent*) {
         painter.drawEllipse(projected.point, 4.5, 4.5);
     }
 
-    const auto valid_markers = std::count_if(frame_.markers.begin(), frame_.markers.end(),
-        [](const PreviewMarker& marker) { return marker.valid && isFinite(marker.position); });
-    const auto valid_segments = std::count_if(frame_.segments.begin(), frame_.segments.end(),
-        [](const PreviewSegment& segment) { return segment.valid && isFinite(segment.position); });
-    const auto valid_gaze = std::count_if(frame_.gaze_rays.begin(), frame_.gaze_rays.end(),
-        [](const PreviewGazeRay& ray) { return ray.valid && isFinite(ray.origin) && isFinite(ray.direction); });
-    painter.setPen(foreground);
-    const QString status = QString("markers %1/%2 | segments %3/%4 | gaze %5/%6 | t %7 s")
-        .arg(valid_markers).arg(frame_.markers.size())
-        .arg(valid_segments).arg(frame_.segments.size())
-        .arg(valid_gaze).arg(frame_.gaze_rays.size())
+    painter.setPen(QColor("#d7dde5"));
+    const QString status = QString("markers %1 | segments %2 | gaze %3 | t %4")
+        .arg(frame_.markers.size())
+        .arg(frame_.segments.size())
+        .arg(frame_.gaze_rays.size())
         .arg(frame_.timestamp, 0, 'f', 3);
     painter.drawText(QRectF(10, 8, width() - 20, 24), Qt::AlignLeft | Qt::AlignVCenter, status);
-
-    const int legend_y = height() - 16;
-    painter.setPen(QPen(segmentXColor(), 2.0));
-    painter.drawText(10, legend_y, "X red");
-    painter.setPen(QPen(segmentYColor(), 2.0));
-    painter.drawText(62, legend_y, "Y green");
-    painter.setPen(QPen(segmentZColor(), 2.0));
-    painter.drawText(126, legend_y, "Z blue");
-    painter.setPen(foreground);
-    painter.drawText(190, legend_y, "positions: metres | dim/absent = invalid or occluded");
 }
 
 void PreviewWidget::mousePressEvent(QMouseEvent* event) {
@@ -341,24 +300,13 @@ void PreviewWidget::resetViewFit() {
 }
 
 void PreviewWidget::lockViewToCurrentScene() {
+    if (view_bounds_.valid) {
+        return;
+    }
     const Bounds bounds = currentSceneBounds();
-    if (!view_bounds_.valid && bounds.valid) {
+    if (bounds.valid) {
         view_bounds_ = bounds;
-    } else if (bounds.valid) {
-        expandViewToInclude(bounds);
     }
-}
-
-void PreviewWidget::expandViewToInclude(const Bounds& bounds) {
-    if (!bounds.valid) {
-        return;
-    }
-    if (!view_bounds_.valid) {
-        view_bounds_ = bounds;
-        return;
-    }
-    includePoint(view_bounds_, bounds.lower);
-    includePoint(view_bounds_, bounds.upper);
 }
 
 void PreviewWidget::includePoint(Bounds& bounds, const PreviewVec3& point) const {

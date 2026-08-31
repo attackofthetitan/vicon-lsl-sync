@@ -188,7 +188,7 @@ void testConnectionTimeoutDoesNotShortenCommandTimeout() {
            "refresh completes within the independent command deadline");
 }
 
-void testCommandTimeoutDisconnectsAndDropsQueuedWork() {
+void testCommandTimeoutRejectsConcurrentWork() {
     QTcpServer server;
     expect(server.listen(QHostAddress::LocalHost, 0), "timeout server listens");
     LabRecorderClient client;
@@ -204,14 +204,13 @@ void testCommandTimeoutDisconnectsAndDropsQueuedWork() {
                      [&failures](const QString&, bool ok, const QString&) {
                          if (!ok) ++failures;
                      });
-    expect(client.sendCommand("start"), "timeout command starts");
-    expect(!client.sendCommand("stop"), "concurrent command is rejected");
+    expect(client.sendCommand("start"), "timeout start command begins");
+    expect(!client.sendCommand("stop"), "second command is rejected while busy");
     expect(readCommand(socket.get()) == "start", "timeout server receives first command");
     expect(waitUntil([&client]() {
         return client.connectionState() == RecorderConnectionState::Error;
     }, 1000), "missing acknowledgement transitions connection to error");
-    expect(failures == 2,
-           "concurrent command rejection and timeout are reported");
+    expect(failures == 2, "rejected and timed-out commands each report failure");
     expect(client.recordingState() == RecorderRecordingState::Unknown,
            "timeout resets recording state");
     expect(!waitUntil([socket = socket.get()]() { return socket->canReadLine(); }, 100),
@@ -270,100 +269,6 @@ void testConnectionStateTracksIdleDisconnectAndReconnect() {
            "client reconnects after idle disconnect");
     expect(client.recordingState() == RecorderRecordingState::Unknown,
            "reconnect preserves unknown recording state until a command is acknowledged");
-}
-
-void testRecorderDuplicateAndShutdownProtocol() {
-    LabRecorderFilenameFields fields;
-    fields.root = "/tmp/data";
-    fields.templ = "run-%r.xdf";
-    fields.participant = "P001";
-    fields.session = "S001";
-    fields.task = "Reach";
-    fields.run = "1";
-    fields.acquisition = "vicon";
-    fields.modality = "beh";
-
-    {
-        QTcpServer server;
-        expect(server.listen(QHostAddress::LocalHost, 0),
-               "duplicate operation server listens");
-        LabRecorderClient client;
-        client.connectToServer("127.0.0.1", server.serverPort());
-        expect(waitUntil([&client]() { return client.isConnected(); }),
-               "duplicate operation client connects");
-        expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
-               "duplicate operation server accepts client");
-        std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
-        if (!socket) return;
-
-        expect(client.startRecording(fields, true), "first Start is accepted");
-        expect(!client.startRecording(fields, true),
-               "rapid duplicate Start is rejected");
-        expect(client.operationState() == RecorderOperationState::Starting,
-               "the single active Start is visible");
-        const QStringList commands = {
-            "update", "select all",
-            LabRecorderFilenamePolicy::filenameCommand(fields), "start",
-        };
-        for (const QString& command : commands) {
-            expect(readCommand(socket.get()) == command,
-                   "Start commands remain ordered");
-            expect(writeReply(socket.get(), "OK"),
-                   "duplicate operation server acknowledges Start command");
-        }
-        expect(waitUntil([&client]() {
-                   return client.recordingState() ==
-                          RecorderRecordingState::Recording;
-               }),
-               "single Start batch reaches Recording");
-        expect(client.stopRecording(), "first Stop is accepted");
-        expect(!client.stopRecording(), "rapid duplicate Stop is rejected");
-        expect(readCommand(socket.get()) == "stop",
-               "exactly one Stop reaches the server");
-        expect(writeReply(socket.get(), "OK"),
-               "server acknowledges the single Stop");
-        expect(waitUntil([&client]() {
-                   return client.recordingState() ==
-                          RecorderRecordingState::Stopped;
-               }) && client.activeOperation().isEmpty(),
-               "Stop settles in Idle");
-    }
-
-    {
-        QTcpServer server;
-        expect(server.listen(QHostAddress::LocalHost, 0),
-               "shutdown server listens");
-        LabRecorderClient client;
-        client.connectToServer("127.0.0.1", server.serverPort());
-        expect(waitUntil([&client]() { return client.isConnected(); }),
-               "shutdown client connects");
-        expect(waitUntil([&server]() { return server.hasPendingConnections(); }),
-               "shutdown server accepts client");
-        std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
-        if (!socket) return;
-        expect(client.startRecording(fields, true), "shutdown Start begins");
-        expect(readCommand(socket.get()) == "update", "Start preparation begins");
-        expect(client.beginShutdown(), "shutdown waits for active Start");
-        expect(!client.sendCommand("ignored"), "shutdown rejects new work");
-
-        const QStringList remaining = {
-            "select all", LabRecorderFilenamePolicy::filenameCommand(fields), "start",
-        };
-        expect(writeReply(socket.get(), "OK"), "first Start command is acknowledged");
-        for (const QString& command : remaining) {
-            expect(readCommand(socket.get()) == command, "Start finishes in order");
-            expect(writeReply(socket.get(), "OK"), "Start command is acknowledged");
-        }
-        expect(readCommand(socket.get()) == "stop",
-               "shutdown sends one Stop after Start completes");
-        expect(writeReply(socket.get(), "OK"), "shutdown Stop is acknowledged");
-        expect(waitUntil([&client]() { return client.shutdownReady(); }) &&
-                   client.shutdownSettledSafely() &&
-                   client.recordingState() == RecorderRecordingState::Stopped,
-               "shutdown reaches a safe stopped state");
-        expect(!waitUntil([socket = socket.get()]() { return socket->canReadLine(); }, 100),
-               "shutdown sends no duplicate Stop");
-    }
 }
 
 } // namespace labrecorder_client_tests

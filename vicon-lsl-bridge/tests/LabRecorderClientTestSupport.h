@@ -48,21 +48,14 @@ void testFilenameCommand();
 void testRenderedFilenameUsesSharedSanitization();
 void testUnresolvedFilenamePlaceholders();
 void testStartRecordingCommands();
+void testBridgeWindowSettingsContract();
 void testRuntimePolicy();
 void testTcpCommandSequence();
 void testTcpStartRecordingSequenceWithSelectAll();
 void testFragmentedReplyControlsCommandProgress();
 void testConnectionTimeoutDoesNotShortenCommandTimeout();
-void testCommandTimeoutDisconnectsAndDropsQueuedWork();
+void testCommandTimeoutRejectsConcurrentWork();
 void testMidCommandDisconnectReportsFailure();
 void testConnectionStateTracksIdleDisconnectAndReconnect();
-void testNormalizedPathPolicy();
-void testSessionConfiguration();
-void testSessionEventLog();
-void testCalibrationProfileStore();
-void testRecorderAllowlistPolicy();
-void testRecorderDuplicateAndShutdownProtocol();
-void testRecordingVerifierOutcomes();
-void testRecorderProcessControllerLifecycle();
 
 } // namespace labrecorder_client_tests
