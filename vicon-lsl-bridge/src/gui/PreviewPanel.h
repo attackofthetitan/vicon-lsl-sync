@@ -40,7 +40,6 @@ public:
     ~PreviewPanel() override;
 
     bool stairModelLoaded() const { return stair_model_loaded_; }
-    bool passesInterfaceChecks() const;
     ComponentLifecycleState lifecycleState() const { return lifecycle_state_; }
     QVector<vicon_lsl::gui::StreamIdentity> streamInventory() const;
     void applySessionConfiguration(const vicon_lsl::gui::SessionConfiguration& configuration);
@@ -48,9 +47,9 @@ public:
     void requestShutdown();
     bool shutdownReady() const;
     bool fileLoadActive() const { return file_loader_ != nullptr; }
-    vicon_lsl::gui::SessionCalibrationState sessionCalibrationState() const;
-    QString calibrationQualityText() const;
-    PreviewDeliveryMetrics deliveryMetrics() const;
+    vicon_lsl::gui::SessionCalibrationState sessionCalibrationState() const {
+        return calibration_state_;
+    }
     void openRecording(const QString& path);
 
 public slots:
@@ -96,7 +95,6 @@ private slots:
     void updateMeasuredStairPose();
 
 private:
-    bool controlsHaveTooltips() const;
     PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
@@ -188,7 +186,8 @@ private:
     QString pending_recording_path_;
     bool stair_model_loaded_ = false;
     ComponentLifecycleState lifecycle_state_ = ComponentLifecycleState::Idle;
-    CalibrationState calibration_state_ = CalibrationState::Manual;
+    gui::SessionCalibrationState calibration_state_ =
+        gui::SessionCalibrationState::Manual;
     PreviewTransformProfile automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;
     gui::StreamBinding marker_binding_;

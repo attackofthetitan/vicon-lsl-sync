@@ -131,7 +131,6 @@ struct BridgeWindowUi {
 
     LabRecorderFilenameFields filenameFields() const;
     void setBridgeInputsEnabled(bool enabled) const;
-    bool passesInterfaceChecks() const;
 };
 
 std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(

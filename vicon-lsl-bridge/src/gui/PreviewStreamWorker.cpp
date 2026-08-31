@@ -3,7 +3,6 @@
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewFrameAssembler.h"
 #include "preview/PreviewParsing.h"
-#include "gui/PerformanceBudgets.h"
 
 #include <lsl_cpp.h>
 
@@ -22,6 +21,8 @@ constexpr int kResolveRetryMs = 1000;
 constexpr int kStatusIntervalMs = 1000;
 constexpr int kStaleSampleMs = 500;
 constexpr double kGazeLowRateFraction = 0.8;
+constexpr double kMetadataTimeoutSeconds = 0.25;
+constexpr double kResolveTimeoutSeconds = 0.05;
 
 std::vector<std::string> channelLabels(lsl::stream_info info,
                                        PreviewStreamRole role,
@@ -264,7 +265,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
     try {
         auto streams = lsl::resolve_stream(
             "name", state.requested_name.toStdString(), 0,
-            gui::PerformanceBudgets::PreviewResolveTimeoutSeconds);
+            kResolveTimeoutSeconds);
         if (streams.empty()) {
             return false;
         }
@@ -330,8 +331,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         try {
             // Search results can omit channel details. The opened stream has
             // the full description, so read the details from it.
-            metadata = inlet->info(
-                gui::PerformanceBudgets::PreviewMetadataTimeoutSeconds);
+            metadata = inlet->info(kMetadataTimeoutSeconds);
         } catch (const std::exception&) {
             // Use the standard labels when a known HoloLens stream omits them.
         }

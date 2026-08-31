@@ -63,8 +63,6 @@ public:
         std::shared_ptr<QSettings> settings = {});
     ~BridgeWindow() override;
 
-    bool passesInterfaceChecks() const;
-
 protected:
     void closeEvent(QCloseEvent* event) override;
 
@@ -104,11 +102,6 @@ private slots:
     void onVerificationFilePoll();
 
 private:
-    enum class RecorderBackend {
-        RemoteControl,
-        AllowlistProcess,
-    };
-
     void connectSignals();
     void loadSettings();
     void saveSettings();
@@ -153,7 +146,6 @@ private:
     void finishVerification(const vicon_lsl::gui::RecordingVerificationReport& report);
     void advanceGuidedStart();
     void advanceGuidedStop();
-    RecorderBackend activeRecorderBackend() const;
     RecorderRecordingState effectiveRecordingState() const;
     RecorderOperationState effectiveOperationState() const;
     bool recordingActiveOrPending() const;

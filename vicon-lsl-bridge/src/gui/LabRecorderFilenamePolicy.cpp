@@ -1,5 +1,4 @@
 #include "gui/LabRecorderFilenamePolicy.h"
-#include "gui/PerformanceBudgets.h"
 
 #include <QDir>
 #include <QFile>
@@ -12,9 +11,18 @@
 
 namespace {
 
+constexpr int kMaximumFindNextRunAttempts = 1000;
+
 struct FilenameToken {
     const char* placeholder;
     QString LabRecorderFilenameFields::*field;
+};
+
+struct RecordingField {
+    const char* command_key;
+    const char* label;
+    QString LabRecorderFilenameFields::*value;
+    bool required;
 };
 
 const FilenameToken kFilenameTokens[] = {
@@ -25,6 +33,17 @@ const FilenameToken kFilenameTokens[] = {
     {"%n", &LabRecorderFilenameFields::run},
     {"%a", &LabRecorderFilenameFields::acquisition},
     {"%m", &LabRecorderFilenameFields::modality},
+};
+
+const RecordingField kRecordingFields[] = {
+    {"root", "study root", &LabRecorderFilenameFields::root, false},
+    {"template", "filename template", &LabRecorderFilenameFields::templ, false},
+    {"participant", "participant", &LabRecorderFilenameFields::participant, true},
+    {"session", "session", &LabRecorderFilenameFields::session, true},
+    {"task", "task", &LabRecorderFilenameFields::task, true},
+    {"run", "run", &LabRecorderFilenameFields::run, false},
+    {"acquisition", "acquisition", &LabRecorderFilenameFields::acquisition, true},
+    {"modality", "modality", &LabRecorderFilenameFields::modality, true},
 };
 
 void appendField(QString& command, const QString& key, const QString& value) {
@@ -98,14 +117,9 @@ QStringList relativeComponents(const QString& relative_path) {
 
 QString fieldNameForProtocolValue(const LabRecorderFilenameFields& fields,
                                   const QString& value) {
-    if (value == fields.root) return "study root";
-    if (value == fields.templ) return "filename template";
-    if (value == fields.participant) return "participant";
-    if (value == fields.session) return "session";
-    if (value == fields.task) return "task";
-    if (value == fields.run) return "run";
-    if (value == fields.acquisition) return "acquisition";
-    if (value == fields.modality) return "modality";
+    for (const RecordingField& field : kRecordingFields) {
+        if (value == fields.*(field.value)) return QLatin1String(field.label);
+    }
     return "recording field";
 }
 
@@ -148,14 +162,9 @@ QString RecordingPathResult::summary() const {
 
 QString LabRecorderFilenamePolicy::filenameCommand(const LabRecorderFilenameFields& fields) {
     QString command = "filename";
-    appendField(command, "root", fields.root);
-    appendField(command, "template", fields.templ);
-    appendField(command, "participant", fields.participant);
-    appendField(command, "session", fields.session);
-    appendField(command, "task", fields.task);
-    appendField(command, "run", fields.run);
-    appendField(command, "acquisition", fields.acquisition);
-    appendField(command, "modality", fields.modality);
+    for (const RecordingField& field : kRecordingFields) {
+        appendField(command, QLatin1String(field.command_key), fields.*(field.value));
+    }
     return command;
 }
 
@@ -184,9 +193,7 @@ QStringList LabRecorderFilenamePolicy::startRecordingCommands(
     bool select_all_first) {
     QStringList commands;
     if (select_all_first) {
-        // Discover streams that appeared since LabRecorder's last refresh
-        // before selecting them. LabRecorder's start handler refreshes again,
-        // but that is too late to select newly discovered streams.
+        // Refresh first so newly visible streams are selected.
         commands.append("update");
         commands.append("select all");
     }
@@ -196,21 +203,8 @@ QStringList LabRecorderFilenamePolicy::startRecordingCommands(
 }
 
 QString LabRecorderFilenamePolicy::sanitizedValue(QString value) {
-    value.replace('{', '_');
-    value.replace('}', '_');
-    value.replace('\n', ' ');
-    value.replace('\r', ' ');
+    value.replace('{', '_').replace('}', '_').replace('\n', ' ').replace('\r', ' ');
     return value.trimmed();
-}
-
-QString LabRecorderFilenamePolicy::renderedFilenamePreview(
-    const LabRecorderFilenameFields& fields) {
-    const QString rendered = renderedFilename(fields);
-    const QString root = sanitizedValue(fields.root);
-    if (!root.isEmpty()) {
-        return QDir::toNativeSeparators(QDir(root).filePath(rendered));
-    }
-    return QDir::toNativeSeparators(rendered);
 }
 
 RecordingPathResult LabRecorderFilenamePolicy::validate(
@@ -230,11 +224,8 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
     result.normalized_fields.acquisition = fields.acquisition.trimmed();
     result.normalized_fields.modality = fields.modality.trimmed();
 
-    const QStringList protocol_values = {
-        fields.root, fields.templ, fields.participant, fields.session, fields.task,
-        fields.run, fields.acquisition, fields.modality,
-    };
-    for (const QString& value : protocol_values) {
+    for (const RecordingField& recording_field : kRecordingFields) {
+        const QString& value = fields.*(recording_field.value);
         if (containsProtocolBreakingCharacter(value)) {
             const QString field = fieldNameForProtocolValue(fields, value);
             addIssue(result, RecordingPathIssueLevel::Error, field,
@@ -269,43 +260,34 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
         result.normalized_fields.templ += ".xdf";
     }
 
-    const std::pair<QString, QString> required_fields[] = {
-        {"participant", result.normalized_fields.participant},
-        {"session", result.normalized_fields.session},
-        {"task", result.normalized_fields.task},
-        {"acquisition", result.normalized_fields.acquisition},
-        {"modality", result.normalized_fields.modality},
-    };
-    for (const auto& field : required_fields) {
-        if (field.second.isEmpty()) {
-            addIssue(result, RecordingPathIssueLevel::Error, field.first,
-                     "The " + field.first + " value is empty.",
+    for (const RecordingField& field : kRecordingFields) {
+        if (!field.required) continue;
+        const QString name = QLatin1String(field.label);
+        const QString& value = result.normalized_fields.*(field.value);
+        if (value.isEmpty()) {
+            addIssue(result, RecordingPathIssueLevel::Error, name,
+                     "The " + name + " value is empty.",
                      "Enter a value before recording.");
         }
-        const QString original =
-            field.first == "participant" ? fields.participant :
-            field.first == "session" ? fields.session :
-            field.first == "task" ? fields.task :
-            field.first == "acquisition" ? fields.acquisition :
-            fields.modality;
+        const QString& original = fields.*(field.value);
         if (original.endsWith(' ') || original.endsWith('.')) {
-            addIssue(result, RecordingPathIssueLevel::Error, field.first,
-                     "The " + field.first +
+            addIssue(result, RecordingPathIssueLevel::Error, name,
+                     "The " + name +
                          " value ends with a space or period.",
                      "Remove the trailing character.");
         }
-        if (field.second == "." || field.second == ".." ||
-            field.second.contains(QRegularExpression("[<>:\"/\\\\|?*]"))) {
-            addIssue(result, RecordingPathIssueLevel::Error, field.first,
-                     "The " + field.first +
+        if (value == "." || value == ".." ||
+            value.contains(QRegularExpression("[<>:\"/\\\\|?*]"))) {
+            addIssue(result, RecordingPathIssueLevel::Error, name,
+                     "The " + name +
                          " value contains a path separator or reserved filename character.",
                      "Use letters, numbers, spaces, hyphens, or underscores.");
         }
-        if (isReservedWindowsName(field.second)) {
-            addIssue(result, RecordingPathIssueLevel::Error, field.first,
-                     "The " + field.first +
+        if (isReservedWindowsName(value)) {
+            addIssue(result, RecordingPathIssueLevel::Error, name,
+                     "The " + name +
                          " value is a Windows-reserved filename name: " +
-                         field.second,
+                         value,
                      "Choose a different value.");
         }
     }
@@ -462,7 +444,7 @@ int LabRecorderFilenamePolicy::findNextRun(
     search_options.verify_storage = false;
     search_options.create_parent_directories = false;
     const int last = (std::min)(1000000,
-        first + vicon_lsl::gui::PerformanceBudgets::MaximumFindNextRunAttempts);
+        first + kMaximumFindNextRunAttempts);
     for (int run = first; run < last; ++run) {
         LabRecorderFilenameFields candidate = fields;
         candidate.run = QString::number(run);

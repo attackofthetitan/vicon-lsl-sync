@@ -148,15 +148,8 @@ void RecordingVerifier::run() {
                           "Opening the recorded XDF for a file check");
     try {
         PreviewLoadOptions options;
-        options.maximum_file_bytes = PerformanceBudgets::MaximumXdfFileBytes;
-        options.maximum_samples_per_stream = PerformanceBudgets::MaximumSamplesPerXdfStream;
         options.maximum_stored_values_per_stream = 20000;
         options.maximum_preview_frames = 1;
-        options.maximum_streams = PerformanceBudgets::MaximumXdfStreams;
-        options.maximum_channels = PerformanceBudgets::MaximumXdfChannels;
-        options.maximum_header_bytes = PerformanceBudgets::MaximumHeaderBytes;
-        options.cancellation_check_sample_interval =
-            PerformanceBudgets::FileCancelSampleInterval;
         options.cancel_requested = [this]() {
             return cancel_requested_.load() || isInterruptionRequested();
         };

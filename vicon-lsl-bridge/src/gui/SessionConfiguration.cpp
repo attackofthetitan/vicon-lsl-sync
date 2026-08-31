@@ -422,7 +422,6 @@ SessionUiState SessionConfigurationStore::loadUiState(QSettings& settings) {
     result.geometry = settings.value("ui/windowGeometry").toByteArray();
     result.splitter_state = settings.value("ui/mainSplitter").toByteArray();
     result.active_control_tab = settings.value("ui/controlTab", 0).toInt();
-    result.active_preview_tab = settings.value("ui/previewTab", 0).toInt();
     result.recent_recordings = settings.value("ui/recentRecordings").toStringList();
     result.recent_preset_directory = settings.value("ui/recentPresetDirectory").toString();
     result.recent_diagnostic_directory = settings.value("ui/recentDiagnosticDirectory").toString();
@@ -433,7 +432,6 @@ void SessionConfigurationStore::saveUiState(QSettings& settings, const SessionUi
     settings.setValue("ui/windowGeometry", state.geometry);
     settings.setValue("ui/mainSplitter", state.splitter_state);
     settings.setValue("ui/controlTab", state.active_control_tab);
-    settings.setValue("ui/previewTab", state.active_preview_tab);
     settings.setValue("ui/recentRecordings", state.recent_recordings.mid(0, 10));
     settings.setValue("ui/recentPresetDirectory", state.recent_preset_directory);
     settings.setValue("ui/recentDiagnosticDirectory", state.recent_diagnostic_directory);

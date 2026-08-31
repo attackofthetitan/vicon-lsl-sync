@@ -1,6 +1,5 @@
 #pragma once
 
-#include "gui/PerformanceBudgets.h"
 #include "gui/SessionConfiguration.h"
 #include "gui/SessionState.h"
 

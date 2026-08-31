@@ -2,8 +2,6 @@
 
 #include "gui/BridgeWindowUi.h"
 #include "gui/LabRecorderClient.h"
-#include "gui/LabRecorderRuntimePolicy.h"
-#include "gui/PerformanceBudgets.h"
 #include "gui/PreviewPanel.h"
 #include "gui/RecorderProcessController.h"
 #include "gui/StreamDiscoveryWorker.h"
@@ -57,6 +55,8 @@ using vicon_lsl::gui::StreamReconnectionMode;
 using vicon_lsl::gui_detail::BridgeWindowUi;
 
 constexpr int kFilenameSyncDelayMs = 300;
+constexpr qint64 kRecorderRetryTimeoutMs = 15000;
+constexpr qint64 kRecorderStopDeadlineMs = 15000;
 constexpr int kStatusStaleMs = 3000;
 constexpr int kVerificationFileTimeoutMs = 15000;
 
@@ -66,6 +66,46 @@ struct BindingControl {
     QCheckBox* follow;
     StreamBinding* binding;
 };
+
+struct TextControl {
+    QLineEdit* edit;
+    QString* value;
+    bool trim;
+};
+
+std::array<TextControl, 12> textControls(
+    BridgeWindowUi& ui,
+    SessionConfiguration& configuration) {
+    return {{{ui.server_edit, &configuration.vicon_endpoint, true},
+             {ui.marker_stream_edit, &configuration.marker_output_name, true},
+             {ui.segment_stream_edit, &configuration.segment_output_name, true},
+             {ui.study_root_edit, &configuration.recording_root, true},
+             {ui.filename_template_edit, &configuration.recording_template, false},
+             {ui.participant_edit, &configuration.participant, false},
+             {ui.session_edit, &configuration.session, false},
+             {ui.task_edit, &configuration.task, false},
+             {ui.acquisition_edit, &configuration.acquisition, false},
+             {ui.modality_edit, &configuration.modality, false},
+             {ui.labrecorder_executable_edit, &configuration.recorder_executable, true},
+             {ui.labrecorder_host_edit, &configuration.recorder_host, true}}};
+}
+
+struct CheckControl {
+    QCheckBox* check;
+    bool* value;
+};
+
+std::array<CheckControl, 7> checkControls(
+    BridgeWindowUi& ui,
+    SessionConfiguration& configuration) {
+    return {{{ui.allow_overwrite_check, &configuration.allow_overwrite},
+             {ui.allow_outside_root_check, &configuration.allow_outside_study_root},
+             {ui.automatic_run_increment_check, &configuration.automatic_run_increment},
+             {ui.automatic_launch_check, &configuration.recorder_automatic_launch},
+             {ui.record_every_visible_check, &configuration.record_every_visible_stream},
+             {ui.recorder_only_check, &configuration.recorder_only_mode},
+             {ui.preview_external_streams_check, &configuration.preview_external_streams}}};
+}
 
 std::array<BindingControl, 4> bindingControls(
     BridgeWindowUi& ui,
@@ -86,6 +126,14 @@ std::shared_ptr<QSettings> sessionSettings(
     if (settings) return settings;
     return std::make_shared<QSettings>("ViconLSL", "ViconLSLBridge");
 }
+
+bool recorderCanStart(const LabRecorderClient& recorder) {
+    return recorder.connectionState() == RecorderConnectionState::Connected &&
+           recorder.recordingState() != RecorderRecordingState::Recording &&
+           recorder.operationState() == RecorderOperationState::Idle &&
+           !recorder.shutdownRequested();
+}
+
 QString preflightLevelText(PreflightLevel level) {
     switch (level) {
         case PreflightLevel::Required: return "Required";
@@ -282,22 +330,21 @@ void BridgeWindow::connectSignals() {
         validateRecordingPath();
         scheduleFilenameSync();
     };
-    connect(ui_->study_root_edit, &QLineEdit::textChanged, this, path_changed);
-    connect(ui_->filename_template_edit, &QLineEdit::textChanged, this, path_changed);
-    connect(ui_->participant_edit, &QLineEdit::textChanged, this, path_changed);
-    connect(ui_->session_edit, &QLineEdit::textChanged, this, path_changed);
-    connect(ui_->task_edit, &QLineEdit::textChanged, this, path_changed);
+    for (QLineEdit* edit : {ui_->study_root_edit, ui_->filename_template_edit,
+                            ui_->participant_edit, ui_->session_edit, ui_->task_edit,
+                            ui_->acquisition_edit, ui_->modality_edit}) {
+        connect(edit, &QLineEdit::textChanged, this, path_changed);
+    }
     connect(ui_->run_spin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, path_changed);
-    connect(ui_->acquisition_edit, &QLineEdit::textChanged, this, path_changed);
-    connect(ui_->modality_edit, &QLineEdit::textChanged, this, path_changed);
     connect(ui_->storage_warning_spin,
             QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, path_changed);
-    connect(ui_->allow_overwrite_check, &QCheckBox::toggled, this, path_changed);
-    connect(ui_->allow_outside_root_check, &QCheckBox::toggled, this, path_changed);
-    connect(ui_->automatic_run_increment_check, &QCheckBox::toggled,
-            this, path_changed);
+    for (QCheckBox* check : {ui_->allow_overwrite_check,
+                             ui_->allow_outside_root_check,
+                             ui_->automatic_run_increment_check}) {
+        connect(check, &QCheckBox::toggled, this, path_changed);
+    }
 
     const auto bridge_names_changed = [this]() {
         updateConfigurationFromUi();
@@ -305,12 +352,10 @@ void BridgeWindow::connectSignals() {
         populateBindingCombos();
         updateReadiness();
     };
-    connect(ui_->server_edit, &QLineEdit::textChanged,
-            this, bridge_names_changed);
-    connect(ui_->marker_stream_edit, &QLineEdit::textChanged,
-            this, bridge_names_changed);
-    connect(ui_->segment_stream_edit, &QLineEdit::textChanged,
-            this, bridge_names_changed);
+    for (QLineEdit* edit : {ui_->server_edit, ui_->marker_stream_edit,
+                            ui_->segment_stream_edit}) {
+        connect(edit, &QLineEdit::textChanged, this, bridge_names_changed);
+    }
     connect(ui_->preview_external_streams_check, &QCheckBox::toggled,
             this, bridge_names_changed);
 
@@ -319,31 +364,26 @@ void BridgeWindow::connectSignals() {
         updateRecordingButtons();
         updateDashboard();
     };
-    connect(ui_->labrecorder_host_edit, &QLineEdit::textChanged,
-            this, recorder_settings_changed);
+    for (QLineEdit* edit : {ui_->labrecorder_host_edit,
+                            ui_->labrecorder_executable_edit}) {
+        connect(edit, &QLineEdit::textChanged, this, recorder_settings_changed);
+    }
     connect(ui_->labrecorder_port_spin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, recorder_settings_changed);
-    connect(ui_->labrecorder_executable_edit, &QLineEdit::textChanged,
-            this, recorder_settings_changed);
-    connect(ui_->automatic_launch_check, &QCheckBox::toggled,
-            this, recorder_settings_changed);
-    connect(ui_->record_every_visible_check, &QCheckBox::toggled,
-            this, recorder_settings_changed);
-    connect(ui_->recorder_only_check, &QCheckBox::toggled,
-            this, recorder_settings_changed);
+    for (QCheckBox* check : {ui_->automatic_launch_check,
+                             ui_->record_every_visible_check,
+                             ui_->recorder_only_check}) {
+        connect(check, &QCheckBox::toggled, this, recorder_settings_changed);
+    }
 
     connect(ui_->stream_table, &QTableWidget::itemChanged, this,
             [this](QTableWidgetItem* item) {
                 if (!item || item->row() < 0 || item->row() >= stream_inventory_.size()) return;
-                if (item->column() == 0) {
-                    stream_inventory_[item->row()].selected =
-                        item->checkState() == Qt::Checked;
-                } else if (item->column() == 1) {
-                    stream_inventory_[item->row()].required =
-                        item->checkState() == Qt::Checked;
-                } else {
-                    return;
-                }
+                if (item->column() < 0 || item->column() > 1) return;
+                bool& checked = item->column() == 0
+                    ? stream_inventory_[item->row()].selected
+                    : stream_inventory_[item->row()].required;
+                checked = item->checkState() == Qt::Checked;
                 updateConfigurationFromUi();
                 updateReadiness();
             });
@@ -357,12 +397,11 @@ void BridgeWindow::connectSignals() {
                 this, binding_changed);
         connect(control.follow, &QCheckBox::toggled, this, binding_changed);
     }
-    connect(ui_->event_severity_filter,
-            QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this]() { updateEventLog(); });
-    connect(ui_->event_component_filter,
-            QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this]() { updateEventLog(); });
+    for (QComboBox* filter : {ui_->event_severity_filter,
+                              ui_->event_component_filter}) {
+        connect(filter, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this]() { updateEventLog(); });
+    }
 
     connect(labrecorder_client_, &LabRecorderClient::connectionStateChanged,
             this, [this](RecorderConnectionState state, const QString& message) {
@@ -538,10 +577,6 @@ void BridgeWindow::connectSignals() {
     }
 }
 
-bool BridgeWindow::passesInterfaceChecks() const {
-    return ui_->passesInterfaceChecks();
-}
-
 void BridgeWindow::loadSettings() {
     configuration_ =
         vicon_lsl::gui::SessionConfigurationStore::load(*settings_);
@@ -560,48 +595,26 @@ void BridgeWindow::saveSettings() {
 }
 
 void BridgeWindow::applyConfigurationToUi() {
-    const QSignalBlocker server_blocker(ui_->server_edit);
-    const QSignalBlocker marker_blocker(ui_->marker_stream_edit);
-    const QSignalBlocker segment_blocker(ui_->segment_stream_edit);
-    const QSignalBlocker root_blocker(ui_->study_root_edit);
-    const QSignalBlocker template_blocker(ui_->filename_template_edit);
-    const QSignalBlocker participant_blocker(ui_->participant_edit);
-    const QSignalBlocker session_blocker(ui_->session_edit);
-    const QSignalBlocker task_blocker(ui_->task_edit);
-    const QSignalBlocker run_blocker(ui_->run_spin);
-    const QSignalBlocker acquisition_blocker(ui_->acquisition_edit);
-    const QSignalBlocker modality_blocker(ui_->modality_edit);
-    const QSignalBlocker recorder_host_blocker(ui_->labrecorder_host_edit);
-    const QSignalBlocker recorder_port_blocker(ui_->labrecorder_port_spin);
-    const QSignalBlocker recorder_executable_blocker(ui_->labrecorder_executable_edit);
-    const QSignalBlocker external_blocker(ui_->preview_external_streams_check);
-
-    ui_->server_edit->setText(configuration_.vicon_endpoint);
-    ui_->marker_stream_edit->setText(configuration_.marker_output_name);
-    ui_->segment_stream_edit->setText(configuration_.segment_output_name);
-    ui_->study_root_edit->setText(configuration_.recording_root);
-    ui_->filename_template_edit->setText(configuration_.recording_template);
-    ui_->participant_edit->setText(configuration_.participant);
-    ui_->session_edit->setText(configuration_.session);
-    ui_->task_edit->setText(configuration_.task);
+    const QSignalBlocker blockers[] = {
+        QSignalBlocker(ui_->server_edit), QSignalBlocker(ui_->marker_stream_edit),
+        QSignalBlocker(ui_->segment_stream_edit), QSignalBlocker(ui_->study_root_edit),
+        QSignalBlocker(ui_->filename_template_edit), QSignalBlocker(ui_->participant_edit),
+        QSignalBlocker(ui_->session_edit), QSignalBlocker(ui_->task_edit),
+        QSignalBlocker(ui_->run_spin), QSignalBlocker(ui_->acquisition_edit),
+        QSignalBlocker(ui_->modality_edit), QSignalBlocker(ui_->labrecorder_host_edit),
+        QSignalBlocker(ui_->labrecorder_port_spin),
+        QSignalBlocker(ui_->labrecorder_executable_edit),
+        QSignalBlocker(ui_->preview_external_streams_check),
+    };
+    for (const TextControl& control : textControls(*ui_, configuration_)) {
+        control.edit->setText(*control.value);
+    }
+    for (const CheckControl& control : checkControls(*ui_, configuration_)) {
+        control.check->setChecked(*control.value);
+    }
     ui_->run_spin->setValue(configuration_.run);
-    ui_->acquisition_edit->setText(configuration_.acquisition);
-    ui_->modality_edit->setText(configuration_.modality);
     ui_->storage_warning_spin->setValue(configuration_.storage_warning_gib);
-    ui_->allow_overwrite_check->setChecked(configuration_.allow_overwrite);
-    ui_->allow_outside_root_check->setChecked(
-        configuration_.allow_outside_study_root);
-    ui_->automatic_run_increment_check->setChecked(
-        configuration_.automatic_run_increment);
-    ui_->labrecorder_executable_edit->setText(configuration_.recorder_executable);
-    ui_->labrecorder_host_edit->setText(configuration_.recorder_host);
     ui_->labrecorder_port_spin->setValue(configuration_.recorder_port);
-    ui_->automatic_launch_check->setChecked(configuration_.recorder_automatic_launch);
-    ui_->record_every_visible_check->setChecked(
-        configuration_.record_every_visible_stream);
-    ui_->recorder_only_check->setChecked(configuration_.recorder_only_mode);
-    ui_->preview_external_streams_check->setChecked(
-        configuration_.preview_external_streams);
     for (const BindingControl& control : bindingControls(*ui_, configuration_)) {
         control.follow->setChecked(
             control.binding->reconnection == StreamReconnectionMode::FollowName);
@@ -617,38 +630,20 @@ void BridgeWindow::applyConfigurationToUi() {
 }
 
 void BridgeWindow::updateConfigurationFromUi() {
-    configuration_.vicon_endpoint = ui_->server_edit->text().trimmed();
-    configuration_.marker_output_name = ui_->marker_stream_edit->text().trimmed();
-    configuration_.segment_output_name = ui_->segment_stream_edit->text().trimmed();
-    configuration_.preview_external_streams =
-        ui_->preview_external_streams_check->isChecked();
+    for (const TextControl& control : textControls(*ui_, configuration_)) {
+        *control.value = control.trim ? control.edit->text().trimmed()
+                                      : control.edit->text();
+    }
+    for (const CheckControl& control : checkControls(*ui_, configuration_)) {
+        *control.value = control.check->isChecked();
+    }
     if (ui_->preview_panel) {
         ui_->preview_panel->updateSessionConfiguration(configuration_);
     }
     if (!configuration_.preview_external_streams) configuration_.bindPreviewOutputs();
-    configuration_.recorder_host = ui_->labrecorder_host_edit->text().trimmed();
     configuration_.recorder_port = ui_->labrecorder_port_spin->value();
-    configuration_.recorder_executable =
-        ui_->labrecorder_executable_edit->text().trimmed();
-    configuration_.recorder_automatic_launch =
-        ui_->automatic_launch_check->isChecked();
-    configuration_.record_every_visible_stream =
-        ui_->record_every_visible_check->isChecked();
-    configuration_.recording_root = ui_->study_root_edit->text().trimmed();
-    configuration_.recording_template = ui_->filename_template_edit->text();
-    configuration_.participant = ui_->participant_edit->text();
-    configuration_.session = ui_->session_edit->text();
-    configuration_.task = ui_->task_edit->text();
     configuration_.run = ui_->run_spin->value();
-    configuration_.acquisition = ui_->acquisition_edit->text();
-    configuration_.modality = ui_->modality_edit->text();
     configuration_.storage_warning_gib = ui_->storage_warning_spin->value();
-    configuration_.automatic_run_increment =
-        ui_->automatic_run_increment_check->isChecked();
-    configuration_.allow_overwrite = ui_->allow_overwrite_check->isChecked();
-    configuration_.allow_outside_study_root =
-        ui_->allow_outside_root_check->isChecked();
-    configuration_.recorder_only_mode = ui_->recorder_only_check->isChecked();
 
     if (!stream_inventory_.isEmpty()) {
         QVector<StreamBinding> bindings;
@@ -939,7 +934,7 @@ void BridgeWindow::updateDashboard() {
     ui_->drop_label->setText(
         "Preview: " + QString::number(preview_replaced_frames_) +
         " frame(s) skipped, " + QString::number(preview_coalesced_samples_) +
-        " sample(s) combined, " + QString::number(preview_latency_ms_) + " ms behind");
+        " update(s) combined, " + QString::number(preview_latency_ms_) + " ms behind");
     ui_->verification_details_button->setEnabled(
         verification_report_.state != RecordingVerificationState::NotRun);
     ui_->open_verified_recording_button->setEnabled(
@@ -974,9 +969,18 @@ void BridgeWindow::onHeartbeatTick() {
 }
 
 QString BridgeWindow::resolveLabRecorderExecutable() const {
-    return LabRecorderRuntimePolicy::resolveExecutable(
-        ui_->labrecorder_executable_edit->text(),
-        QCoreApplication::applicationDirPath());
+    const QString configured_path =
+        ui_->labrecorder_executable_edit->text().trimmed();
+    const QFileInfo configured(configured_path);
+    if (!configured_path.isEmpty() && configured.exists() && configured.isFile()) {
+        return QDir::toNativeSeparators(configured.absoluteFilePath());
+    }
+
+    const QFileInfo bundled(QDir(QCoreApplication::applicationDirPath())
+                                .filePath("labrecorder/LabRecorder.exe"));
+    return bundled.exists() && bundled.isFile()
+        ? QDir::toNativeSeparators(bundled.absoluteFilePath())
+        : QString{};
 }
 
 QString BridgeWindow::resolveAllowlistExecutable() const {
@@ -1080,15 +1084,15 @@ void BridgeWindow::onLabRecorderRetry() {
     }
     const qint64 elapsed = labrecorder_retry_elapsed_.isValid()
         ? labrecorder_retry_elapsed_.elapsed()
-        : LabRecorderRuntimePolicy::RetryTimeoutMs;
-    if (LabRecorderRuntimePolicy::retryExpired(elapsed)) {
+        : kRecorderRetryTimeoutMs;
+    if (elapsed >= kRecorderRetryTimeoutMs) {
         labrecorder_retry_timer_->stop();
         setLabRecorderStatus(
             "The recorder was not ready within 15 seconds",
             EventSeverity::Error);
         return;
     }
-    if (!LabRecorderRuntimePolicy::shouldAttemptConnection(state, elapsed)) return;
+    if (state == RecorderConnectionState::Connecting) return;
     labrecorder_client_->connectToServer(
         ui_->labrecorder_host_edit->text().trimmed(),
         static_cast<quint16>(ui_->labrecorder_port_spin->value()), 200);
@@ -1107,11 +1111,7 @@ void BridgeWindow::scheduleFilenameSync() {
     if (!filename_sync_timer_ || close_pending_) return;
     if (configuration_.record_every_visible_stream &&
         path_result_.valid() &&
-        LabRecorderRuntimePolicy::canStartRecording(
-            labrecorder_client_->connectionState(),
-            labrecorder_client_->recordingState(),
-            labrecorder_client_->operationState(),
-            labrecorder_client_->shutdownRequested())) {
+        recorderCanStart(*labrecorder_client_)) {
         filename_sync_timer_->start();
     } else {
         filename_sync_timer_->stop();
@@ -1126,11 +1126,6 @@ void BridgeWindow::syncFilenameToLabRecorder() {
     }
 }
 
-BridgeWindow::RecorderBackend BridgeWindow::activeRecorderBackend() const {
-    return configuration_.record_every_visible_stream
-        ? RecorderBackend::RemoteControl : RecorderBackend::AllowlistProcess;
-}
-
 RecorderRecordingState BridgeWindow::effectiveRecordingState() const {
     if (recorder_process_ &&
         recorder_process_->kind() == RecorderProcessKind::AllowlistRecorder) {
@@ -1143,7 +1138,7 @@ RecorderRecordingState BridgeWindow::effectiveRecordingState() const {
 }
 
 RecorderOperationState BridgeWindow::effectiveOperationState() const {
-    if (activeRecorderBackend() == RecorderBackend::AllowlistProcess) {
+    if (!configuration_.record_every_visible_stream) {
         if (recorder_process_->state() == RecorderProcessState::Launching) {
             return RecorderOperationState::Starting;
         }
@@ -1174,11 +1169,7 @@ void BridgeWindow::updateRecordingButtons() {
     const bool remote = configuration_.record_every_visible_stream;
     ui_->refresh_streams_button->setEnabled(
         !close_pending_ && remote &&
-        LabRecorderRuntimePolicy::canRefreshStreams(
-            labrecorder_client_->connectionState(),
-            labrecorder_client_->recordingState(),
-            labrecorder_client_->operationState(),
-            labrecorder_client_->shutdownRequested()));
+        recorderCanStart(*labrecorder_client_));
     ui_->start_recording_button->setEnabled(
         !close_pending_ && !recordingActiveOrPending());
     ui_->stop_recording_button->setEnabled(
@@ -1808,7 +1799,7 @@ void BridgeWindow::beginRecordingAfterPreflight() {
     workflow_ = SessionWorkflowState::Starting;
 
     bool accepted = false;
-    if (activeRecorderBackend() == RecorderBackend::RemoteControl) {
+    if (configuration_.record_every_visible_stream) {
         accepted = labrecorder_client_->startRecording(
             path_result_.normalized_fields, true);
     } else {
@@ -2241,8 +2232,7 @@ void BridgeWindow::updateShutdownStatus() {
     }
     const bool owns_process = recorder_process_->ownsRunningProcess();
     const bool recorder_deadline = close_started_ms_ >= 0 &&
-        now_ms - close_started_ms_ >=
-            vicon_lsl::gui::PerformanceBudgets::RecorderStopDeadlineMs;
+        now_ms - close_started_ms_ >= kRecorderStopDeadlineMs;
     if (owns_process && !owned_process_end_requested_ &&
         (remote_safe || recorder_deadline)) {
         owned_process_end_requested_ = true;

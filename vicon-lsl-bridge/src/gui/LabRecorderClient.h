@@ -29,7 +29,6 @@ public:
     bool shutdownReady() const;
     bool shutdownSettledSafely() const;
     bool startMayHaveReachedServer() const { return start_may_have_reached_server_; }
-    QString activeOperation() const;
 
     bool sendCommand(const QString& command);
     bool refreshStreams();

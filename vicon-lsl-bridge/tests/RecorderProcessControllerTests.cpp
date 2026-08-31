@@ -1,4 +1,3 @@
-#include "gui/PerformanceBudgets.h"
 #include "gui/RecorderProcessController.h"
 #include "LabRecorderClientTestSupport.h"
 
@@ -51,7 +50,7 @@ void testRecorderProcessControllerLifecycle() {
     expect(waitUntil([&exited]() { return exited; }, 2000) && !expected_exit,
            "unrequested recorder process exit is reported as unexpected");
     const QByteArray output = controller.boundedOutput();
-    expect(output.size() <= PerformanceBudgets::MaximumProcessOutputBytes,
+    expect(output.size() <= 64 * 1024,
            "recorder process output buffer stays within its fixed bound");
     expect(output.contains("cwd=" + QFileInfo(fixture).absolutePath().toLocal8Bit()),
            "recorder process uses the executable directory as its working directory");

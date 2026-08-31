@@ -10,6 +10,7 @@ namespace vicon_lsl::gui {
 namespace {
 
 constexpr qsizetype kMaximumLogLineBytes = 4096;
+constexpr qsizetype kMaximumProcessOutputBytes = 64 * 1024;
 
 } // namespace
 
@@ -269,9 +270,9 @@ void RecorderProcessController::appendOutput(const QByteArray& bytes,
                                              EventSeverity severity) {
     if (bytes.isEmpty()) return;
     output_buffer_.append(bytes);
-    if (output_buffer_.size() > PerformanceBudgets::MaximumProcessOutputBytes) {
+    if (output_buffer_.size() > kMaximumProcessOutputBytes) {
         output_buffer_.remove(0, output_buffer_.size() -
-                                  PerformanceBudgets::MaximumProcessOutputBytes);
+                                  kMaximumProcessOutputBytes);
     }
     partial_line_.append(bytes);
     while (true) {

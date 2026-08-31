@@ -12,7 +12,6 @@ int main(int argc, char** argv) {
     run("rendered filename", testRenderedFilenameUsesSharedSanitization);
     run("unresolved placeholders", testUnresolvedFilenamePlaceholders);
     run("start commands", testStartRecordingCommands);
-    run("runtime policy", testRuntimePolicy);
     run("TCP command sequence", testTcpCommandSequence);
     run("TCP Start sequence", testTcpStartRecordingSequenceWithSelectAll);
     run("fragmented reply", testFragmentedReplyControlsCommandProgress);

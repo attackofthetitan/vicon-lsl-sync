@@ -97,10 +97,6 @@ bool LabRecorderClient::shutdownSettledSafely() const {
     return shutdownReady() && !start_may_have_reached_server_;
 }
 
-QString LabRecorderClient::activeOperation() const {
-    return have_active_batch_ ? active_batch_.operation : QString();
-}
-
 bool LabRecorderClient::sendCommand(const QString& command) {
     return beginBatch(CommandKind::Generic, command, {command},
                       RecorderRecordingState::Unknown);

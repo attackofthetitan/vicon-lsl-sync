@@ -132,7 +132,6 @@ struct SessionUiState {
     QByteArray geometry;
     QByteArray splitter_state;
     int active_control_tab = 0;
-    int active_preview_tab = 0;
     QStringList recent_recordings;
     QString recent_preset_directory;
     QString recent_diagnostic_directory;

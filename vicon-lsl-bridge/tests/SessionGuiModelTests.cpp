@@ -2,7 +2,6 @@
 
 #include "gui/CalibrationProfileStore.h"
 #include "gui/LabRecorderFilenamePolicy.h"
-#include "gui/PerformanceBudgets.h"
 #include "gui/RecorderProcessController.h"
 #include "gui/SessionConfiguration.h"
 #include "gui/SessionState.h"
@@ -58,9 +57,9 @@ void testNormalizedPathPolicy() {
                valid.summary().toStdString());
     expect(valid.absolute_path.endsWith(".xdf", Qt::CaseInsensitive),
            "appends the XDF extension consistently");
-    expect(LabRecorderFilenamePolicy::renderedFilenamePreview(
-               valid.normalized_fields) == valid.absolute_path,
-           "normalized command fields render the exact displayed destination");
+    expect(LabRecorderFilenamePolicy::renderedFilename(valid.normalized_fields) ==
+               valid.relative_path,
+           "normalized fields render the checked relative destination");
     expect(LabRecorderFilenamePolicy::filenameCommand(
                valid.normalized_fields).contains(
                    "{root:" + valid.normalized_fields.root + "}"),

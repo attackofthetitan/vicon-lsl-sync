@@ -41,7 +41,6 @@
 #include <QSet>
 #include <QUrl>
 #include <QVBoxLayout>
-#include "gui/PerformanceBudgets.h"
 
 #include <exception>
 #include <map>
@@ -50,6 +49,10 @@
 
 namespace vicon_lsl {
 namespace {
+
+constexpr int kDefaultRenderHz = 30;
+constexpr int kMaximumLivePreviewDelayMs = 100;
+constexpr int kMaximumRenderHz = 60;
 
 QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
     auto* label = new QLabel(text);
@@ -73,31 +76,44 @@ QPushButton* makeButton(const QString& text, const QString& tooltip,
     return button;
 }
 
-QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
+void addField(QGridLayout* layout,
+              int row,
+              int column,
+              const QString& label,
+              QWidget* control,
+              const QString& tooltip) {
+    layout->addWidget(makeTooltipLabel(label, control, tooltip), row, column);
+    layout->addWidget(control, row, column + 1);
+}
+
+void addWidgets(QBoxLayout* layout,
+                std::initializer_list<QWidget*> widgets) {
+    for (QWidget* widget : widgets) layout->addWidget(widget);
+}
+
+QDoubleSpinBox* makeDoubleSpin(double minimum,
+                               double maximum,
+                               int decimals,
+                               double step,
+                               double value) {
     auto* spin = new QDoubleSpinBox();
-    spin->setRange(-100.0, 100.0);
-    spin->setDecimals(3);
-    spin->setSingleStep(0.01);
+    spin->setRange(minimum, maximum);
+    spin->setDecimals(decimals);
+    spin->setSingleStep(step);
     spin->setValue(value);
     return spin;
+}
+
+QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
+    return makeDoubleSpin(-100.0, 100.0, 3, 0.01, value);
 }
 
 QDoubleSpinBox* makeAngleSpin(double value = 0.0) {
-    auto* spin = new QDoubleSpinBox();
-    spin->setRange(-360.0, 360.0);
-    spin->setDecimals(2);
-    spin->setSingleStep(1.0);
-    spin->setValue(value);
-    return spin;
+    return makeDoubleSpin(-360.0, 360.0, 2, 1.0, value);
 }
 
 QDoubleSpinBox* makeQuaternionSpin(double value = 0.0) {
-    auto* spin = new QDoubleSpinBox();
-    spin->setRange(-1.0, 1.0);
-    spin->setDecimals(6);
-    spin->setSingleStep(0.01);
-    spin->setValue(value);
-    return spin;
+    return makeDoubleSpin(-1.0, 1.0, 6, 0.01, value);
 }
 
 } // namespace
@@ -139,11 +155,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     segment_stream_edit_->setObjectName("previewSegmentInput");
     gaze_stream_edit_ = new QLineEdit(stream_defaults::HoloLensGaze);
     calibration_stream_edit_ = new QLineEdit(stream_defaults::HoloLensModelTargetPose);
-    tolerance_spin_ = new QDoubleSpinBox();
-    tolerance_spin_->setRange(0.001, 1.0);
-    tolerance_spin_->setDecimals(3);
-    tolerance_spin_->setSingleStep(0.005);
-    tolerance_spin_->setValue(0.05);
+    tolerance_spin_ = makeDoubleSpin(0.001, 1.0, 3, 0.005, 0.05);
     cache_megabytes_spin_ = new QSpinBox();
     cache_megabytes_spin_->setRange(16, 2048);
     cache_megabytes_spin_->setSingleStep(16);
@@ -152,51 +164,23 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     trail_points_spin_ = new QSpinBox();
     trail_points_spin_->setRange(2, 500);
     trail_points_spin_->setValue(24);
-    playback_speed_spin_ = new QDoubleSpinBox();
-    playback_speed_spin_->setRange(0.1, 4.0);
-    playback_speed_spin_->setDecimals(1);
-    playback_speed_spin_->setSingleStep(0.1);
-    playback_speed_spin_->setValue(1.0);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Markers:", marker_stream_edit_,
-                               "LSL stream containing Vicon marker samples for the preview."),
-                           0, 0);
-    stream_grid->addWidget(marker_stream_edit_, 0, 1);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Segments:", segment_stream_edit_,
-                               "LSL stream containing Vicon segment samples for the preview."),
-                           0, 2);
-    stream_grid->addWidget(segment_stream_edit_, 0, 3);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Gaze:", gaze_stream_edit_,
-                               "LSL stream containing HoloLens gaze samples."),
-                           1, 0);
-    stream_grid->addWidget(gaze_stream_edit_, 1, 1);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Max time gap (s):", tolerance_spin_,
-                               "Largest time difference allowed when matching preview samples."),
-                           1, 2);
-    stream_grid->addWidget(tolerance_spin_, 1, 3);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Trail points:", trail_points_spin_,
-                               "Number of recent preview frames retained in the trail."),
-                           2, 0);
-    stream_grid->addWidget(trail_points_spin_, 2, 1);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Playback speed:", playback_speed_spin_,
-                               "Playback speed multiplier for CSV and XDF recordings."),
-                           2, 2);
-    stream_grid->addWidget(playback_speed_spin_, 2, 3);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Stair target:", calibration_stream_edit_,
-                               "LSL stream containing tracked stair-target poses for calibration."),
-                           3, 0);
-    stream_grid->addWidget(calibration_stream_edit_, 3, 1);
-    stream_grid->addWidget(makeTooltipLabel(
-                               "Playback memory:", cache_megabytes_spin_,
-                               "Maximum memory used while reading and displaying a recording."),
-                           3, 2);
-    stream_grid->addWidget(cache_megabytes_spin_, 3, 3);
+    playback_speed_spin_ = makeDoubleSpin(0.1, 4.0, 1, 0.1, 1.0);
+    addField(stream_grid, 0, 0, "Markers:", marker_stream_edit_,
+             "LSL stream containing Vicon marker samples for the preview.");
+    addField(stream_grid, 0, 2, "Segments:", segment_stream_edit_,
+             "LSL stream containing Vicon segment samples for the preview.");
+    addField(stream_grid, 1, 0, "Gaze:", gaze_stream_edit_,
+             "LSL stream containing HoloLens gaze samples.");
+    addField(stream_grid, 1, 2, "Max time gap (s):", tolerance_spin_,
+             "Largest time difference allowed when matching preview samples.");
+    addField(stream_grid, 2, 0, "Trail points:", trail_points_spin_,
+             "Number of recent preview frames retained in the trail.");
+    addField(stream_grid, 2, 2, "Playback speed:", playback_speed_spin_,
+             "Playback speed multiplier for CSV and XDF recordings.");
+    addField(stream_grid, 3, 0, "Stair target:", calibration_stream_edit_,
+             "LSL stream containing tracked stair-target poses for calibration.");
+    addField(stream_grid, 3, 2, "Playback memory:", cache_megabytes_spin_,
+             "Maximum memory used while reading and displaying a recording.");
     stream_grid->setColumnStretch(1, 1);
     stream_grid->setColumnStretch(3, 1);
     sources_layout->addLayout(stream_grid);
@@ -235,8 +219,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* calibration_row = new QHBoxLayout();
     calibrate_button_ = makeButton("Calibrate from Stair Target", "Collect stable poses from the stair-target stream and apply a HoloLens transform for this session only.");
     use_manual_transform_button_ = makeButton("Use Manual Transform", "Stop automatic calibration and use the manual HoloLens translation and rotation fields.");
-    calibration_row->addWidget(calibrate_button_);
-    calibration_row->addWidget(use_manual_transform_button_);
+    addWidgets(calibration_row, {calibrate_button_, use_manual_transform_button_});
     calibration_row->addStretch(1);
     alignment_layout->addLayout(calibration_row);
 
@@ -297,12 +280,9 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* retire_profile_button = makeButton("Hide", "Hide the selected calibration without deleting it from past session records.");
     auto* import_profile_button = makeButton("Import", "Import a saved calibration file.");
     auto* export_profile_button = makeButton("Export", "Export the selected calibration to a file.");
-    profile_buttons->addWidget(apply_profile_button);
-    profile_buttons->addWidget(save_profile_button);
-    profile_buttons->addWidget(duplicate_profile_button);
-    profile_buttons->addWidget(retire_profile_button);
-    profile_buttons->addWidget(import_profile_button);
-    profile_buttons->addWidget(export_profile_button);
+    addWidgets(profile_buttons, {apply_profile_button, save_profile_button,
+                                 duplicate_profile_button, retire_profile_button,
+                                 import_profile_button, export_profile_button});
     profiles_layout->addLayout(profile_buttons);
     calibration_quality_label_ = new QLabel("Quality: not calibrated");
     calibration_quality_label_->setObjectName("calibrationQuality");
@@ -339,21 +319,16 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     status_label_ = new QLabel("Preview stopped");
     status_label_->setWordWrap(true);
     delivery_metrics_label_ = new QLabel(
-        "skipped preview frames 0 | discarded queued samples 0 | delay 0 ms");
+        "skipped preview frames 0 | combined updates 0 | delay 0 ms");
     delivery_metrics_label_->setToolTip(
         "Older preview updates are skipped so the display stays current.");
     auto* fit_view_button = makeButton("Fit View", "Fit the camera to all currently visible data.");
     auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
     auto* export_image_button = makeButton("Export Image", "Export the current preview view as a PNG image without changing source data.");
-    button_row->addWidget(start_button_);
-    button_row->addWidget(stop_button_);
-    button_row->addWidget(open_csv_button_);
-    button_row->addWidget(open_xdf_button_);
-    button_row->addWidget(play_csv_button_);
-    button_row->addWidget(fit_view_button);
-    button_row->addWidget(reset_camera_button);
-    button_row->addWidget(export_image_button);
-    button_row->addWidget(delivery_metrics_label_);
+    addWidgets(button_row, {start_button_, stop_button_, open_csv_button_,
+                            open_xdf_button_, play_csv_button_, fit_view_button,
+                            reset_camera_button, export_image_button,
+                            delivery_metrics_label_});
     button_row->addWidget(status_label_, 1);
     controls_layout->addLayout(button_row);
 
@@ -371,11 +346,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     recent_files_combo_->setToolTip("Recently opened CSV and XDF recordings.");
     auto* open_recent_button = makeButton("Open Recent", "Open the selected recent recording.");
     load_row->addWidget(file_state_label_, 1);
-    load_row->addWidget(memory_label_);
-    load_row->addWidget(load_progress_);
-    load_row->addWidget(cancel_load_button_);
-    load_row->addWidget(recent_files_combo_);
-    load_row->addWidget(open_recent_button);
+    addWidgets(load_row, {memory_label_, load_progress_, cancel_load_button_,
+                          recent_files_combo_, open_recent_button});
     controls_layout->addLayout(load_row);
 
     auto* playback_row = new QHBoxLayout();
@@ -424,7 +396,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     playback_elapsed_.start();
     live_render_timer_ = new QTimer(this);
     live_render_timer_->setTimerType(Qt::PreciseTimer);
-    live_render_timer_->setInterval(1000 / gui::PerformanceBudgets::DefaultRenderHz);
+    live_render_timer_->setInterval(1000 / kDefaultRenderHz);
 
     start_button_->setShortcut(QKeySequence("Alt+P"));
     stop_button_->setShortcut(QKeySequence("Alt+Shift+P"));
@@ -448,20 +420,22 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     calibration_quality_label_->setAccessibleName("Saved calibration quality");
     calibration_metadata_label_->setAccessibleName("Calibration coordinate details");
 
-    connect(start_button_, &QPushButton::clicked, this, &PreviewPanel::startPreview);
-    connect(stop_button_, &QPushButton::clicked, this, &PreviewPanel::stopPreview);
-    connect(open_csv_button_, &QPushButton::clicked, this, &PreviewPanel::openMergedCsv);
-    connect(open_xdf_button_, &QPushButton::clicked, this, &PreviewPanel::openXdf);
-    connect(play_csv_button_, &QPushButton::clicked, this, &PreviewPanel::toggleCsvPlayback);
+    const auto on_click = [this](QPushButton* button, auto handler) {
+        connect(button, &QPushButton::clicked, this, handler);
+    };
+    on_click(start_button_, &PreviewPanel::startPreview);
+    on_click(stop_button_, &PreviewPanel::stopPreview);
+    on_click(open_csv_button_, &PreviewPanel::openMergedCsv);
+    on_click(open_xdf_button_, &PreviewPanel::openXdf);
+    on_click(play_csv_button_, &PreviewPanel::toggleCsvPlayback);
     connect(csv_timer_, &QTimer::timeout, this, &PreviewPanel::advanceCsvPlayback);
     connect(live_render_timer_, &QTimer::timeout,
             this, &PreviewPanel::displayLatestLiveFrame);
-    connect(fit_view_button, &QPushButton::clicked, this, &PreviewPanel::fitView);
-    connect(reset_camera_button, &QPushButton::clicked, this, &PreviewPanel::resetCamera);
-    connect(export_image_button, &QPushButton::clicked,
-            this, &PreviewPanel::exportPreviewImage);
-    connect(cancel_load_button_, &QPushButton::clicked, this, &PreviewPanel::cancelFileLoad);
-    connect(open_recent_button, &QPushButton::clicked, this, &PreviewPanel::openRecentRecording);
+    on_click(fit_view_button, &PreviewPanel::fitView);
+    on_click(reset_camera_button, &PreviewPanel::resetCamera);
+    on_click(export_image_button, &PreviewPanel::exportPreviewImage);
+    on_click(cancel_load_button_, &PreviewPanel::cancelFileLoad);
+    on_click(open_recent_button, &PreviewPanel::openRecentRecording);
     connect(timeline_slider_, &QSlider::valueChanged,
             this, &PreviewPanel::seekPlaybackFromSlider);
     connect(loop_playback_check_, &QCheckBox::toggled, this, [this](bool looping) {
@@ -489,23 +463,17 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
             this, [this](double speed) {
                 playback_clock_.setSpeed(speed, playback_elapsed_.elapsed() / 1000.0);
             });
-    connect(browse_stair_button, &QPushButton::clicked, this, &PreviewPanel::browseStairModel);
+    on_click(browse_stair_button, &PreviewPanel::browseStairModel);
     connect(stair_model_edit_, &QLineEdit::editingFinished,
             this, &PreviewPanel::reloadStairModel);
-    connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
-    connect(use_manual_transform_button_, &QPushButton::clicked, this, &PreviewPanel::useManualTransform);
-    connect(apply_profile_button, &QPushButton::clicked,
-            this, &PreviewPanel::applySelectedCalibrationProfile);
-    connect(save_profile_button, &QPushButton::clicked,
-            this, &PreviewPanel::saveSessionCalibrationProfile);
-    connect(duplicate_profile_button, &QPushButton::clicked,
-            this, &PreviewPanel::duplicateCalibrationProfile);
-    connect(retire_profile_button, &QPushButton::clicked,
-            this, &PreviewPanel::retireCalibrationProfile);
-    connect(import_profile_button, &QPushButton::clicked,
-            this, &PreviewPanel::importCalibrationProfile);
-    connect(export_profile_button, &QPushButton::clicked,
-            this, &PreviewPanel::exportCalibrationProfile);
+    on_click(calibrate_button_, &PreviewPanel::beginCalibration);
+    on_click(use_manual_transform_button_, &PreviewPanel::useManualTransform);
+    on_click(apply_profile_button, &PreviewPanel::applySelectedCalibrationProfile);
+    on_click(save_profile_button, &PreviewPanel::saveSessionCalibrationProfile);
+    on_click(duplicate_profile_button, &PreviewPanel::duplicateCalibrationProfile);
+    on_click(retire_profile_button, &PreviewPanel::retireCalibrationProfile);
+    on_click(import_profile_button, &PreviewPanel::importCalibrationProfile);
+    on_click(export_profile_button, &PreviewPanel::exportCalibrationProfile);
     connect(calibration_profile_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) { refreshCalibrationProfileUi(); });
     QDoubleSpinBox* const pose_spins[] = {
@@ -565,7 +533,7 @@ void PreviewPanel::applySessionConfiguration(
     gaze_ry_spin_->setValue(configuration.preview_gaze_rotation_degrees.y);
     gaze_rz_spin_->setValue(configuration.preview_gaze_rotation_degrees.z);
     const int render_hz = std::clamp(configuration.preview_render_hz, 1,
-                                     gui::PerformanceBudgets::MaximumRenderHz);
+                                     kMaximumRenderHz);
     live_render_timer_->setInterval((std::max)(1, 1000 / render_hz));
     if (!configuration.stair_model_path.trimmed().isEmpty()) {
         stair_model_edit_->setText(configuration.stair_model_path);
@@ -612,26 +580,6 @@ bool PreviewPanel::shutdownReady() const {
     return worker_ == nullptr && file_loader_ == nullptr;
 }
 
-gui::SessionCalibrationState PreviewPanel::sessionCalibrationState() const {
-    switch (calibration_state_) {
-        case CalibrationState::Manual: return gui::SessionCalibrationState::Manual;
-        case CalibrationState::Collecting: return gui::SessionCalibrationState::Collecting;
-        case CalibrationState::AutomaticSession:
-            return gui::SessionCalibrationState::AutomaticSession;
-        case CalibrationState::SavedProfile:
-            return gui::SessionCalibrationState::SavedProfile;
-    }
-    return gui::SessionCalibrationState::Manual;
-}
-
-QString PreviewPanel::calibrationQualityText() const {
-    return calibration_quality_label_ ? calibration_quality_label_->text() : QString();
-}
-
-PreviewDeliveryMetrics PreviewPanel::deliveryMetrics() const {
-    return worker_ ? worker_->deliveryMetrics() : last_delivery_metrics_;
-}
-
 void PreviewPanel::openRecording(const QString& path) {
     if (path.endsWith(".xdf", Qt::CaseInsensitive)) {
         startFileLoad(PreviewFileType::Xdf, path);
@@ -661,45 +609,6 @@ void PreviewPanel::exportPreviewImage() {
         return;
     }
     setStatus("Exported preview image to " + QDir::toNativeSeparators(normalized));
-}
-
-bool PreviewPanel::controlsHaveTooltips() const {
-    const QWidget* const controls[] = {
-        marker_stream_edit_,
-        segment_stream_edit_,
-        gaze_stream_edit_,
-        calibration_stream_edit_,
-        stair_model_edit_,
-        tolerance_spin_,
-        cache_megabytes_spin_,
-        playback_speed_spin_,
-        gaze_tx_spin_,
-        gaze_ty_spin_,
-        gaze_tz_spin_,
-        gaze_rx_spin_,
-        gaze_ry_spin_,
-        gaze_rz_spin_,
-        trail_points_spin_,
-        calibrate_button_,
-        use_manual_transform_button_,
-        jump_seconds_spin_,
-        recent_files_combo_,
-        cancel_load_button_,
-        calibration_profile_combo_,
-        calibration_profile_name_edit_,
-        calibration_setup_id_edit_,
-        calibration_notes_edit_,
-        gaze_frame_edit_,
-        target_frame_edit_,
-        stair_tx_spin_, stair_ty_spin_, stair_tz_spin_,
-        stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_,
-    };
-    for (const QWidget* control : controls) {
-        if (!control || control->toolTip().trimmed().isEmpty()) {
-            return false;
-        }
-    }
-    return true;
 }
 
 void PreviewPanel::startPreview() {
@@ -784,7 +693,7 @@ void PreviewPanel::startPreview() {
                     : "Coordinate details: missing or do not match");
                 emit streamInventoryChanged(latest_stream_inventory_);
                 emit calibrationStateChanged(sessionCalibrationState(),
-                                             calibrationQualityText(),
+                                             calibration_quality_label_->text(),
                                              calibration_metadata_compatible_);
             });
     connect(worker_, &QThread::finished, worker_, &QObject::deleteLater);
@@ -814,22 +723,6 @@ void PreviewPanel::startPreview() {
     emit lifecycleChanged(lifecycle_state_, "Finding selected streams");
     live_render_timer_->start();
     worker_->start();
-}
-
-bool PreviewPanel::passesInterfaceChecks() const {
-    if (!controlsHaveTooltips()) return false;
-    if (!widget_ || widget_->accessibleName().trimmed().isEmpty() ||
-        !timeline_slider_ || timeline_slider_->accessibleName().trimmed().isEmpty()) {
-        return false;
-    }
-    const auto buttons = findChildren<QPushButton*>();
-    for (const QPushButton* button : buttons) {
-        if (button->accessibleName().trimmed().isEmpty() ||
-            button->focusPolicy() == Qt::NoFocus) {
-            return false;
-        }
-    }
-    return true;
 }
 
 void PreviewPanel::stopPreview() {
@@ -866,18 +759,17 @@ void PreviewPanel::displayLatestLiveFrame() {
     }
     metrics = worker_->deliveryMetrics();
     last_delivery_metrics_ = metrics;
-    const bool late = metrics.display_latency_ms >
-        gui::PerformanceBudgets::MaximumLivePreviewLatencyMs;
+    const bool late = metrics.display_latency_ms > kMaximumLivePreviewDelayMs;
     delivery_metrics_label_->setText(
         QString(late ? "PREVIEW DELAYED | skipped preview frames "
                      : "skipped preview frames ") +
         QString::number(metrics.replaced_before_display) +
-        " | discarded queued samples " +
+        " | combined updates " +
         QString::number(metrics.coalesced_input_samples) +
         " | delay " + QString::number(metrics.display_latency_ms) + " ms");
     delivery_metrics_label_->setToolTip(
         late ? "Preview delay is above the " +
-                   QString::number(gui::PerformanceBudgets::MaximumLivePreviewLatencyMs) +
+                   QString::number(kMaximumLivePreviewDelayMs) +
                    " ms target; source-rate measurements are unaffected."
              : "Preview updates are arriving within the delay target.");
     emit deliveryMetricsChanged(metrics);
@@ -902,7 +794,7 @@ void PreviewPanel::beginCalibration() {
         }
     }
     calibration_samples_.clear();
-    calibration_state_ = CalibrationState::Collecting;
+    calibration_state_ = gui::SessionCalibrationState::Collecting;
     calibration_rejection_reason_.clear();
     const CalibrationProfile profile = activeSolverProfile();
     setStatus("Waiting for " + QString::number(profile.required_samples) +
@@ -914,7 +806,7 @@ void PreviewPanel::beginCalibration() {
 }
 
 void PreviewPanel::useManualTransform() {
-    calibration_state_ = CalibrationState::Manual;
+    calibration_state_ = gui::SessionCalibrationState::Manual;
     calibration_samples_.clear();
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
@@ -930,14 +822,14 @@ void PreviewPanel::useManualTransform() {
 
 void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     const CalibrationProfile profile = activeSolverProfile();
-    if (calibration_state_ != CalibrationState::Collecting) {
+    if (calibration_state_ != gui::SessionCalibrationState::Collecting) {
         return;
     }
     if (!pose.tracked) {
         calibration_samples_.clear();
         calibration_rejection_reason_ = "Stair target lost";
         if (calibration_progress_throttle_.elapsed() >= 100) {
-            setStatus("Stair target lost; waiting for a stable acquisition...");
+            setStatus("Stair target lost; waiting for a steady reading...");
             calibration_progress_throttle_.restart();
         }
         return;
@@ -970,7 +862,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     }
 
     const auto solution = solveTrackedTargetCalibration(calibration_samples_, profile);
-    calibration_state_ = CalibrationState::Manual;
+    calibration_state_ = gui::SessionCalibrationState::Manual;
     calibration_samples_.clear();
     if (!solution) {
         calibration_rejection_reason_ =
@@ -985,7 +877,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     automatic_gaze_transform_ = gazeTransformFromTargetCalibration(
         profile,
         solution->holo_from_target);
-    calibration_state_ = CalibrationState::AutomaticSession;
+    calibration_state_ = gui::SessionCalibrationState::AutomaticSession;
     calibration_quality_ = solution->quality;
     if (worker_) {
         worker_->setGazeTransform(gazeTransform());
@@ -1044,19 +936,8 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
     vicon_transform.name = "Vicon";
     vicon_transform.scale = 0.001;
     PreviewLoadOptions options;
-    options.maximum_preview_frames = gui::PerformanceBudgets::MaximumPreviewFrames;
     options.maximum_memory_bytes =
         static_cast<std::size_t>(cache_megabytes_spin_->value()) * 1024ULL * 1024ULL;
-    options.maximum_stored_values_per_stream =
-        gui::PerformanceBudgets::MaximumStoredValuesPerXdfStream;
-    options.maximum_file_bytes = gui::PerformanceBudgets::MaximumXdfFileBytes;
-    options.maximum_samples_per_stream =
-        gui::PerformanceBudgets::MaximumSamplesPerXdfStream;
-    options.maximum_channels = gui::PerformanceBudgets::MaximumXdfChannels;
-    options.maximum_streams = gui::PerformanceBudgets::MaximumXdfStreams;
-    options.maximum_header_bytes = gui::PerformanceBudgets::MaximumHeaderBytes;
-    options.cancellation_check_sample_interval =
-        gui::PerformanceBudgets::FileCancelSampleInterval;
 
     auto* loader = new PreviewFileLoader(
         type, path, vicon_transform, gazeTransform(), tolerance_spin_->value(),
@@ -1402,8 +1283,8 @@ PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
 }
 
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
-    if (calibration_state_ == CalibrationState::AutomaticSession ||
-        calibration_state_ == CalibrationState::SavedProfile) {
+    if (calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
+        calibration_state_ == gui::SessionCalibrationState::SavedProfile) {
         return automatic_gaze_transform_;
     }
     return manualGazeTransform();
@@ -1411,7 +1292,7 @@ PreviewTransformProfile PreviewPanel::gazeTransform() const {
 
 void PreviewPanel::resetCalibrationSession() {
     calibration_samples_.clear();
-    calibration_state_ = CalibrationState::Manual;
+    calibration_state_ = gui::SessionCalibrationState::Manual;
     automatic_gaze_transform_ = {};
 }
 
@@ -1566,7 +1447,7 @@ void PreviewPanel::applySelectedCalibrationProfile() {
     }
     automatic_gaze_transform_ = profile->gaze_transform;
     calibration_quality_ = profile->quality;
-    calibration_state_ = CalibrationState::SavedProfile;
+    calibration_state_ = gui::SessionCalibrationState::SavedProfile;
     if (worker_) worker_->setGazeTransform(gazeTransform());
     reloadStairModel();
     widget_->requestViewRefit();
@@ -1583,8 +1464,8 @@ void PreviewPanel::applySelectedCalibrationProfile() {
 }
 
 void PreviewPanel::saveSessionCalibrationProfile() {
-    if (calibration_state_ != CalibrationState::AutomaticSession &&
-        calibration_state_ != CalibrationState::SavedProfile) {
+    if (calibration_state_ != gui::SessionCalibrationState::AutomaticSession &&
+        calibration_state_ != gui::SessionCalibrationState::SavedProfile) {
         setStatus("Complete or apply a calibration before saving it");
         return;
     }
@@ -1626,9 +1507,9 @@ void PreviewPanel::saveSessionCalibrationProfile() {
     }
     saveCalibrationProfiles();
     refreshCalibrationProfileUi(profile.id);
-    calibration_state_ = CalibrationState::SavedProfile;
+    calibration_state_ = gui::SessionCalibrationState::SavedProfile;
     updateCalibrationPersistentStatus(gui::SessionCalibrationState::SavedProfile,
-                                      calibrationQualityText(),
+                                      calibration_quality_label_->text(),
                                       calibration_metadata_compatible_);
     setStatus("Saved calibration " + profile.display_name);
 }

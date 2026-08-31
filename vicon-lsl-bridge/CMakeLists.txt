@@ -148,7 +148,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/BridgeWindowUi.cpp
                 src/gui/LabRecorderClient.cpp
                 src/gui/LabRecorderFilenamePolicy.cpp
-                src/gui/LabRecorderRuntimePolicy.cpp
                 src/gui/CalibrationProfileStore.cpp
                 src/gui/RecorderProcessController.cpp
                 src/gui/RecordingVerifier.cpp
