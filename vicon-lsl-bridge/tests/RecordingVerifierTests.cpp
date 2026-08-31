@@ -120,7 +120,7 @@ vicon_lsl::gui::RecordingVerificationRequest verificationRequest(
     selected.coordinate_frame = "vicon";
     selected.selected = true;
     selected.required = true;
-    request.preflight_inventory = {selected};
+    request.setup_check_inventory = {selected};
     return request;
 }
 

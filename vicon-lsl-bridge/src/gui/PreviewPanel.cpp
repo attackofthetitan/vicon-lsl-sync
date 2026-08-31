@@ -8,6 +8,8 @@
 #include "preview/PreviewXdf.h"
 #include "StreamDefaults.h"
 
+#include <exception>
+
 #include <QCoreApplication>
 #include <QAbstractButton>
 #include <QCheckBox>
@@ -1077,7 +1079,10 @@ void PreviewPanel::reloadStairModel() {
         widget_->setStairMesh(mesh, stairTransform());
         stair_model_loaded_ = true;
         setStatus("Stair model loaded: " + QFileInfo(path).fileName());
-    } catch (...) {}
+    } catch (const std::exception& ex) {
+        stair_model_loaded_ = false;
+        setStatus("Stair model could not be read: " + QString::fromUtf8(ex.what()));
+    }
 }
 
 PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
@@ -1340,7 +1345,10 @@ void PreviewPanel::updateMeasuredStairPose() {
         const PreviewMesh mesh = loadObjMesh(QDir::toNativeSeparators(stair_model_edit_->text()).toStdString());
         widget_->setStairMesh(mesh, stairTransform());
         widget_->requestViewRefit();
-    } catch (...) {}
+    } catch (const std::exception& ex) {
+        stair_model_loaded_ = false;
+        setStatus("Stair model could not be read: " + QString::fromUtf8(ex.what()));
+    }
 }
 
 void PreviewPanel::updateCalibrationPersistentStatus(gui::SessionCalibrationState state, const QString& text, bool metadata_compatible) {

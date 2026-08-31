@@ -132,7 +132,7 @@ StreamIdentitySelection selectStreamIdentity(
                std::tie(b.source_id, b.hostname, b.session_id, b.uid);
     });
     if (matches.isEmpty()) {
-        return {-1, false, false, "No visible stream matches " + binding.name};
+        return {-1, false, false, true, "No visible stream matches " + binding.name};
     }
 
     const QString req_src = binding.source_id.trimmed();
@@ -151,28 +151,29 @@ StreamIdentitySelection selectStreamIdentity(
                 return std::tie(a.hostname, a.session_id, a.uid) <
                        std::tie(b.hostname, b.session_id, b.uid);
             });
-            return {exact.front(), false, false,
-                    exact.size() > 1
+            const bool duplicated_source = exact.size() > 1;
+            return {exact.front(), false, false, duplicated_source,
+                    duplicated_source
                         ? "Selected the newest visible instance of configured source ID " +
                               req_src + " from " + QString::number(exact.size()) +
-                              " recovered instances"
+                              " matching sources"
                         : "Selected configured source ID " + req_src};
         }
         if (binding.reconnection == StreamReconnectionMode::SourceIdentity) {
-            return {-1, false, false,
+            return {-1, false, false, true,
                     "Selected source ID " + req_src +
                         " is unavailable; the app did not switch to another stream with the same name"};
         }
     }
 
     if (matches.size() > 1 && binding.reconnection != StreamReconnectionMode::FollowName) {
-        return {-1, true, false,
+        return {-1, true, false, true,
                 "Multiple streams named " + binding.name +
                     " are available; select a source ID or enable Follow by name"};
     }
 
     const bool fallback = !req_src.isEmpty() || matches.size() > 1;
-    return {matches.front(), false, fallback,
+    return {matches.front(), false, fallback, fallback,
             fallback ? "Follow by name selected the first matching source"
                      : "Selected the only matching stream"};
 }

@@ -13,7 +13,7 @@ namespace vicon_lsl::gui {
 enum class RecorderProcessKind {
     None,
     GraphicalRecorder,
-    AllowlistRecorder,
+    SelectedStreamRecorder,
 };
 
 class RecorderProcessController : public QObject {
@@ -25,21 +25,21 @@ public:
     RecorderProcessState state() const { return state_; }
     RecorderProcessKind kind() const { return kind_; }
     bool ownsRunningProcess() const;
-    bool allowlistRecording() const;
+    bool selectedStreamRecording() const;
     QByteArray boundedOutput() const { return output_buffer_; }
 
     bool launchGraphicalRecorder(const QString& executable, QString* error = nullptr);
-    bool launchAllowlistRecorder(const QString& executable,
+    bool launchSelectedStreamRecorder(const QString& executable,
                                  const QString& absolute_output_path,
                                  const QVector<StreamIdentity>& selected_streams,
                                  QString* error = nullptr);
-    bool stopAllowlistRecording();
+    bool stopSelectedStreamRecording();
     void endOwnedProcess();
     void detach();
 
-    static QString bundledAllowlistExecutable(const QString& graphical_executable,
+    static QString bundledSelectedStreamExecutable(const QString& graphical_executable,
                                               const QString& application_directory);
-    static QStringList allowlistArguments(const QString& absolute_output_path,
+    static QStringList selectedStreamArguments(const QString& absolute_output_path,
                                           const QVector<StreamIdentity>& selected_streams,
                                           QString* error = nullptr);
 

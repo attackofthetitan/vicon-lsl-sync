@@ -80,8 +80,8 @@ private slots:
     void onRefreshLabRecorder();
     void onStartRecording();
     void onStopRecording();
-    void onRunPreflight();
-    void onOverridePreflight();
+    void onRunSetupCheck();
+    void onOverrideSetupCheck();
     void onDiscoverStreams();
     void onFindNextRun();
     void onResetConfiguration();
@@ -118,14 +118,16 @@ private:
     void updateReadiness();
     void updateRecordingButtons();
     void updateDashboard();
+    void refreshUi();
+    void pumpSession();
     void updateEventLog();
     QJsonObject diagnosticBundle() const;
     void appendEvent(SessionComponent component,
                      EventSeverity severity,
                      const QString& message);
-    void populatePreflight(const PreflightResult& result);
-    PreflightResult runPreflight() const;
-    void beginRecordingAfterPreflight();
+    void populateSetupCheck(const SetupCheckResult& result);
+    SetupCheckResult runSetupCheck() const;
+    void beginRecordingAfterSetupCheck();
     void completePendingRecordingStart();
     QVector<vicon_lsl::gui::StreamIdentity> selectedStreams() const;
     void populateStreamTable();
@@ -138,7 +140,7 @@ private:
     void startStreamDiscovery(bool continue_recording_start);
     void cancelStreamDiscovery();
     QString resolveLabRecorderExecutable() const;
-    QString resolveAllowlistExecutable() const;
+    QString resolveSelectedStreamExecutable() const;
     void beginLabRecorderStartup();
     void launchConfiguredRecorder();
     void requestVerification();
@@ -158,7 +160,7 @@ private:
     vicon_lsl::gui::SessionConfiguration configuration_;
     vicon_lsl::gui::SessionUiState ui_state_;
     SessionEventLog event_log_;
-    PreflightResult preflight_;
+    SetupCheckResult setup_check_;
     RecordingPathResult path_result_;
     QVector<vicon_lsl::gui::StreamIdentity> stream_inventory_;
     QVector<vicon_lsl::gui::StreamIdentity> recording_inventory_;
@@ -181,6 +183,12 @@ private:
     QElapsedTimer recording_elapsed_;
     QElapsedTimer verification_file_elapsed_;
 
+    enum class SessionSequence { None, StartingSession, StoppingSession, Closing };
+    bool startingSession() const { return sequence_ == SessionSequence::StartingSession; }
+    bool stoppingSession() const { return sequence_ == SessionSequence::StoppingSession; }
+    bool closing() const { return sequence_ == SessionSequence::Closing; }
+
+    SessionSequence sequence_ = SessionSequence::None;
     vicon_lsl::gui::SessionWorkflowState workflow_ =
         vicon_lsl::gui::SessionWorkflowState::Idle;
     vicon_lsl::gui::SessionFileState file_state_ =
@@ -199,11 +207,8 @@ private:
     bool startup_endpoint_probe_ = false;
     bool startup_launch_attempted_ = false;
     bool pending_recording_start_ = false;
-    bool preflight_start_waiting_ = false;
-    bool guided_start_pending_ = false;
-    bool guided_stop_pending_ = false;
+    bool setup_check_start_waiting_ = false;
     bool verification_waiting_for_file_ = false;
-    bool close_pending_ = false;
     bool close_finalizing_ = false;
     bool owned_process_end_requested_ = false;
     bool recorder_connection_loss_reported_ = false;

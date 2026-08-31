@@ -1,6 +1,7 @@
 #include "gui/PreviewStreamWorker.h"
 
 #include "StreamDefaults.h"
+#include "gui/LslStreamIdentity.h"
 #include "gui/SessionConfiguration.h"
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewFrameAssembler.h"
@@ -212,18 +213,8 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         QVector<gui::StreamIdentity> candidates;
         candidates.reserve(static_cast<qsizetype>(streams.size()));
         for (const lsl::stream_info& c : streams) {
-            gui::StreamIdentity id;
+            gui::StreamIdentity id = gui::identityFromStreamInfo(c);
             id.role = roleText(state.role);
-            id.name = QString::fromStdString(c.name());
-            id.type = QString::fromStdString(c.type());
-            id.source_id = QString::fromStdString(c.source_id());
-            id.hostname = QString::fromStdString(c.hostname());
-            id.session_id = QString::fromStdString(c.session_id());
-            id.uid = QString::fromStdString(c.uid());
-            id.publisher_created_at = c.created_at();
-            id.channel_count = c.channel_count();
-            id.nominal_rate = c.nominal_srate();
-            id.discovered_at = QDateTime::currentDateTimeUtc();
             candidates.push_back(std::move(id));
         }
         gui::StreamBinding selection_binding;
@@ -250,17 +241,15 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         }
 
         const std::size_t selected_index = static_cast<std::size_t>(selection.index);
-        QString selection_warning = (selection.used_name_fallback || selection.explanation.contains("recovered instances"))
-            ? selection.explanation : QString();
+        QString selection_warning = selection.should_warn ? selection.explanation : QString();
 
         auto inlet = std::make_unique<lsl::stream_inlet>(streams[selected_index], 360, 0, true);
         lsl::stream_info metadata = streams[selected_index];
-        try { metadata = inlet->info(kMetadataTimeoutSeconds); } catch (...) {}
+        try { metadata = inlet->info(kMetadataTimeoutSeconds); } catch (const std::exception&) {}
 
         bool metadata_complete = false;
         state.labels = channelLabels(metadata, state.role, &metadata_complete);
-        const char* coordinate_frame = metadata.desc().child("acquisition").child_value("coordinate_frame");
-        state.coordinate_frame = coordinate_frame ? coordinate_frame : "";
+        state.coordinate_frame = gui::coordinateFrameOf(metadata).toStdString();
         state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
         state.nominal_rate = metadata.nominal_srate() > 0.0 && std::isfinite(metadata.nominal_srate()) ? metadata.nominal_srate() : 0.0;
         state.inlet = std::move(inlet);
@@ -270,22 +259,13 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         state.latest_timestamp = 0.0;
         state.rate_tracker.reset();
         state.last_error.clear();
+        state.identity = gui::identityFromStreamInfo(metadata);
         state.identity.role = roleText(state.role);
-        state.identity.name = QString::fromStdString(metadata.name());
-        state.identity.type = QString::fromStdString(metadata.type());
-        state.identity.source_id = QString::fromStdString(metadata.source_id());
-        state.identity.hostname = QString::fromStdString(metadata.hostname());
-        state.identity.session_id = QString::fromStdString(metadata.session_id());
-        state.identity.uid = QString::fromStdString(metadata.uid());
-        state.identity.publisher_created_at = metadata.created_at();
-        state.identity.channel_count = metadata.channel_count();
         state.identity.nominal_rate = state.nominal_rate;
-        state.identity.coordinate_frame = QString::fromStdString(state.coordinate_frame);
         const bool coordinate_required = state.role == PreviewStreamRole::HoloLensGaze ||
                                          state.role == PreviewStreamRole::HoloLensCalibrationTarget;
-        state.identity.metadata_complete = metadata_complete && !state.identity.source_id.isEmpty() &&
-            (!coordinate_required || !state.identity.coordinate_frame.isEmpty());
-        state.identity.discovered_at = QDateTime::currentDateTimeUtc();
+        state.identity.metadata_complete = metadata_complete &&
+            gui::identityDescribesItself(state.identity, coordinate_required);
         if (!state.follow_by_name && !state.identity.source_id.isEmpty()) state.bound_source_id = state.identity.source_id;
         if (isInterruptionRequested()) return false;
         if (!state.identity.metadata_complete) {

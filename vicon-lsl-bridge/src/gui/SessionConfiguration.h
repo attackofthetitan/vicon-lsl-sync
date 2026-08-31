@@ -66,6 +66,7 @@ struct StreamIdentitySelection {
     int index = -1;
     bool ambiguous = false;
     bool used_name_fallback = false;
+    bool should_warn = false;
     QString explanation;
 };
 

@@ -47,7 +47,7 @@ struct BridgeWindowUi {
     QLabel* shutdown_label = nullptr;
     QPushButton* start_session_button = nullptr;
     QPushButton* stop_session_button = nullptr;
-    QPushButton* run_preflight_button = nullptr;
+    QPushButton* run_setup_check_button = nullptr;
     QPushButton* emergency_stop_button = nullptr;
 
     QComboBox* preset_combo = nullptr;
@@ -57,9 +57,9 @@ struct BridgeWindowUi {
     QPushButton* import_configuration_button = nullptr;
     QPushButton* export_configuration_button = nullptr;
     QCheckBox* recorder_only_check = nullptr;
-    QTreeWidget* preflight_tree = nullptr;
-    QLineEdit* preflight_override_reason_edit = nullptr;
-    QPushButton* preflight_override_button = nullptr;
+    QTreeWidget* setup_check_tree = nullptr;
+    QLineEdit* setup_check_override_reason_edit = nullptr;
+    QPushButton* setup_check_override_button = nullptr;
 
     QLineEdit* server_edit = nullptr;
     QLineEdit* marker_stream_edit = nullptr;

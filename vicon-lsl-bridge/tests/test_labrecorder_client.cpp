@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     run("session configuration", testSessionConfiguration);
     run("session event log", testSessionEventLog);
     run("calibration profiles", testCalibrationProfileStore);
-    run("recorder allowlist", testRecorderAllowlistPolicy);
+    run("selected-stream recorder", testSelectedStreamRecorderPolicy);
     run("duplicate and shutdown protocol", testRecorderDuplicateAndShutdownProtocol);
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);

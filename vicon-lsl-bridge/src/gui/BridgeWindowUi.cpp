@@ -142,11 +142,11 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
                                           QKeySequence("Ctrl+Shift+R"), "Start guided session");
     ui->stop_session_button = makeButton("Stop Session", "Stop recording, preview, and the bridge, then close a recorder started here.",
                                          QKeySequence("Ctrl+Shift+T"), "Stop guided session");
-    ui->run_preflight_button = makeButton("Check Setup", "Check whether the session is ready to record.",
+    ui->run_setup_check_button = makeButton("Check Setup", "Check whether the session is ready to record.",
                                           QKeySequence(Qt::Key_F5), "Check session setup");
     ui->emergency_stop_button = makeButton("Emergency Stop Recording", "Ask the recorder to stop immediately.",
                                            QKeySequence("Ctrl+Shift+S"), "Emergency stop recording");
-    addWidgets(db_buttons, {ui->start_session_button, ui->stop_session_button, ui->run_preflight_button, ui->emergency_stop_button});
+    addWidgets(db_buttons, {ui->start_session_button, ui->stop_session_button, ui->run_setup_check_button, ui->emergency_stop_button});
     db_buttons->addStretch(1);
     ui->shutdown_label = makeStateValue(QString(), "Shutdown progress");
     db_buttons->addWidget(ui->shutdown_label, 1);
@@ -193,26 +193,26 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->recorder_only_check->setToolTip("Allow recording when the Vicon bridge is not running.");
     session_layout->addWidget(ui->recorder_only_check);
 
-    auto* preflight_group = new QGroupBox("Setup Check");
-    auto* preflight_layout = new QVBoxLayout(preflight_group);
-    ui->preflight_tree = new QTreeWidget();
-    ui->preflight_tree->setColumnCount(4);
-    ui->preflight_tree->setHeaderLabels({"Importance", "Part", "Result", "Details"});
-    ui->preflight_tree->header()->setSectionResizeMode(3, QHeaderView::Stretch);
-    ui->preflight_tree->setRootIsDecorated(false);
-    ui->preflight_tree->setAccessibleName("Setup checks and suggested fixes");
-    preflight_layout->addWidget(ui->preflight_tree, 1);
+    auto* setup_check_group = new QGroupBox("Setup Check");
+    auto* setup_check_layout = new QVBoxLayout(setup_check_group);
+    ui->setup_check_tree = new QTreeWidget();
+    ui->setup_check_tree->setColumnCount(4);
+    ui->setup_check_tree->setHeaderLabels({"Importance", "Part", "Result", "Details"});
+    ui->setup_check_tree->header()->setSectionResizeMode(3, QHeaderView::Stretch);
+    ui->setup_check_tree->setRootIsDecorated(false);
+    ui->setup_check_tree->setAccessibleName("Setup checks and suggested fixes");
+    setup_check_layout->addWidget(ui->setup_check_tree, 1);
 
     auto* override_row = new QHBoxLayout();
-    ui->preflight_override_reason_edit = new QLineEdit();
-    ui->preflight_override_reason_edit->setPlaceholderText("Required reason for Record anyway");
-    ui->preflight_override_reason_edit->setToolTip("Explain why recording should start even though a required check failed.");
-    ui->preflight_override_button = makeButton("Record Anyway", "Start recording after entering a reason for the failed check.");
-    override_row->addWidget(makeTooltipLabel("Reason:", ui->preflight_override_reason_edit, ui->preflight_override_reason_edit->toolTip()));
-    override_row->addWidget(ui->preflight_override_reason_edit, 1);
-    override_row->addWidget(ui->preflight_override_button);
-    preflight_layout->addLayout(override_row);
-    session_layout->addWidget(preflight_group, 1);
+    ui->setup_check_override_reason_edit = new QLineEdit();
+    ui->setup_check_override_reason_edit->setPlaceholderText("Required reason for Record anyway");
+    ui->setup_check_override_reason_edit->setToolTip("Explain why recording should start even though a required check failed.");
+    ui->setup_check_override_button = makeButton("Record Anyway", "Start recording after entering a reason for the failed check.");
+    override_row->addWidget(makeTooltipLabel("Reason:", ui->setup_check_override_reason_edit, ui->setup_check_override_reason_edit->toolTip()));
+    override_row->addWidget(ui->setup_check_override_reason_edit, 1);
+    override_row->addWidget(ui->setup_check_override_button);
+    setup_check_layout->addLayout(override_row);
+    session_layout->addWidget(setup_check_group, 1);
     ui->controls_tabs->addTab(scrollable(session_page), "Session");
 
     // Bridge Tab

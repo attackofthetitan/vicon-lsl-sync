@@ -47,7 +47,7 @@ namespace vicon_lsl::gui {
 enum class SessionWorkflowState {
     Idle,
     Preparing,
-    PreflightBlocked,
+    SetupBlocked,
     Ready,
     Starting,
     Recording,
@@ -103,7 +103,7 @@ enum class EventSeverity {
     Error,
 };
 
-enum class PreflightLevel {
+enum class SetupCheckLevel {
     Required,
     Warning,
     Information,
@@ -147,17 +147,17 @@ private:
     std::function<QDateTime()> clock_;
 };
 
-struct PreflightItem {
+struct SetupCheckItem {
     SessionComponent component = SessionComponent::Application;
-    PreflightLevel level = PreflightLevel::Information;
+    SetupCheckLevel level = SetupCheckLevel::Information;
     bool passed = true;
     QString message;
     QString corrective_action;
 };
 
-struct PreflightResult {
+struct SetupCheckResult {
     QDateTime completed_at;
-    QVector<PreflightItem> items;
+    QVector<SetupCheckItem> items;
     bool override_used = false;
     QString override_reason;
 
