@@ -65,6 +65,14 @@ QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& t
     return label;
 }
 
+QPushButton* makeButton(const QString& text, const QString& tooltip,
+                        const QString& accessible_name = {}) {
+    auto* button = new QPushButton(text);
+    button->setToolTip(tooltip);
+    if (!accessible_name.isEmpty()) button->setAccessibleName(accessible_name);
+    return button;
+}
+
 QDoubleSpinBox* makeDistanceSpin(double value = 0.0) {
     auto* spin = new QDoubleSpinBox();
     spin->setRange(-100.0, 100.0);
@@ -225,12 +233,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     alignment_layout->addLayout(transforms);
 
     auto* calibration_row = new QHBoxLayout();
-    calibrate_button_ = new QPushButton("Calibrate from Stair Target");
-    use_manual_transform_button_ = new QPushButton("Use Manual Transform");
-    calibrate_button_->setToolTip(
-        "Collect stable poses from the stair-target stream and apply a HoloLens transform for this session only.");
-    use_manual_transform_button_->setToolTip(
-        "Stop automatic calibration and use the manual HoloLens translation and rotation fields.");
+    calibrate_button_ = makeButton("Calibrate from Stair Target", "Collect stable poses from the stair-target stream and apply a HoloLens transform for this session only.");
+    use_manual_transform_button_ = makeButton("Use Manual Transform", "Stop automatic calibration and use the manual HoloLens translation and rotation fields.");
     calibration_row->addWidget(calibrate_button_);
     calibration_row->addWidget(use_manual_transform_button_);
     calibration_row->addStretch(1);
@@ -287,20 +291,12 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     profiles_layout->addLayout(pose_grid);
 
     auto* profile_buttons = new QHBoxLayout();
-    auto* apply_profile_button = new QPushButton("Apply");
-    auto* save_profile_button = new QPushButton("Save Session Calibration");
-    auto* duplicate_profile_button = new QPushButton("Copy");
-    auto* retire_profile_button = new QPushButton("Hide");
-    auto* import_profile_button = new QPushButton("Import");
-    auto* export_profile_button = new QPushButton("Export");
-    apply_profile_button->setToolTip("Apply the selected saved calibration to the live preview and session details.");
-    save_profile_button->setToolTip(
-        "Save the current calibration with its physical setup and quality details.");
-    duplicate_profile_button->setToolTip("Copy the selected calibration with a separate ID.");
-    retire_profile_button->setToolTip(
-        "Hide the selected calibration without deleting it from past session records.");
-    import_profile_button->setToolTip("Import a saved calibration file.");
-    export_profile_button->setToolTip("Export the selected calibration to a file.");
+    auto* apply_profile_button = makeButton("Apply", "Apply the selected saved calibration to the live preview and session details.");
+    auto* save_profile_button = makeButton("Save Session Calibration", "Save the current calibration with its physical setup and quality details.");
+    auto* duplicate_profile_button = makeButton("Copy", "Copy the selected calibration with a separate ID.");
+    auto* retire_profile_button = makeButton("Hide", "Hide the selected calibration without deleting it from past session records.");
+    auto* import_profile_button = makeButton("Import", "Import a saved calibration file.");
+    auto* export_profile_button = makeButton("Export", "Export the selected calibration to a file.");
     profile_buttons->addWidget(apply_profile_button);
     profile_buttons->addWidget(save_profile_button);
     profile_buttons->addWidget(duplicate_profile_button);
@@ -346,13 +342,9 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
         "skipped preview frames 0 | discarded queued samples 0 | delay 0 ms");
     delivery_metrics_label_->setToolTip(
         "Older preview updates are skipped so the display stays current.");
-    auto* fit_view_button = new QPushButton("Fit View");
-    auto* reset_camera_button = new QPushButton("Reset Camera");
-    auto* export_image_button = new QPushButton("Export Image");
-    fit_view_button->setToolTip("Fit the camera to all currently visible data.");
-    reset_camera_button->setToolTip("Restore the default camera angle, zoom, and fit.");
-    export_image_button->setToolTip(
-        "Export the current preview view as a PNG image without changing source data.");
+    auto* fit_view_button = makeButton("Fit View", "Fit the camera to all currently visible data.");
+    auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
+    auto* export_image_button = makeButton("Export Image", "Export the current preview view as a PNG image without changing source data.");
     button_row->addWidget(start_button_);
     button_row->addWidget(stop_button_);
     button_row->addWidget(open_csv_button_);
@@ -372,14 +364,12 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     load_progress_->setRange(0, 100);
     load_progress_->setValue(0);
     load_progress_->setVisible(false);
-    cancel_load_button_ = new QPushButton("Cancel Load");
+    cancel_load_button_ = makeButton("Cancel Load", "Cancel the background file load and keep the current source.");
     cancel_load_button_->setEnabled(false);
-    cancel_load_button_->setToolTip("Cancel the background file load and keep the current source.");
     recent_files_combo_ = new QComboBox();
     recent_files_combo_->setMinimumContentsLength(16);
     recent_files_combo_->setToolTip("Recently opened CSV and XDF recordings.");
-    auto* open_recent_button = new QPushButton("Open Recent");
-    open_recent_button->setToolTip("Open the selected recent recording.");
+    auto* open_recent_button = makeButton("Open Recent", "Open the selected recent recording.");
     load_row->addWidget(file_state_label_, 1);
     load_row->addWidget(memory_label_);
     load_row->addWidget(load_progress_);
@@ -389,24 +379,12 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     controls_layout->addLayout(load_row);
 
     auto* playback_row = new QHBoxLayout();
-    auto* jump_start_button = new QPushButton("|<");
-    auto* step_back_button = new QPushButton("<");
-    auto* jump_back_button = new QPushButton("- Jump");
-    auto* jump_forward_button = new QPushButton("Jump +");
-    auto* step_forward_button = new QPushButton(">");
-    auto* jump_end_button = new QPushButton(">|");
-    jump_start_button->setAccessibleName("Jump to recording start");
-    step_back_button->setAccessibleName("Step one frame backward");
-    jump_back_button->setAccessibleName("Jump backward by selected time");
-    jump_forward_button->setAccessibleName("Jump forward by selected time");
-    step_forward_button->setAccessibleName("Step one frame forward");
-    jump_end_button->setAccessibleName("Jump to recording end");
-    jump_start_button->setToolTip("Go to the first loaded frame.");
-    step_back_button->setToolTip("Go back one loaded frame.");
-    jump_back_button->setToolTip("Seek backward by the selected time interval.");
-    jump_forward_button->setToolTip("Seek forward by the selected time interval.");
-    step_forward_button->setToolTip("Go forward one loaded frame.");
-    jump_end_button->setToolTip("Go to the final loaded frame.");
+    auto* jump_start_button = makeButton("|<", "Go to the first loaded frame.", "Jump to recording start");
+    auto* step_back_button = makeButton("<", "Go back one loaded frame.", "Step one frame backward");
+    auto* jump_back_button = makeButton("- Jump", "Seek backward by the selected time interval.", "Jump backward by selected time");
+    auto* jump_forward_button = makeButton("Jump +", "Seek forward by the selected time interval.", "Jump forward by selected time");
+    auto* step_forward_button = makeButton(">", "Go forward one loaded frame.", "Step one frame forward");
+    auto* jump_end_button = makeButton(">|", "Go to the final loaded frame.", "Jump to recording end");
     timeline_slider_ = new QSlider(Qt::Horizontal);
     timeline_slider_->setRange(0, 10000);
     timeline_slider_->setEnabled(false);

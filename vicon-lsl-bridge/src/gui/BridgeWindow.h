@@ -136,6 +136,8 @@ private:
     void completePendingRecordingStart();
     QVector<vicon_lsl::gui::StreamIdentity> selectedStreams() const;
     void populateStreamTable();
+    void mergeStreamInventory(
+        const QVector<vicon_lsl::gui::StreamIdentity>& streams);
     void populateBindingCombos();
     void updateBindingsFromUi();
     static void selectBindingCombo(QComboBox* combo,

@@ -59,7 +59,6 @@ public:
                                               bool select_all_first);
     static QString sanitizedValue(QString value);
     static QString renderedFilenamePreview(const LabRecorderFilenameFields& fields);
-    static QString validationError(const LabRecorderFilenameFields& fields);
     static RecordingPathResult validate(
         const LabRecorderFilenameFields& fields,
         const RecordingPathValidationOptions& options = {});

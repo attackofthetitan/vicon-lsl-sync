@@ -40,6 +40,7 @@
 #include <QTreeWidgetItem>
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <utility>
 
@@ -47,15 +48,38 @@ namespace {
 
 using vicon_lsl::gui::RecorderProcessKind;
 using vicon_lsl::gui::SessionCalibrationState;
+using vicon_lsl::gui::SessionConfiguration;
 using vicon_lsl::gui::SessionFileState;
 using vicon_lsl::gui::SessionWorkflowState;
 using vicon_lsl::gui::StreamBinding;
 using vicon_lsl::gui::StreamIdentity;
 using vicon_lsl::gui::StreamReconnectionMode;
+using vicon_lsl::gui_detail::BridgeWindowUi;
 
 constexpr int kFilenameSyncDelayMs = 300;
 constexpr int kStatusStaleMs = 3000;
 constexpr int kVerificationFileTimeoutMs = 15000;
+
+struct BindingControl {
+    QString role;
+    QComboBox* combo;
+    QCheckBox* follow;
+    StreamBinding* binding;
+};
+
+std::array<BindingControl, 4> bindingControls(
+    BridgeWindowUi& ui,
+    SessionConfiguration& configuration) {
+    return {{{"markers", ui.marker_binding_combo, ui.marker_follow_name_check,
+              &configuration.preview_markers},
+             {"segments", ui.segment_binding_combo, ui.segment_follow_name_check,
+              &configuration.preview_segments},
+             {"gaze", ui.gaze_binding_combo, ui.gaze_follow_name_check,
+              &configuration.preview_gaze},
+             {"calibration", ui.calibration_binding_combo,
+              ui.calibration_follow_name_check,
+              &configuration.preview_calibration}}};
+}
 
 std::shared_ptr<QSettings> sessionSettings(
     std::shared_ptr<QSettings> settings) {
@@ -202,56 +226,35 @@ BridgeWindow::~BridgeWindow() {
 }
 
 void BridgeWindow::connectSignals() {
-    connect(ui_->start_button, &QPushButton::clicked,
-            this, &BridgeWindow::onStart);
-    connect(ui_->stop_button, &QPushButton::clicked,
-            this, &BridgeWindow::onStop);
-    connect(ui_->start_session_button, &QPushButton::clicked,
-            this, &BridgeWindow::onStartSession);
-    connect(ui_->stop_session_button, &QPushButton::clicked,
-            this, &BridgeWindow::onStopSession);
-    connect(ui_->emergency_stop_button, &QPushButton::clicked,
-            this, &BridgeWindow::onEmergencyStop);
-    connect(ui_->run_preflight_button, &QPushButton::clicked,
-            this, &BridgeWindow::onRunPreflight);
-    connect(ui_->preflight_override_button, &QPushButton::clicked,
-            this, &BridgeWindow::onOverridePreflight);
-    connect(ui_->browse_root_button, &QPushButton::clicked,
-            this, &BridgeWindow::onBrowseStudyRoot);
-    connect(ui_->browse_labrecorder_button, &QPushButton::clicked,
-            this, &BridgeWindow::onBrowseLabRecorder);
-    connect(ui_->launch_labrecorder_button, &QPushButton::clicked,
-            this, &BridgeWindow::onLaunchLabRecorder);
-    connect(ui_->connect_labrecorder_button, &QPushButton::clicked,
-            this, &BridgeWindow::onConnectLabRecorder);
-    connect(ui_->detach_labrecorder_button, &QPushButton::clicked,
-            this, &BridgeWindow::onDetachLabRecorder);
-    connect(ui_->refresh_streams_button, &QPushButton::clicked,
-            this, &BridgeWindow::onRefreshLabRecorder);
-    connect(ui_->start_recording_button, &QPushButton::clicked,
-            this, &BridgeWindow::onStartRecording);
-    connect(ui_->stop_recording_button, &QPushButton::clicked,
-            this, &BridgeWindow::onStopRecording);
-    connect(ui_->discover_streams_button, &QPushButton::clicked,
-            this, &BridgeWindow::onDiscoverStreams);
-    connect(ui_->find_next_run_button, &QPushButton::clicked,
-            this, &BridgeWindow::onFindNextRun);
-    connect(ui_->reset_configuration_button, &QPushButton::clicked,
-            this, &BridgeWindow::onResetConfiguration);
-    connect(ui_->save_preset_button, &QPushButton::clicked,
-            this, &BridgeWindow::onSavePreset);
-    connect(ui_->load_preset_button, &QPushButton::clicked,
-            this, &BridgeWindow::onLoadPreset);
-    connect(ui_->import_configuration_button, &QPushButton::clicked,
-            this, &BridgeWindow::onImportConfiguration);
-    connect(ui_->export_configuration_button, &QPushButton::clicked,
-            this, &BridgeWindow::onExportConfiguration);
-    connect(ui_->copy_diagnostics_button, &QPushButton::clicked,
-            this, &BridgeWindow::onCopyDiagnostics);
-    connect(ui_->export_diagnostics_button, &QPushButton::clicked,
-            this, &BridgeWindow::onExportDiagnostics);
-    connect(ui_->verification_details_button, &QPushButton::clicked,
-            this, &BridgeWindow::onShowVerificationDetails);
+    const auto on_click = [this](QPushButton* button, auto handler) {
+        connect(button, &QPushButton::clicked, this, handler);
+    };
+    on_click(ui_->start_button, &BridgeWindow::onStart);
+    on_click(ui_->stop_button, &BridgeWindow::onStop);
+    on_click(ui_->start_session_button, &BridgeWindow::onStartSession);
+    on_click(ui_->stop_session_button, &BridgeWindow::onStopSession);
+    on_click(ui_->emergency_stop_button, &BridgeWindow::onEmergencyStop);
+    on_click(ui_->run_preflight_button, &BridgeWindow::onRunPreflight);
+    on_click(ui_->preflight_override_button, &BridgeWindow::onOverridePreflight);
+    on_click(ui_->browse_root_button, &BridgeWindow::onBrowseStudyRoot);
+    on_click(ui_->browse_labrecorder_button, &BridgeWindow::onBrowseLabRecorder);
+    on_click(ui_->launch_labrecorder_button, &BridgeWindow::onLaunchLabRecorder);
+    on_click(ui_->connect_labrecorder_button, &BridgeWindow::onConnectLabRecorder);
+    on_click(ui_->detach_labrecorder_button, &BridgeWindow::onDetachLabRecorder);
+    on_click(ui_->refresh_streams_button, &BridgeWindow::onRefreshLabRecorder);
+    on_click(ui_->start_recording_button, &BridgeWindow::onStartRecording);
+    on_click(ui_->stop_recording_button, &BridgeWindow::onStopRecording);
+    on_click(ui_->discover_streams_button, &BridgeWindow::onDiscoverStreams);
+    on_click(ui_->find_next_run_button, &BridgeWindow::onFindNextRun);
+    on_click(ui_->reset_configuration_button, &BridgeWindow::onResetConfiguration);
+    on_click(ui_->save_preset_button, &BridgeWindow::onSavePreset);
+    on_click(ui_->load_preset_button, &BridgeWindow::onLoadPreset);
+    on_click(ui_->import_configuration_button, &BridgeWindow::onImportConfiguration);
+    on_click(ui_->export_configuration_button, &BridgeWindow::onExportConfiguration);
+    on_click(ui_->copy_diagnostics_button, &BridgeWindow::onCopyDiagnostics);
+    on_click(ui_->export_diagnostics_button, &BridgeWindow::onExportDiagnostics);
+    on_click(ui_->verification_details_button,
+            &BridgeWindow::onShowVerificationDetails);
     connect(ui_->acknowledge_error_button, &QPushButton::clicked, this, [this]() {
         event_log_.acknowledgeLastError();
         updateEventLog();
@@ -348,20 +351,11 @@ void BridgeWindow::connectSignals() {
         updateBindingsFromUi();
         if (ui_->preview_panel) ui_->preview_panel->applySessionConfiguration(configuration_);
     };
-    QComboBox* const binding_combos[] = {
-        ui_->marker_binding_combo, ui_->segment_binding_combo,
-        ui_->gaze_binding_combo, ui_->calibration_binding_combo,
-    };
-    for (QComboBox* combo : binding_combos) {
-        connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+    for (const BindingControl& control : bindingControls(*ui_, configuration_)) {
+        connect(control.combo,
+                QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, binding_changed);
-    }
-    QCheckBox* const follow_checks[] = {
-        ui_->marker_follow_name_check, ui_->segment_follow_name_check,
-        ui_->gaze_follow_name_check, ui_->calibration_follow_name_check,
-    };
-    for (QCheckBox* check : follow_checks) {
-        connect(check, &QCheckBox::toggled, this, binding_changed);
+        connect(control.follow, &QCheckBox::toggled, this, binding_changed);
     }
     connect(ui_->event_severity_filter,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -515,21 +509,7 @@ void BridgeWindow::connectSignals() {
                 });
         connect(ui_->preview_panel, &vicon_lsl::PreviewPanel::streamInventoryChanged,
                 this, [this](const QVector<StreamIdentity>& streams) {
-                    for (const StreamIdentity& stream : streams) {
-                        auto found = std::find_if(stream_inventory_.begin(),
-                            stream_inventory_.end(), [&stream](const StreamIdentity& existing) {
-                                return existing.stableKey() == stream.stableKey();
-                            });
-                        if (found != stream_inventory_.end()) {
-                            const bool selected = found->selected;
-                            const bool required = found->required;
-                            *found = stream;
-                            found->selected = selected;
-                            found->required = required;
-                        } else {
-                            stream_inventory_.push_back(stream);
-                        }
-                    }
+                    mergeStreamInventory(streams);
                     populateStreamTable();
                 });
         connect(ui_->preview_panel, &vicon_lsl::PreviewPanel::calibrationStateChanged,
@@ -622,18 +602,10 @@ void BridgeWindow::applyConfigurationToUi() {
     ui_->recorder_only_check->setChecked(configuration_.recorder_only_mode);
     ui_->preview_external_streams_check->setChecked(
         configuration_.preview_external_streams);
-    ui_->marker_follow_name_check->setChecked(
-        configuration_.preview_markers.reconnection ==
-        StreamReconnectionMode::FollowName);
-    ui_->segment_follow_name_check->setChecked(
-        configuration_.preview_segments.reconnection ==
-        StreamReconnectionMode::FollowName);
-    ui_->gaze_follow_name_check->setChecked(
-        configuration_.preview_gaze.reconnection ==
-        StreamReconnectionMode::FollowName);
-    ui_->calibration_follow_name_check->setChecked(
-        configuration_.preview_calibration.reconnection ==
-        StreamReconnectionMode::FollowName);
+    for (const BindingControl& control : bindingControls(*ui_, configuration_)) {
+        control.follow->setChecked(
+            control.binding->reconnection == StreamReconnectionMode::FollowName);
+    }
     ui_->marker_binding_combo->setEnabled(configuration_.preview_external_streams);
     ui_->segment_binding_combo->setEnabled(configuration_.preview_external_streams);
     if (ui_->preview_panel) {
@@ -1379,24 +1351,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
     }
     updateConfigurationFromUi();
     if (ui_->preview_panel) {
-        const QVector<StreamIdentity> preview_streams =
-            ui_->preview_panel->streamInventory();
-        for (const StreamIdentity& preview_stream : preview_streams) {
-            auto existing = std::find_if(
-                stream_inventory_.begin(), stream_inventory_.end(),
-                [&preview_stream](const StreamIdentity& stream) {
-                    return stream.stableKey() == preview_stream.stableKey();
-                });
-            if (existing == stream_inventory_.end()) {
-                stream_inventory_.push_back(preview_stream);
-                continue;
-            }
-            const bool selected = existing->selected;
-            const bool required = existing->required;
-            *existing = preview_stream;
-            existing->selected = selected;
-            existing->required = required;
-        }
+        mergeStreamInventory(ui_->preview_panel->streamInventory());
     }
     pending_recording_start_ =
         pending_recording_start_ || continue_recording_start;
@@ -1544,6 +1499,25 @@ void BridgeWindow::populateStreamTable() {
     updateReadiness();
 }
 
+void BridgeWindow::mergeStreamInventory(const QVector<StreamIdentity>& streams) {
+    for (const StreamIdentity& stream : streams) {
+        auto existing = std::find_if(
+            stream_inventory_.begin(), stream_inventory_.end(),
+            [&stream](const StreamIdentity& candidate) {
+                return candidate.stableKey() == stream.stableKey();
+            });
+        if (existing == stream_inventory_.end()) {
+            stream_inventory_.push_back(stream);
+            continue;
+        }
+        const bool selected = existing->selected;
+        const bool required = existing->required;
+        *existing = stream;
+        existing->selected = selected;
+        existing->required = required;
+    }
+}
+
 void BridgeWindow::selectBindingCombo(QComboBox* combo,
                                       const StreamBinding& binding) {
     if (!combo) return;
@@ -1571,30 +1545,18 @@ void BridgeWindow::selectBindingCombo(QComboBox* combo,
 }
 
 void BridgeWindow::populateBindingCombos() {
-    struct RoleUi {
-        QString role;
-        QComboBox* combo;
-        const StreamBinding* binding;
-    };
-    const RoleUi roles[] = {
-        {"markers", ui_->marker_binding_combo, &configuration_.preview_markers},
-        {"segments", ui_->segment_binding_combo, &configuration_.preview_segments},
-        {"gaze", ui_->gaze_binding_combo, &configuration_.preview_gaze},
-        {"calibration", ui_->calibration_binding_combo,
-         &configuration_.preview_calibration},
-    };
-    for (const RoleUi& role : roles) {
-        const QSignalBlocker blocker(role.combo);
-        role.combo->clear();
+    for (const BindingControl& control : bindingControls(*ui_, configuration_)) {
+        const QSignalBlocker blocker(control.combo);
+        control.combo->clear();
         for (const StreamIdentity& stream : stream_inventory_) {
-            if (!stream.present || stream.role != role.role) continue;
-            role.combo->addItem(stream.displayText(), stream.source_id);
-            const int index = role.combo->count() - 1;
-            role.combo->setItemData(index, stream.name, Qt::UserRole + 1);
-            role.combo->setItemData(index, stream.stableKey(), Qt::UserRole + 2);
-            role.combo->setItemData(index, stream.warning, Qt::ToolTipRole);
+            if (!stream.present || stream.role != control.role) continue;
+            control.combo->addItem(stream.displayText(), stream.source_id);
+            const int index = control.combo->count() - 1;
+            control.combo->setItemData(index, stream.name, Qt::UserRole + 1);
+            control.combo->setItemData(index, stream.stableKey(), Qt::UserRole + 2);
+            control.combo->setItemData(index, stream.warning, Qt::ToolTipRole);
         }
-        selectBindingCombo(role.combo, *role.binding);
+        selectBindingCombo(control.combo, *control.binding);
     }
     ui_->marker_binding_combo->setEnabled(configuration_.preview_external_streams);
     ui_->segment_binding_combo->setEnabled(configuration_.preview_external_streams);
@@ -1627,15 +1589,9 @@ void BridgeWindow::updateBindingsFromUi() {
             ? StreamReconnectionMode::FollowName
             : StreamReconnectionMode::SourceIdentity;
     };
-    update(ui_->marker_binding_combo, ui_->marker_follow_name_check,
-           configuration_.preview_markers);
-    update(ui_->segment_binding_combo, ui_->segment_follow_name_check,
-           configuration_.preview_segments);
-    update(ui_->gaze_binding_combo, ui_->gaze_follow_name_check,
-           configuration_.preview_gaze);
-    update(ui_->calibration_binding_combo,
-           ui_->calibration_follow_name_check,
-           configuration_.preview_calibration);
+    for (const BindingControl& control : bindingControls(*ui_, configuration_)) {
+        update(control.combo, control.follow, *control.binding);
+    }
     configuration_.preview_external_streams =
         ui_->preview_external_streams_check->isChecked();
     if (!configuration_.preview_external_streams) configuration_.bindPreviewOutputs();

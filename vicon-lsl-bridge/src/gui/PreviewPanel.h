@@ -50,7 +50,6 @@ public:
     bool fileLoadActive() const { return file_loader_ != nullptr; }
     vicon_lsl::gui::SessionCalibrationState sessionCalibrationState() const;
     QString calibrationQualityText() const;
-    bool calibrationMetadataCompatible() const { return calibration_metadata_compatible_; }
     PreviewDeliveryMetrics deliveryMetrics() const;
     void openRecording(const QString& path);
 

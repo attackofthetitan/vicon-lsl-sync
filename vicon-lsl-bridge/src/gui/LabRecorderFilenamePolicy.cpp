@@ -213,11 +213,6 @@ QString LabRecorderFilenamePolicy::renderedFilenamePreview(
     return QDir::toNativeSeparators(rendered);
 }
 
-QString LabRecorderFilenamePolicy::validationError(
-    const LabRecorderFilenameFields& fields) {
-    return validate(fields).firstError();
-}
-
 RecordingPathResult LabRecorderFilenamePolicy::validate(
     const LabRecorderFilenameFields& fields,
     const RecordingPathValidationOptions& options) {

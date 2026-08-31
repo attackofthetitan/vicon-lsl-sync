@@ -57,6 +57,12 @@ QLabel* makeStateValue(const QString& text, const QString& accessible_name) {
     return label;
 }
 
+QPushButton* makeButton(const QString& text, const QString& tooltip) {
+    auto* button = new QPushButton(text);
+    button->setToolTip(tooltip);
+    return button;
+}
+
 QScrollArea* scrollable(QWidget* page) {
     auto* area = new QScrollArea();
     area->setWidgetResizable(true);
@@ -147,10 +153,10 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     dashboard_layout->addWidget(ui->drop_label, 4, 5);
 
     auto* dashboard_buttons = new QHBoxLayout();
-    ui->start_session_button = new QPushButton("Start Session");
-    ui->stop_session_button = new QPushButton("Stop Session");
-    ui->run_preflight_button = new QPushButton("Check Setup");
-    ui->emergency_stop_button = new QPushButton("Emergency Stop Recording");
+    ui->start_session_button = makeButton("Start Session", "Start the bridge and preview, check the setup, then start recording.");
+    ui->stop_session_button = makeButton("Stop Session", "Stop recording, preview, and the bridge, then close a recorder started here.");
+    ui->run_preflight_button = makeButton("Check Setup", "Check whether the session is ready to record.");
+    ui->emergency_stop_button = makeButton("Emergency Stop Recording", "Ask the recorder to stop immediately.");
     setButtonShortcut(ui->start_session_button, QKeySequence("Ctrl+Shift+R"),
                       "Start guided session");
     setButtonShortcut(ui->stop_session_button, QKeySequence("Ctrl+Shift+T"),
@@ -159,12 +165,6 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
                       "Check session setup");
     setButtonShortcut(ui->emergency_stop_button, QKeySequence("Ctrl+Shift+S"),
                       "Emergency stop recording");
-    ui->start_session_button->setToolTip(
-        "Start the bridge and preview, check the setup, then start recording.");
-    ui->stop_session_button->setToolTip(
-        "Stop recording, preview, and the bridge, then close a recorder started here.");
-    ui->run_preflight_button->setToolTip("Check whether the session is ready to record.");
-    ui->emergency_stop_button->setToolTip("Ask the recorder to stop immediately.");
     dashboard_buttons->addWidget(ui->start_session_button);
     dashboard_buttons->addWidget(ui->stop_session_button);
     dashboard_buttons->addWidget(ui->run_preflight_button);
@@ -196,16 +196,11 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->preset_combo = new QComboBox();
     ui->preset_combo->setEditable(true);
     ui->preset_combo->setToolTip("Saved session settings that can be used again.");
-    ui->reset_configuration_button = new QPushButton("Reset");
-    ui->save_preset_button = new QPushButton("Save Preset");
-    ui->load_preset_button = new QPushButton("Load Preset");
-    ui->import_configuration_button = new QPushButton("Import");
-    ui->export_configuration_button = new QPushButton("Export");
-    ui->reset_configuration_button->setToolTip("Reset the session settings to safe defaults.");
-    ui->save_preset_button->setToolTip("Save the current session settings under this name.");
-    ui->load_preset_button->setToolTip("Load the selected session preset.");
-    ui->import_configuration_button->setToolTip("Load session settings from a file.");
-    ui->export_configuration_button->setToolTip("Save the current session settings to a file.");
+    ui->reset_configuration_button = makeButton("Reset", "Reset the session settings to safe defaults.");
+    ui->save_preset_button = makeButton("Save Preset", "Save the current session settings under this name.");
+    ui->load_preset_button = makeButton("Load Preset", "Load the selected session preset.");
+    ui->import_configuration_button = makeButton("Import", "Load session settings from a file.");
+    ui->export_configuration_button = makeButton("Export", "Save the current session settings to a file.");
     preset_layout->addWidget(makeTooltipLabel("Preset:", ui->preset_combo,
                                                ui->preset_combo->toolTip()), 0, 0);
     preset_layout->addWidget(ui->preset_combo, 0, 1, 1, 4);
@@ -236,9 +231,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
         "Required reason for Record anyway");
     ui->preflight_override_reason_edit->setToolTip(
         "Explain why recording should start even though a required check failed.");
-    ui->preflight_override_button = new QPushButton("Record Anyway");
-    ui->preflight_override_button->setToolTip(
-        "Start recording after entering a reason for the failed check.");
+    ui->preflight_override_button = makeButton("Record Anyway", "Start recording after entering a reason for the failed check.");
     override_row->addWidget(makeTooltipLabel("Reason:",
                                              ui->preflight_override_reason_edit,
                                              ui->preflight_override_reason_edit->toolTip()));
@@ -273,13 +266,11 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
                  ui->segment_stream_edit);
     bridge_layout->addWidget(settings_group);
     auto* bridge_buttons = new QHBoxLayout();
-    ui->start_button = new QPushButton("Start Streaming");
-    ui->stop_button = new QPushButton("Stop Bridge");
+    ui->start_button = makeButton("Start Streaming", "Connect to Vicon and publish the configured LSL streams.");
+    ui->stop_button = makeButton("Stop Bridge", "Ask the bridge to stop without freezing the window.");
     ui->stop_button->setEnabled(false);
     setButtonShortcut(ui->start_button, QKeySequence("Ctrl+B"), "Start bridge streaming");
     setButtonShortcut(ui->stop_button, QKeySequence("Ctrl+Shift+B"), "Stop bridge streaming");
-    ui->start_button->setToolTip("Connect to Vicon and publish the configured LSL streams.");
-    ui->stop_button->setToolTip("Ask the bridge to stop without freezing the window.");
     bridge_buttons->addWidget(ui->start_button);
     bridge_buttons->addWidget(ui->stop_button);
     bridge_buttons->addStretch(1);
@@ -293,9 +284,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->frames_label = makeStateValue("0", "Vicon frame number");
     ui->frame_rate_label = makeStateValue("0.0 Hz", "Measured Vicon frame rate");
     ui->last_error_label = makeStateValue("-", "Last application error");
-    ui->acknowledge_error_button = new QPushButton("Clear Error");
-    ui->acknowledge_error_button->setToolTip(
-        "Clear the Last error display without deleting the event history.");
+    ui->acknowledge_error_button = makeButton("Clear Error", "Clear the Last error display without deleting the event history.");
     bridge_status->addWidget(new QLabel("Bridge state:"), 0, 0);
     bridge_status->addWidget(ui->status_label, 0, 1, 1, 3);
     bridge_status->addWidget(new QLabel("Vicon frames:"), 1, 0);
@@ -325,8 +314,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     recording_form->setVerticalSpacing(4);
     auto* root_layout = new QHBoxLayout();
     ui->study_root_edit = new QLineEdit();
-    ui->browse_root_button = new QPushButton("Browse");
-    ui->browse_root_button->setToolTip("Choose the recording study root directory.");
+    ui->browse_root_button = makeButton("Browse", "Choose the recording study root directory.");
     root_layout->addWidget(ui->study_root_edit, 1);
     root_layout->addWidget(ui->browse_root_button);
     ui->filename_template_edit = new QLineEdit(
@@ -394,8 +382,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     path_policy->addWidget(ui->allow_outside_root_check);
     path_policy->addWidget(ui->automatic_run_increment_check);
     recording_form->addRow("Saving options:", path_policy);
-    ui->find_next_run_button = new QPushButton("Find Next Run");
-    ui->find_next_run_button->setToolTip("Choose the first run number with an unused file path.");
+    ui->find_next_run_button = makeButton("Find Next Run", "Choose the first run number with an unused file path.");
     recording_form->addRow(QString(), ui->find_next_run_button);
     recording_layout->addWidget(destination_group);
 
@@ -404,8 +391,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     auto* labrecorder_form = new QFormLayout();
     auto* executable_layout = new QHBoxLayout();
     ui->labrecorder_executable_edit = new QLineEdit();
-    ui->browse_labrecorder_button = new QPushButton("Browse");
-    ui->browse_labrecorder_button->setToolTip("Choose a custom graphical recorder program.");
+    ui->browse_labrecorder_button = makeButton("Browse", "Choose a custom graphical recorder program.");
     executable_layout->addWidget(ui->labrecorder_executable_edit, 1);
     executable_layout->addWidget(ui->browse_labrecorder_button);
     labrecorder_form->addRow(makeTooltipLabel("Recorder program:",
@@ -435,19 +421,12 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     recorder_layout->addWidget(ui->automatic_launch_check);
     recorder_layout->addWidget(ui->record_every_visible_check);
     auto* recorder_buttons = new QGridLayout();
-    ui->launch_labrecorder_button = new QPushButton("Launch Recorder");
-    ui->connect_labrecorder_button = new QPushButton("Connect");
-    ui->detach_labrecorder_button = new QPushButton("Disconnect / Detach");
-    ui->refresh_streams_button = new QPushButton("Refresh Recorder Streams");
-    ui->start_recording_button = new QPushButton("Start Recording");
-    ui->stop_recording_button = new QPushButton("Stop Recording");
-    ui->launch_labrecorder_button->setToolTip("Start the graphical recorder in the background.");
-    ui->connect_labrecorder_button->setToolTip("Connect to the recorder at the host and port above.");
-    ui->detach_labrecorder_button->setToolTip(
-        "Disconnect from the recorder without closing it.");
-    ui->refresh_streams_button->setToolTip("Ask the graphical recorder to refresh its visible stream list.");
-    ui->start_recording_button->setToolTip("Check the setup, then start recording.");
-    ui->stop_recording_button->setToolTip("Ask the recorder to stop.");
+    ui->launch_labrecorder_button = makeButton("Launch Recorder", "Start the graphical recorder in the background.");
+    ui->connect_labrecorder_button = makeButton("Connect", "Connect to the recorder at the host and port above.");
+    ui->detach_labrecorder_button = makeButton("Disconnect / Detach", "Disconnect from the recorder without closing it.");
+    ui->refresh_streams_button = makeButton("Refresh Recorder Streams", "Ask the graphical recorder to refresh its visible stream list.");
+    ui->start_recording_button = makeButton("Start Recording", "Check the setup, then start recording.");
+    ui->stop_recording_button = makeButton("Stop Recording", "Ask the recorder to stop.");
     setButtonShortcut(ui->start_recording_button, QKeySequence("Ctrl+R"), "Start recording");
     setButtonShortcut(ui->stop_recording_button, QKeySequence("Ctrl+S"), "Stop recording");
     recorder_buttons->addWidget(ui->launch_labrecorder_button, 0, 0);
@@ -478,11 +457,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     auto* streams_layout = new QVBoxLayout(streams_page);
     streams_layout->setContentsMargins(6, 6, 6, 6);
     auto* discovery_row = new QHBoxLayout();
-    ui->discover_streams_button = new QPushButton("Find LSL Streams");
+    ui->discover_streams_button = makeButton("Find LSL Streams", "Find available streams and keep the details needed to reconnect.");
     setButtonShortcut(ui->discover_streams_button, QKeySequence("Ctrl+D"),
                       "Discover visible LSL streams");
-    ui->discover_streams_button->setToolTip(
-        "Find available streams and keep the details needed to reconnect.");
     ui->preview_external_streams_check = new QCheckBox("Preview external streams");
     ui->preview_external_streams_check->setObjectName("previewExternalStreams");
     ui->preview_external_streams_check->setToolTip(
@@ -582,15 +559,10 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->event_log->setAccessibleName("Recent session events with times");
     events_layout->addWidget(ui->event_log, 1);
     auto* diagnostic_buttons = new QHBoxLayout();
-    ui->copy_diagnostics_button = new QPushButton("Copy Session Details");
-    ui->export_diagnostics_button = new QPushButton("Export Session Details");
-    ui->verification_details_button = new QPushButton("File Check Details");
-    ui->open_verified_recording_button = new QPushButton("Open Recording in Preview");
-    ui->copy_diagnostics_button->setToolTip("Copy settings, status, stream details, rates, and recent events.");
-    ui->export_diagnostics_button->setToolTip(
-        "Save session details without including recorded samples.");
-    ui->verification_details_button->setToolTip("Show the result for each recorded stream.");
-    ui->open_verified_recording_button->setToolTip("Open the checked recording without freezing the window.");
+    ui->copy_diagnostics_button = makeButton("Copy Session Details", "Copy settings, status, stream details, rates, and recent events.");
+    ui->export_diagnostics_button = makeButton("Export Session Details", "Save session details without including recorded samples.");
+    ui->verification_details_button = makeButton("File Check Details", "Show the result for each recorded stream.");
+    ui->open_verified_recording_button = makeButton("Open Recording in Preview", "Open the checked recording without freezing the window.");
     diagnostic_buttons->addWidget(ui->copy_diagnostics_button);
     diagnostic_buttons->addWidget(ui->export_diagnostics_button);
     diagnostic_buttons->addWidget(ui->verification_details_button);
