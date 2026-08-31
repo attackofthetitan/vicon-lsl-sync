@@ -48,6 +48,31 @@ PreviewVec3 rVec3(const QJsonObject& o, const PreviewVec3& def = {}) {
     return {rDouble(o, "x", def.x), rDouble(o, "y", def.y), rDouble(o, "z", def.z)};
 }
 
+bool parseConfiguration(const QByteArray& bytes, const QString& bad_json,
+                        SessionConfiguration& config, QString* error) {
+    QJsonParseError parse_error;
+    const auto doc = QJsonDocument::fromJson(bytes, &parse_error);
+    QString message;
+    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
+        message = bad_json + " " + parse_error.errorString();
+    } else {
+        const auto loaded = SessionConfiguration::fromJson(doc.object(), &message);
+        if (message.isEmpty()) config = loaded;
+    }
+    if (error) *error = message;
+    return message.isEmpty();
+}
+
+bool readFile(const QString& path, QByteArray& bytes, QString* error) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    bytes = file.readAll();
+    return true;
+}
+
 StreamBinding makeBinding(const QString& role, const QString& name, bool req,
                           int ch = 0, double rate = 0.0, const QString& frame = {}) {
     StreamBinding b;
@@ -340,17 +365,9 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QStrin
 }
 
 SessionConfiguration SessionConfigurationStore::load(QSettings& settings) {
-    const auto stored = settings.value("session/configuration").toByteArray();
-    if (!stored.isEmpty()) {
-        QJsonParseError parse_error;
-        const auto doc = QJsonDocument::fromJson(stored, &parse_error);
-        QString error;
-        if (parse_error.error == QJsonParseError::NoError && doc.isObject()) {
-            auto res = SessionConfiguration::fromJson(doc.object(), &error);
-            if (error.isEmpty()) return res;
-        }
-    }
-    return {};
+    SessionConfiguration config;
+    parseConfiguration(settings.value("session/configuration").toByteArray(), {}, config, nullptr);
+    return config;
 }
 
 void SessionConfigurationStore::save(QSettings& settings, const SessionConfiguration& configuration) {
@@ -408,34 +425,17 @@ bool SessionConfigurationStore::savePreset(QSettings& settings, const QString& n
 
 bool SessionConfigurationStore::loadPreset(QSettings& settings, const QString& name,
                                            SessionConfiguration& config, QString* error) {
-    const auto data = settings.value("sessionPresets/" + name.trimmed()).toByteArray();
-    QJsonParseError parse_error;
-    const auto doc = QJsonDocument::fromJson(data, &parse_error);
-    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
-        if (error) *error = "Preset is missing or is not valid JSON.";
-        return false;
-    }
-    QString err;
-    const auto loaded = SessionConfiguration::fromJson(doc.object(), &err);
-    if (!err.isEmpty()) {
-        if (error) *error = err;
-        return false;
-    }
-    config = loaded;
-    if (error) error->clear();
-    return true;
+    return parseConfiguration(settings.value("sessionPresets/" + name.trimmed()).toByteArray(),
+                              "Preset is missing or is not valid JSON.", config, error);
 }
 
 bool SessionConfigurationStore::exportConfiguration(const QString& path,
                                                     const SessionConfiguration& config,
                                                     QString* error) {
     QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (error) *error = file.errorString();
-        return false;
-    }
     const auto bytes = QJsonDocument(config.toJson()).toJson(QJsonDocument::Indented);
-    if (file.write(bytes) != bytes.size()) {
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        file.write(bytes) != bytes.size() || !file.flush()) {
         if (error) *error = file.errorString();
         return false;
     }
@@ -446,26 +446,9 @@ bool SessionConfigurationStore::exportConfiguration(const QString& path,
 bool SessionConfigurationStore::importConfiguration(const QString& path,
                                                     SessionConfiguration& config,
                                                     QString* error) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = file.errorString();
-        return false;
-    }
-    QJsonParseError parse_error;
-    const auto doc = QJsonDocument::fromJson(file.readAll(), &parse_error);
-    if (parse_error.error != QJsonParseError::NoError || !doc.isObject()) {
-        if (error) *error = "Invalid session configuration JSON: " + parse_error.errorString();
-        return false;
-    }
-    QString err;
-    const auto loaded = SessionConfiguration::fromJson(doc.object(), &err);
-    if (!err.isEmpty()) {
-        if (error) *error = err;
-        return false;
-    }
-    config = loaded;
-    if (error) error->clear();
-    return true;
+    QByteArray bytes;
+    return readFile(path, bytes, error) &&
+           parseConfiguration(bytes, "The file is not valid session configuration JSON.", config, error);
 }
 
 } // namespace vicon_lsl::gui

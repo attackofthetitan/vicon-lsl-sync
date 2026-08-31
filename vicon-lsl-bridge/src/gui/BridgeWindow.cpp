@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <array>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -248,7 +249,7 @@ void BridgeWindow::connectSignals() {
     connect(ui_->refresh_streams_button, &QPushButton::clicked, this, &BridgeWindow::onRefreshLabRecorder);
     connect(ui_->start_recording_button, &QPushButton::clicked, this, &BridgeWindow::onStartRecording);
     connect(ui_->stop_recording_button, &QPushButton::clicked, this, &BridgeWindow::onStopRecording);
-    connect(ui_->discover_streams_button, &QPushButton::clicked, this, &BridgeWindow::onDiscoverStreams);
+    connect(ui_->discover_streams_button, &QPushButton::clicked, this, [this]() { startStreamDiscovery(false); });
     connect(ui_->find_next_run_button, &QPushButton::clicked, this, &BridgeWindow::onFindNextRun);
     connect(ui_->reset_configuration_button, &QPushButton::clicked, this, &BridgeWindow::onResetConfiguration);
     connect(ui_->save_preset_button, &QPushButton::clicked, this, &BridgeWindow::onSavePreset);
@@ -272,7 +273,7 @@ void BridgeWindow::connectSignals() {
 
     connect(filename_sync_timer_, &QTimer::timeout, this, &BridgeWindow::syncFilenameToLabRecorder);
     connect(labrecorder_retry_timer_, &QTimer::timeout, this, &BridgeWindow::onLabRecorderRetry);
-    connect(close_poll_timer_, &QTimer::timeout, this, &BridgeWindow::onClosePoll);
+    connect(close_poll_timer_, &QTimer::timeout, this, &BridgeWindow::updateShutdownStatus);
     connect(heartbeat_timer_, &QTimer::timeout, this, &BridgeWindow::onHeartbeatTick);
     connect(verification_file_timer_, &QTimer::timeout, this, &BridgeWindow::onVerificationFilePoll);
 
@@ -456,38 +457,17 @@ void BridgeWindow::saveSettings() {
 }
 
 void BridgeWindow::applyConfigurationToUi() {
-    const QSignalBlocker blockers[] = {
-        QSignalBlocker(ui_->server_edit),
-        QSignalBlocker(ui_->marker_stream_edit),
-        QSignalBlocker(ui_->segment_stream_edit),
-        QSignalBlocker(ui_->study_root_edit),
-        QSignalBlocker(ui_->filename_template_edit),
-        QSignalBlocker(ui_->participant_edit),
-        QSignalBlocker(ui_->session_edit),
-        QSignalBlocker(ui_->task_edit),
-        QSignalBlocker(ui_->run_spin),
-        QSignalBlocker(ui_->acquisition_edit),
-        QSignalBlocker(ui_->modality_edit),
-        QSignalBlocker(ui_->allow_overwrite_check),
-        QSignalBlocker(ui_->allow_outside_root_check),
-        QSignalBlocker(ui_->automatic_run_increment_check),
-        QSignalBlocker(ui_->storage_warning_spin),
-        QSignalBlocker(ui_->labrecorder_host_edit),
-        QSignalBlocker(ui_->labrecorder_port_spin),
-        QSignalBlocker(ui_->labrecorder_executable_edit),
-        QSignalBlocker(ui_->automatic_launch_check),
-        QSignalBlocker(ui_->record_every_visible_check),
-        QSignalBlocker(ui_->recorder_only_check),
-        QSignalBlocker(ui_->preview_external_streams_check),
-        QSignalBlocker(ui_->marker_binding_combo),
-        QSignalBlocker(ui_->marker_follow_name_check),
-        QSignalBlocker(ui_->segment_binding_combo),
-        QSignalBlocker(ui_->segment_follow_name_check),
-        QSignalBlocker(ui_->gaze_binding_combo),
-        QSignalBlocker(ui_->gaze_follow_name_check),
-        QSignalBlocker(ui_->calibration_binding_combo),
-        QSignalBlocker(ui_->calibration_follow_name_check),
-    };
+    std::vector<QSignalBlocker> blockers;
+    for (const TextControl& c : textControls(*ui_, configuration_)) blockers.emplace_back(c.edit);
+    for (const CheckControl& c : checkControls(*ui_, configuration_)) blockers.emplace_back(c.check);
+    for (const BindingControl& c : bindingControls(*ui_, configuration_)) {
+        blockers.emplace_back(c.combo);
+        blockers.emplace_back(c.follow);
+    }
+    for (QWidget* w : std::initializer_list<QWidget*>{
+             ui_->run_spin, ui_->storage_warning_spin, ui_->labrecorder_port_spin}) {
+        blockers.emplace_back(w);
+    }
     for (const TextControl& c : textControls(*ui_, configuration_)) c.edit->setText(*c.value);
     for (const CheckControl& c : checkControls(*ui_, configuration_)) c.check->setChecked(*c.value);
     ui_->run_spin->setValue(configuration_.run);
@@ -1007,10 +987,6 @@ void BridgeWindow::onWorkerFinished() {
     updateReadiness();
     updateDashboard();
     pumpSession();
-}
-
-void BridgeWindow::onDiscoverStreams() {
-    startStreamDiscovery(false);
 }
 
 void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
@@ -1655,10 +1631,6 @@ void BridgeWindow::beginClose() {
     if (worker_) worker_->stopBridge();
     appendEvent(SessionComponent::Application, EventSeverity::Information, "Closing safely");
     close_poll_timer_->start();
-    updateShutdownStatus();
-}
-
-void BridgeWindow::onClosePoll() {
     updateShutdownStatus();
 }
 

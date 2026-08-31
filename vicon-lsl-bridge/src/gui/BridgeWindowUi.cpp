@@ -1,5 +1,7 @@
 #include "gui/BridgeWindowUi.h"
 
+#include "gui/WidgetHelpers.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -28,58 +30,6 @@
 #include "gui/PreviewPanel.h"
 
 namespace vicon_lsl::gui_detail {
-namespace {
-
-QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
-    auto* label = new QLabel(text);
-    label->setToolTip(tooltip);
-    if (control) {
-        label->setBuddy(control);
-        control->setToolTip(tooltip);
-        if (control->accessibleName().isEmpty()) {
-            QString acc = text;
-            acc.remove('&');
-            acc.remove(':');
-            control->setAccessibleName(acc.trimmed());
-        }
-    }
-    return label;
-}
-
-QLabel* makeStateValue(const QString& text, const QString& accessible_name) {
-    auto* label = new QLabel(text);
-    label->setWordWrap(true);
-    label->setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
-    label->setAccessibleName(accessible_name);
-    return label;
-}
-
-QPushButton* makeButton(const QString& text, const QString& tooltip, const QKeySequence& shortcut = {}, const QString& acc_name = {}) {
-    auto* button = new QPushButton(text);
-    button->setToolTip(tooltip);
-    if (!shortcut.isEmpty()) button->setShortcut(shortcut);
-    if (!acc_name.isEmpty()) button->setAccessibleName(acc_name);
-    return button;
-}
-
-void addField(QGridLayout* layout, int row, int col, const QString& label, QWidget* control, const QString& tooltip = {}, int span = 1) {
-    layout->addWidget(tooltip.isEmpty() ? new QLabel(label) : makeTooltipLabel(label, control, tooltip), row, col);
-    layout->addWidget(control, row, col + 1, 1, span);
-}
-
-void addWidgets(QBoxLayout* layout, std::initializer_list<QWidget*> widgets) {
-    for (QWidget* w : widgets) layout->addWidget(w);
-}
-
-QScrollArea* scrollable(QWidget* page) {
-    auto* area = new QScrollArea();
-    area->setWidgetResizable(true);
-    area->setFrameShape(QFrame::NoFrame);
-    area->setWidget(page);
-    return area;
-}
-
-} // namespace
 
 std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     QWidget* window, bool enable_preview, const std::shared_ptr<QSettings>& settings) {
@@ -139,13 +89,13 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
 
     auto* db_buttons = new QHBoxLayout();
     ui->start_session_button = makeButton("Start Session", "Start the bridge and preview, check the setup, then start recording.",
-                                          QKeySequence("Ctrl+Shift+R"), "Start guided session");
+                                          "Start guided session", QKeySequence("Ctrl+Shift+R"));
     ui->stop_session_button = makeButton("Stop Session", "Stop recording, preview, and the bridge, then close a recorder started here.",
-                                         QKeySequence("Ctrl+Shift+T"), "Stop guided session");
+                                         "Stop guided session", QKeySequence("Ctrl+Shift+T"));
     ui->run_setup_check_button = makeButton("Check Setup", "Check whether the session is ready to record.",
-                                          QKeySequence(Qt::Key_F5), "Check session setup");
+                                          "Check session setup", QKeySequence(Qt::Key_F5));
     ui->emergency_stop_button = makeButton("Emergency Stop Recording", "Ask the recorder to stop immediately.",
-                                           QKeySequence("Ctrl+Shift+S"), "Emergency stop recording");
+                                           "Emergency stop recording", QKeySequence("Ctrl+Shift+S"));
     addWidgets(db_buttons, {ui->start_session_button, ui->stop_session_button, ui->run_setup_check_button, ui->emergency_stop_button});
     db_buttons->addStretch(1);
     ui->shutdown_label = makeStateValue(QString(), "Shutdown progress");
@@ -189,8 +139,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     preset_layout->addWidget(ui->export_configuration_button, 1, 4);
     session_layout->addWidget(preset_group);
 
-    ui->recorder_only_check = new QCheckBox("Record without the Vicon bridge");
-    ui->recorder_only_check->setToolTip("Allow recording when the Vicon bridge is not running.");
+    ui->recorder_only_check = makeCheck("Record without the Vicon bridge", "Allow recording when the Vicon bridge is not running.");
     session_layout->addWidget(ui->recorder_only_check);
 
     auto* setup_check_group = new QGroupBox("Setup Check");
@@ -236,8 +185,8 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     bridge_layout->addWidget(settings_group);
 
     auto* bridge_buttons = new QHBoxLayout();
-    ui->start_button = makeButton("Start Streaming", "Connect to Vicon and publish the configured LSL streams.", QKeySequence("Ctrl+B"), "Start bridge streaming");
-    ui->stop_button = makeButton("Stop Bridge", "Ask the bridge to stop without freezing the window.", QKeySequence("Ctrl+Shift+B"), "Stop bridge streaming");
+    ui->start_button = makeButton("Start Streaming", "Connect to Vicon and publish the configured LSL streams.", "Start bridge streaming", QKeySequence("Ctrl+B"));
+    ui->stop_button = makeButton("Stop Bridge", "Ask the bridge to stop without freezing the window.", "Stop bridge streaming", QKeySequence("Ctrl+Shift+B"));
     ui->stop_button->setEnabled(false);
     bridge_buttons->addWidget(ui->start_button);
     bridge_buttons->addWidget(ui->stop_button);
@@ -285,9 +234,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->participant_edit = new QLineEdit("P001");
     ui->session_edit = new QLineEdit("S001");
     ui->task_edit = new QLineEdit("Task");
-    ui->run_spin = new QSpinBox();
-    ui->run_spin->setRange(1, 999999);
-    ui->run_spin->setValue(1);
+    ui->run_spin = makeSpin(1, 999999, 1);
     ui->acquisition_edit = new QLineEdit("vicon");
     ui->modality_edit = new QLineEdit("beh");
     ui->filename_preview_label = new QLineEdit();
@@ -319,12 +266,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     recording_form->addRow(makeTooltipLabel("Storage warning:", ui->storage_warning_spin, "Warn when available storage falls below this threshold."), ui->storage_warning_spin);
 
     auto* path_policy = new QHBoxLayout();
-    ui->allow_overwrite_check = new QCheckBox("Allow overwrite");
-    ui->allow_outside_root_check = new QCheckBox("Allow outside study root");
-    ui->automatic_run_increment_check = new QCheckBox("Increment run after a successful file check");
-    ui->allow_overwrite_check->setToolTip("Advanced opt-in to overwrite an existing destination.");
-    ui->allow_outside_root_check->setToolTip("Allow a recording to be saved outside the study folder.");
-    ui->automatic_run_increment_check->setToolTip("Increment only after the output exists and the selected file check succeeds.");
+    ui->allow_overwrite_check = makeCheck("Allow overwrite", "Advanced opt-in to overwrite an existing destination.");
+    ui->allow_outside_root_check = makeCheck("Allow outside study root", "Allow a recording to be saved outside the study folder.");
+    ui->automatic_run_increment_check = makeCheck("Increment run after a successful file check", "Increment only after the output exists and the selected file check succeeds.");
     addWidgets(path_policy, {ui->allow_overwrite_check, ui->allow_outside_root_check, ui->automatic_run_increment_check});
     recording_form->addRow("Saving options:", path_policy);
     ui->find_next_run_button = makeButton("Find Next Run", "Choose the first run number with an unused file path.");
@@ -343,9 +287,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
         "Custom graphical recorder path; otherwise the bundled recorder is used."), executable_layout);
 
     ui->labrecorder_host_edit = new QLineEdit("localhost");
-    ui->labrecorder_port_spin = new QSpinBox();
-    ui->labrecorder_port_spin->setRange(1, 65535);
-    ui->labrecorder_port_spin->setValue(22345);
+    ui->labrecorder_port_spin = makeSpin(1, 65535, 22345);
     auto* endpoint = new QHBoxLayout();
     endpoint->addWidget(makeTooltipLabel("Host:", ui->labrecorder_host_edit, "Computer running the recorder."));
     endpoint->addWidget(ui->labrecorder_host_edit, 1);
@@ -354,10 +296,8 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     labrecorder_form->addRow("Address:", endpoint);
     recorder_layout->addLayout(labrecorder_form);
 
-    ui->automatic_launch_check = new QCheckBox("Start the recorder when it is not already running");
-    ui->record_every_visible_check = new QCheckBox("Record every visible stream in a separate recorder window");
-    ui->automatic_launch_check->setToolTip("Try to connect first, then start the bundled or chosen recorder in the background.");
-    ui->record_every_visible_check->setToolTip("Control another recorder and save every stream it can see. Turn this off to choose streams here.");
+    ui->automatic_launch_check = makeCheck("Start the recorder when it is not already running", "Try to connect first, then start the bundled or chosen recorder in the background.");
+    ui->record_every_visible_check = makeCheck("Record every visible stream in a separate recorder window", "Control another recorder and save every stream it can see. Turn this off to choose streams here.");
     recorder_layout->addWidget(ui->automatic_launch_check);
     recorder_layout->addWidget(ui->record_every_visible_check);
 
@@ -366,8 +306,8 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->connect_labrecorder_button = makeButton("Connect", "Connect to the recorder at the host and port above.");
     ui->detach_labrecorder_button = makeButton("Disconnect / Detach", "Disconnect from the recorder without closing it.");
     ui->refresh_streams_button = makeButton("Refresh Recorder Streams", "Ask the graphical recorder to refresh its visible stream list.");
-    ui->start_recording_button = makeButton("Start Recording", "Check the setup, then start recording.", QKeySequence("Ctrl+R"), "Start recording");
-    ui->stop_recording_button = makeButton("Stop Recording", "Ask the recorder to stop.", QKeySequence("Ctrl+S"), "Stop recording");
+    ui->start_recording_button = makeButton("Start Recording", "Check the setup, then start recording.", "Start recording", QKeySequence("Ctrl+R"));
+    ui->stop_recording_button = makeButton("Stop Recording", "Ask the recorder to stop.", "Stop recording", QKeySequence("Ctrl+S"));
     recorder_buttons->addWidget(ui->launch_labrecorder_button, 0, 0);
     recorder_buttons->addWidget(ui->connect_labrecorder_button, 0, 1);
     recorder_buttons->addWidget(ui->detach_labrecorder_button, 0, 2);
@@ -399,7 +339,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
 
     auto* discovery_row = new QHBoxLayout();
     ui->discover_streams_button = makeButton("Find LSL Streams", "Find available streams and keep the details needed to reconnect.",
-                                             QKeySequence("Ctrl+D"), "Discover visible LSL streams");
+                                             "Discover visible LSL streams", QKeySequence("Ctrl+D"));
     ui->preview_external_streams_check = new QCheckBox("Choose preview streams separately");
     ui->preview_external_streams_check->setObjectName("previewExternalStreams");
     ui->preview_external_streams_check->setToolTip("Let the preview use streams other than the bridge outputs.");
@@ -424,31 +364,22 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
 
     auto* bindings_group = new QGroupBox("Preview Streams");
     auto* bindings = new QGridLayout(bindings_group);
-    ui->marker_binding_combo = new QComboBox();
-    ui->segment_binding_combo = new QComboBox();
-    ui->gaze_binding_combo = new QComboBox();
-    ui->calibration_binding_combo = new QComboBox();
-    ui->marker_follow_name_check = new QCheckBox("Reconnect by name");
-    ui->segment_follow_name_check = new QCheckBox("Reconnect by name");
-    ui->gaze_follow_name_check = new QCheckBox("Reconnect by name");
-    ui->calibration_follow_name_check = new QCheckBox("Reconnect by name");
-
-    QComboBox* const binding_combos[] = {ui->marker_binding_combo, ui->segment_binding_combo, ui->gaze_binding_combo, ui->calibration_binding_combo};
-    for (QComboBox* combo : binding_combos) {
-        combo->setMinimumContentsLength(22);
-        combo->setToolTip("Choose the visible stream source for this part of the preview. Duplicate names are never chosen silently.");
+    const struct { const char* label; QComboBox** combo; QCheckBox** follow; } bindings_rows[] = {
+        {"Markers:", &ui->marker_binding_combo, &ui->marker_follow_name_check},
+        {"Segments:", &ui->segment_binding_combo, &ui->segment_follow_name_check},
+        {"Gaze:", &ui->gaze_binding_combo, &ui->gaze_follow_name_check},
+        {"Calibration:", &ui->calibration_binding_combo, &ui->calibration_follow_name_check},
+    };
+    int binding_row = 0;
+    for (const auto& row : bindings_rows) {
+        *row.combo = new QComboBox();
+        (*row.combo)->setMinimumContentsLength(22);
+        (*row.combo)->setToolTip("Choose the visible stream source for this part of the preview. Duplicate names are never chosen silently.");
+        *row.follow = makeCheck("Reconnect by name", "Use the stream name when the original stream restarts.");
+        addField(bindings, binding_row, 0, row.label, *row.combo, (*row.combo)->toolTip());
+        bindings->addWidget(*row.follow, binding_row, 2);
+        ++binding_row;
     }
-    QCheckBox* const follow_checks[] = {ui->marker_follow_name_check, ui->segment_follow_name_check, ui->gaze_follow_name_check, ui->calibration_follow_name_check};
-    for (QCheckBox* check : follow_checks) check->setToolTip("Use the stream name when the original stream restarts.");
-
-    addField(bindings, 0, 0, "Markers:", ui->marker_binding_combo, ui->marker_binding_combo->toolTip());
-    bindings->addWidget(ui->marker_follow_name_check, 0, 2);
-    addField(bindings, 1, 0, "Segments:", ui->segment_binding_combo, ui->segment_binding_combo->toolTip());
-    bindings->addWidget(ui->segment_follow_name_check, 1, 2);
-    addField(bindings, 2, 0, "Gaze:", ui->gaze_binding_combo, ui->gaze_binding_combo->toolTip());
-    bindings->addWidget(ui->gaze_follow_name_check, 2, 2);
-    addField(bindings, 3, 0, "Calibration:", ui->calibration_binding_combo, ui->calibration_binding_combo->toolTip());
-    bindings->addWidget(ui->calibration_follow_name_check, 3, 2);
     bindings->setColumnStretch(1, 1);
     streams_layout->addWidget(bindings_group);
     ui->controls_tabs->addTab(scrollable(streams_page), "Streams");

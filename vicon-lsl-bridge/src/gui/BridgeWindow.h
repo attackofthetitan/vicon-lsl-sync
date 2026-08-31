@@ -82,7 +82,6 @@ private slots:
     void onStopRecording();
     void onRunSetupCheck();
     void onOverrideSetupCheck();
-    void onDiscoverStreams();
     void onFindNextRun();
     void onResetConfiguration();
     void onSavePreset();
@@ -98,8 +97,8 @@ private slots:
                         unsigned int frames, const QString& message);
     void onWorkerFinished();
     void onLabRecorderRetry();
-    void onClosePoll();
     void onVerificationFilePoll();
+    void updateShutdownStatus();
 
 private:
     void connectSignals();
@@ -153,7 +152,6 @@ private:
     bool recordingActiveOrPending() const;
     bool bridgeStatusRecent() const;
     void beginClose();
-    void updateShutdownStatus();
 
     std::shared_ptr<QSettings> settings_;
     std::unique_ptr<vicon_lsl::gui_detail::BridgeWindowUi> ui_;
