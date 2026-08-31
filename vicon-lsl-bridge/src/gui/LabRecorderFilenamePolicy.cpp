@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr int kMaximumFindNextRunAttempts = 1000;
+constexpr int kMaxFindNextRun = 1000;
 
 struct FilenameToken {
     const char* placeholder;
@@ -47,67 +47,47 @@ const RecordingField kRecordingFields[] = {
 };
 
 void appendField(QString& command, const QString& key, const QString& value) {
-    const QString sanitized = LabRecorderFilenamePolicy::sanitizedValue(value);
-    if (sanitized.isEmpty()) {
-        return;
-    }
-    command += " {" + key + ":" + sanitized + "}";
+    const QString s = LabRecorderFilenamePolicy::sanitizedValue(value);
+    if (!s.isEmpty()) command += " {" + key + ":" + s + "}";
 }
 
-bool containsProtocolBreakingCharacter(const QString& value) {
-    return value.contains('{') || value.contains('}') ||
-           value.contains('\n') || value.contains('\r');
+bool containsProtocolBreakingChar(const QString& v) {
+    return v.contains('{') || v.contains('}') || v.contains('\n') || v.contains('\r');
 }
 
-void addIssue(RecordingPathResult& result,
-              RecordingPathIssueLevel level,
-              const QString& field,
-              const QString& message,
-              const QString& corrective_action) {
-    result.issues.push_back({level, field, message, corrective_action});
+void addIssue(RecordingPathResult& res, RecordingPathIssueLevel lvl,
+              const QString& field, const QString& msg, const QString& act) {
+    res.issues.push_back({lvl, field, msg, act});
 }
 
 bool pathIsWithin(const QString& root, const QString& path) {
-    QString normalized_root = QDir::fromNativeSeparators(
-        QDir::cleanPath(QDir(root).absolutePath()));
-    QString normalized_path = QDir::fromNativeSeparators(
-        QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
+    QString norm_root = QDir::fromNativeSeparators(QDir::cleanPath(QDir(root).absolutePath()));
+    QString norm_path = QDir::fromNativeSeparators(QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
 #ifdef Q_OS_WIN
-    normalized_root = normalized_root.toLower();
-    normalized_path = normalized_path.toLower();
+    norm_root = norm_root.toLower();
+    norm_path = norm_path.toLower();
 #endif
-    if (normalized_path == normalized_root) {
-        return true;
-    }
-    if (!normalized_root.endsWith('/')) {
-        normalized_root += '/';
-    }
-    return normalized_path.startsWith(normalized_root);
+    if (norm_path == norm_root) return true;
+    if (!norm_root.endsWith('/')) norm_root += '/';
+    return norm_path.startsWith(norm_root);
 }
 
 QString nearestExistingDirectory(QString path) {
     QFileInfo info(path);
-    if (!info.isDir()) {
-        path = info.absolutePath();
+    if (!info.isDir()) path = info.absolutePath();
+    QDir dir(path);
+    while (!dir.exists()) {
+        if (!dir.cdUp()) return {};
     }
-    QDir directory(path);
-    while (!directory.exists()) {
-        if (!directory.cdUp()) {
-            return {};
-        }
-    }
-    return directory.absolutePath();
+    return dir.absolutePath();
 }
 
 bool isReservedWindowsName(const QString& component) {
     QString base = component;
     const int dot = base.indexOf('.');
-    if (dot >= 0) {
-        base = base.left(dot);
-    }
+    if (dot >= 0) base = base.left(dot);
     base = base.trimmed().toUpper();
-    static const QRegularExpression reserved(
-        "^(CON|PRN|AUX|NUL|CLOCK\\$|COM[1-9]|LPT[1-9])$");
+    static const QRegularExpression reserved("^(CON|PRN|AUX|NUL|CLOCK\\$|COM[1-9]|LPT[1-9])$");
     return reserved.match(base).hasMatch();
 }
 
@@ -126,23 +106,21 @@ QString fieldNameForProtocolValue(const LabRecorderFilenameFields& fields,
 } // namespace
 
 bool RecordingPathResult::valid() const {
-    return std::none_of(issues.begin(), issues.end(), [](const RecordingPathIssue& issue) {
-        return issue.level == RecordingPathIssueLevel::Error;
+    return std::none_of(issues.begin(), issues.end(), [](const auto& i) {
+        return i.level == RecordingPathIssueLevel::Error;
     });
 }
 
 bool RecordingPathResult::hasWarnings() const {
-    return std::any_of(issues.begin(), issues.end(), [](const RecordingPathIssue& issue) {
-        return issue.level == RecordingPathIssueLevel::Warning;
+    return std::any_of(issues.begin(), issues.end(), [](const auto& i) {
+        return i.level == RecordingPathIssueLevel::Warning;
     });
 }
 
 QString RecordingPathResult::firstError() const {
-    for (const RecordingPathIssue& issue : issues) {
-        if (issue.level == RecordingPathIssueLevel::Error) {
-            return issue.message + (issue.corrective_action.isEmpty()
-                ? QString()
-                : " " + issue.corrective_action);
+    for (const auto& i : issues) {
+        if (i.level == RecordingPathIssueLevel::Error) {
+            return i.message + (i.corrective_action.isEmpty() ? QString() : " " + i.corrective_action);
         }
     }
     return {};
@@ -150,12 +128,10 @@ QString RecordingPathResult::firstError() const {
 
 QString RecordingPathResult::summary() const {
     QStringList lines;
-    for (const RecordingPathIssue& issue : issues) {
-        lines.push_back((issue.level == RecordingPathIssueLevel::Error ? "Error" : "Warning") +
-                        QString(" [%1]: %2").arg(issue.field, issue.message) +
-                        (issue.corrective_action.isEmpty()
-                            ? QString()
-                            : " " + issue.corrective_action));
+    for (const auto& i : issues) {
+        lines.push_back((i.level == RecordingPathIssueLevel::Error ? "Error" : "Warning") +
+                        QString(" [%1]: %2").arg(i.field, i.message) +
+                        (i.corrective_action.isEmpty() ? QString() : " " + i.corrective_action));
     }
     return lines.isEmpty() ? "Recording destination is valid." : lines.join('\n');
 }
@@ -226,7 +202,7 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
 
     for (const RecordingField& recording_field : kRecordingFields) {
         const QString& value = fields.*(recording_field.value);
-        if (containsProtocolBreakingCharacter(value)) {
+        if (containsProtocolBreakingChar(value)) {
             const QString field = fieldNameForProtocolValue(fields, value);
             addIssue(result, RecordingPathIssueLevel::Error, field,
                      field + " contains a brace or line break that cannot be sent safely.",
@@ -443,8 +419,7 @@ int LabRecorderFilenamePolicy::findNextRun(
     search_options.verify_write_access = false;
     search_options.verify_storage = false;
     search_options.create_parent_directories = false;
-    const int last = (std::min)(1000000,
-        first + kMaximumFindNextRunAttempts);
+    const int last = (std::min)(1000000, first + kMaxFindNextRun);
     for (int run = first; run < last; ++run) {
         LabRecorderFilenameFields candidate = fields;
         candidate.run = QString::number(run);

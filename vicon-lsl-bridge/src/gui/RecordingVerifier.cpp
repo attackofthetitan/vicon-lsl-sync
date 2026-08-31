@@ -15,118 +15,84 @@
 namespace vicon_lsl::gui {
 namespace {
 
-void addFinding(RecordingVerificationReport& report,
-                EventSeverity severity,
-                QString id,
-                QString stream,
-                QString message,
-                QString action = {}) {
-    report.findings.push_back({severity, std::move(id), std::move(stream),
-                               std::move(message), std::move(action)});
+void addFinding(RecordingVerificationReport& report, EventSeverity severity,
+                QString id, QString stream, QString message, QString action = {}) {
+    report.findings.push_back({severity, std::move(id), std::move(stream), std::move(message), std::move(action)});
 }
 
-bool streamMatches(const XdfStreamData& recorded,
-                   const StreamBinding& expected) {
-    if (!expected.source_id.trimmed().isEmpty() &&
-        expected.reconnection == StreamReconnectionMode::SourceIdentity) {
-        return QString::fromStdString(recorded.source_id) == expected.source_id;
+bool streamMatches(const XdfStreamData& rec, const StreamBinding& exp) {
+    if (!exp.source_id.trimmed().isEmpty() && exp.reconnection == StreamReconnectionMode::SourceIdentity) {
+        return QString::fromStdString(rec.source_id) == exp.source_id;
     }
-    return QString::fromStdString(recorded.name) == expected.name;
+    return QString::fromStdString(rec.name) == exp.name;
 }
 
-bool streamMatchesInventory(const XdfStreamData& recorded,
-                            const StreamIdentity& expected) {
-    if (!expected.source_id.trimmed().isEmpty()) {
-        return QString::fromStdString(recorded.source_id) == expected.source_id;
-    }
-    return QString::fromStdString(recorded.name) == expected.name &&
-           (expected.hostname.isEmpty() ||
-            QString::fromStdString(recorded.hostname) == expected.hostname);
+bool streamMatchesInventory(const XdfStreamData& rec, const StreamIdentity& exp) {
+    if (!exp.source_id.trimmed().isEmpty()) return QString::fromStdString(rec.source_id) == exp.source_id;
+    return QString::fromStdString(rec.name) == exp.name &&
+           (exp.hostname.isEmpty() || QString::fromStdString(rec.hostname) == exp.hostname);
 }
 
-QString streamLabel(const XdfStreamData& stream) {
-    QString result = QString::fromStdString(stream.name);
-    if (!stream.source_id.empty()) result += " [" + QString::fromStdString(stream.source_id) + "]";
-    return result;
+QString streamLabel(const XdfStreamData& s) {
+    return s.source_id.empty() ? QString::fromStdString(s.name)
+                               : QString::fromStdString(s.name) + " [" + QString::fromStdString(s.source_id) + "]";
 }
 
 } // namespace
 
 QJsonObject RecordingVerificationFinding::toJson() const {
-    return {
-        {"severity", SessionEventLog::severityText(severity)},
-        {"id", id},
-        {"stream", stream},
-        {"message", message},
-        {"correctiveAction", corrective_action},
-    };
+    return {{"severity", SessionEventLog::severityText(severity)}, {"id", id},
+            {"stream", stream}, {"message", message}, {"correctiveAction", corrective_action}};
 }
 
 QJsonObject RecordedStreamVerification::toJson() const {
     return {
-        {"name", name}, {"type", type}, {"sourceId", source_id},
-        {"hostname", hostname}, {"sessionId", session_id},
-        {"coordinateFrame", coordinate_frame}, {"channelCount", channel_count},
-        {"nominalRate", nominal_rate}, {"effectiveRate", effective_rate},
-        {"sampleCount", sample_count}, {"startTime", start_time},
-        {"endTime", end_time}, {"maximumGap", maximum_gap},
-        {"largeGapCount", large_gap_count},
-        {"clockCorrectionCount", clock_correction_count},
+        {"name", name}, {"type", type}, {"sourceId", source_id}, {"hostname", hostname},
+        {"sessionId", session_id}, {"coordinateFrame", coordinate_frame},
+        {"channelCount", channel_count}, {"nominalRate", nominal_rate},
+        {"effectiveRate", effective_rate}, {"sampleCount", sample_count},
+        {"startTime", start_time}, {"endTime", end_time}, {"maximumGap", maximum_gap},
+        {"largeGapCount", large_gap_count}, {"clockCorrectionCount", clock_correction_count},
         {"repairedTimestampCount", repaired_timestamp_count},
     };
 }
 
 bool RecordingVerificationReport::hasErrors() const {
-    return std::any_of(findings.begin(), findings.end(), [](const auto& finding) {
-        return finding.severity == EventSeverity::Error;
-    });
+    return std::any_of(findings.begin(), findings.end(), [](const auto& f) { return f.severity == EventSeverity::Error; });
 }
 
 bool RecordingVerificationReport::hasWarnings() const {
-    return std::any_of(findings.begin(), findings.end(), [](const auto& finding) {
-        return finding.severity == EventSeverity::Warning;
-    });
+    return std::any_of(findings.begin(), findings.end(), [](const auto& f) { return f.severity == EventSeverity::Warning; });
 }
 
 QString RecordingVerificationReport::summary() const {
-    int errors = 0;
-    int warnings = 0;
-    for (const RecordingVerificationFinding& finding : findings) {
-        if (finding.severity == EventSeverity::Error) ++errors;
-        if (finding.severity == EventSeverity::Warning) ++warnings;
+    int errors = 0, warnings = 0;
+    for (const auto& f : findings) {
+        if (f.severity == EventSeverity::Error) ++errors;
+        if (f.severity == EventSeverity::Warning) ++warnings;
     }
     return verificationStateText(state) + ": " + QString::number(streams.size()) +
-           " stream(s), " + QString::number(errors) + " error(s), " +
-           QString::number(warnings) + " warning(s)";
+           " stream(s), " + QString::number(errors) + " error(s), " + QString::number(warnings) + " warning(s)";
 }
 
 QJsonObject RecordingVerificationReport::toJson() const {
-    QJsonArray serialized_streams;
-    for (const RecordedStreamVerification& stream : streams) {
-        serialized_streams.push_back(stream.toJson());
-    }
-    QJsonArray serialized_findings;
-    for (const RecordingVerificationFinding& finding : findings) {
-        serialized_findings.push_back(finding.toJson());
-    }
+    QJsonArray serialized_streams, serialized_findings;
+    for (const auto& s : streams) serialized_streams.push_back(s.toJson());
+    for (const auto& f : findings) serialized_findings.push_back(f.toJson());
     return {
-        {"state", verificationStateText(state)},
-        {"path", path},
+        {"state", verificationStateText(state)}, {"path", path},
         {"startedAt", started_at.toString(Qt::ISODateWithMs)},
         {"completedAt", completed_at.toString(Qt::ISODateWithMs)},
         {"durationSeconds", duration_seconds},
         {"truncatedTailRecovered", truncated_tail_recovered},
         {"fileSizeBytes", file_size_bytes},
-        {"streams", serialized_streams},
-        {"findings", serialized_findings},
+        {"streams", serialized_streams}, {"findings", serialized_findings},
     };
 }
 
-RecordingVerifier::RecordingVerifier(RecordingVerificationRequest request,
-                                     QObject* parent)
+RecordingVerifier::RecordingVerifier(RecordingVerificationRequest request, QObject* parent)
     : QThread(parent), request_(std::move(request)) {
-    qRegisterMetaType<RecordingVerificationReport>(
-        "vicon_lsl::gui::RecordingVerificationReport");
+    qRegisterMetaType<RecordingVerificationReport>("vicon_lsl::gui::RecordingVerificationReport");
     qRegisterMetaType<ComponentLifecycleState>("ComponentLifecycleState");
 }
 
