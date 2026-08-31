@@ -73,7 +73,7 @@ double resolveSampleTimestamp(const std::optional<double>& encoded_timestamp,
     } else {
         if (!previous_timestamp || !std::isfinite(nominal_srate) || nominal_srate <= 0.0) {
             throw std::runtime_error(
-                "Cannot reconstruct implicit XDF timestamp without a preceding timestamp and positive nominal_srate");
+                "Cannot restore an XDF sample time without an earlier time and a positive expected rate");
         }
         timestamp = *previous_timestamp + 1.0 / nominal_srate;
     }
@@ -138,7 +138,7 @@ std::size_t correctAndRepairTimestamps(XdfStreamData& stream) {
         if (previous && repaired <= *previous) {
             repaired = std::nextafter(*previous, std::numeric_limits<double>::infinity());
             if (!std::isfinite(repaired)) {
-                throw std::runtime_error("Unable to repair non-monotonic XDF timestamp");
+                throw std::runtime_error("Could not fix an XDF timestamp that moved backward");
             }
             accumulated_shift += static_cast<long double>(repaired) - shifted;
             ++repaired_count;

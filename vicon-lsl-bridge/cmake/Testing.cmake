@@ -14,6 +14,7 @@ set(VICON_LSL_BRIDGE_TEST_SOURCES
     tests/PreviewFrameAssemblerTests.cpp
     tests/PreviewXdfTests.cpp
     tests/PreviewRateTests.cpp
+    tests/PreviewDeliveryTests.cpp
     tests/ViconFrameMapperTests.cpp
 )
 
@@ -52,31 +53,72 @@ endif()
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     set(VICON_LSL_QT_TEST_ENV
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    if(NOT WIN32)
-        list(APPEND VICON_LSL_QT_TEST_ENV
-            "QT_QPA_PLATFORM=set:offscreen")
+    if(WIN32)
+        list(APPEND VICON_LSL_QT_TEST_ENV "QT_QPA_PLATFORM=set:windows")
+    else()
+        list(APPEND VICON_LSL_QT_TEST_ENV "QT_QPA_PLATFORM=set:offscreen")
     endif()
+
+    add_executable(vicon-lsl-recorder-process-fixture
+        tests/RecorderProcessFixture.cpp)
+    set_target_properties(vicon-lsl-recorder-process-fixture PROPERTIES
+        AUTOMOC OFF)
 
     add_executable(vicon-lsl-labrecorder-tests
         tests/test_labrecorder_client.cpp
         tests/LabRecorderFilenameTests.cpp
-        tests/BridgeWindowSettingsTests.cpp
         tests/LabRecorderRuntimePolicyTests.cpp
         tests/LabRecorderClientProtocolTests.cpp
-        src/gui/BridgeWindowSettings.cpp
+        tests/SessionGuiModelTests.cpp
+        tests/RecordingVerifierTests.cpp
+        tests/RecorderProcessControllerTests.cpp
         src/gui/LabRecorderClient.cpp
         src/gui/LabRecorderFilenamePolicy.cpp
         src/gui/LabRecorderRuntimePolicy.cpp
+        src/gui/CalibrationProfileStore.cpp
+        src/gui/RecorderProcessController.cpp
+        src/gui/RecordingVerifier.cpp
+        src/gui/SessionConfiguration.cpp
+        src/gui/SessionState.cpp
     )
     target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
-    target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE Qt6::Core Qt6::Network)
+    target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE
+        vicon-lsl-bridge-logic
+        Qt6::Core
+        Qt6::Network
+    )
     set_target_properties(vicon-lsl-labrecorder-tests PROPERTIES AUTOMOC ON)
+    add_dependencies(vicon-lsl-labrecorder-tests
+        vicon-lsl-recorder-process-fixture)
     add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)
     set_tests_properties(vicon-lsl-labrecorder-tests PROPERTIES
         TIMEOUT 30
         ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
     )
 
+    if(TARGET vicon-lsl-bridge-gui-components)
+        add_executable(vicon-lsl-bridge-gui-tests
+            tests/test_bridge_gui.cpp)
+        target_link_libraries(vicon-lsl-bridge-gui-tests PRIVATE
+            vicon-lsl-bridge-gui-components)
+
+        set(VICON_LSL_GUI_TEST_ENV
+            ${VICON_LSL_QT_TEST_ENV}
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
+        add_test(NAME vicon-lsl-bridge-gui-test
+            COMMAND vicon-lsl-bridge-gui-tests --test)
+        set_tests_properties(vicon-lsl-bridge-gui-test PROPERTIES
+            TIMEOUT 30
+            ENVIRONMENT_MODIFICATION "${VICON_LSL_GUI_TEST_ENV}"
+        )
+        add_test(NAME vicon-lsl-bridge-gui-scaled-test
+            COMMAND vicon-lsl-bridge-gui-tests --test)
+        set_tests_properties(vicon-lsl-bridge-gui-scaled-test PROPERTIES
+            TIMEOUT 30
+            ENVIRONMENT_MODIFICATION
+                "${VICON_LSL_GUI_TEST_ENV};QT_SCALE_FACTOR=set:1.5"
+        )
+    endif()
 endif()
 
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME)

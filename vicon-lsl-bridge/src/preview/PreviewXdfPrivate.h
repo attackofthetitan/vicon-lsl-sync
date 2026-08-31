@@ -26,6 +26,7 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                                    const PreviewTransformProfile& vicon_transform,
                                    const PreviewTransformProfile& gaze_transform,
                                    double match_tolerance_seconds,
-                                   const PreviewCancel& cancel = {});
+                                   std::uint32_t preferred_master_stream_id,
+                                   const PreviewLoadOptions& options);
 
 } // namespace vicon_lsl::preview_xdf_detail
