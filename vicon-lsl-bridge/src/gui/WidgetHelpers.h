@@ -4,6 +4,8 @@
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFrame>
+#include <QGroupBox>
+#include <QVBoxLayout>
 #include <QGridLayout>
 #include <QKeySequence>
 #include <QLabel>
@@ -14,6 +16,7 @@
 #include <QString>
 
 #include <initializer_list>
+#include <utility>
 
 namespace vicon_lsl::gui_detail {
 
@@ -102,6 +105,20 @@ inline void addSpinRow(QGridLayout* layout, int row, const QString& label,
 
 inline void addWidgets(QBoxLayout* layout, std::initializer_list<QWidget*> widgets) {
     for (QWidget* widget : widgets) layout->addWidget(widget);
+}
+
+template <typename Layout>
+std::pair<QGroupBox*, Layout*> makeGroup(const QString& title) {
+    auto* box = new QGroupBox(title);
+    return {box, new Layout(box)};
+}
+
+inline std::pair<QWidget*, QVBoxLayout*> makePage() {
+    auto* page = new QWidget();
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(8);
+    return {page, layout};
 }
 
 inline QScrollArea* scrollable(QWidget* page) {

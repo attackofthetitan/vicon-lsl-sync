@@ -17,6 +17,7 @@
 
 class QCloseEvent;
 class QComboBox;
+class QWidget;
 class QJsonObject;
 class QSettings;
 
@@ -102,6 +103,9 @@ private slots:
 
 private:
     void connectSignals();
+    // Connect whichever "the user changed this" signal each widget type has.
+    template <typename Handler>
+    void onEdited(std::initializer_list<QWidget*> widgets, Handler handler);
     void loadSettings();
     void saveSettings();
     void applyConfigurationToUi();

@@ -77,8 +77,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     widget_ = new PreviewWidget();
     layout->addWidget(widget_, 1);
 
-    auto* controls_group = new QGroupBox("Live Preview");
-    auto* controls_layout = new QVBoxLayout(controls_group);
+    auto [controls_group, controls_layout] = makeGroup<QVBoxLayout>("Live Preview");
     controls_layout->setContentsMargins(8, 8, 8, 8);
     controls_layout->setSpacing(6);
 
@@ -148,8 +147,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     calibration_row->addStretch(1);
     alignment_layout->addLayout(calibration_row);
 
-    auto* profiles_group = new QGroupBox("Saved Calibration");
-    auto* profiles_layout = new QVBoxLayout(profiles_group);
+    auto [profiles_group, profiles_layout] = makeGroup<QVBoxLayout>("Saved Calibration");
     auto* profile_form = new QFormLayout();
     calibration_profile_combo_ = new QComboBox();
     calibration_profile_combo_->setToolTip("Saved calibration setup. Automatic results remain available only for this session until saved.");

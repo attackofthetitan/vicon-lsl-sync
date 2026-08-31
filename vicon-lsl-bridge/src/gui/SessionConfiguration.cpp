@@ -286,7 +286,6 @@ QJsonObject SessionConfiguration::toJson() const {
             {"run", run}, {"acquisition", acquisition}, {"modality", modality},
             {"storageWarningGiB", storage_warning_gib},
             {"automaticRunIncrement", automatic_run_increment},
-            {"incrementAfterVerifiedOnly", increment_run_after_verified_only},
             {"allowOverwrite", allow_overwrite},
             {"allowOutsideStudyRoot", allow_outside_study_root},
         }},
@@ -349,7 +348,6 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QStrin
     res.modality = rString(recing, "modality", res.modality);
     res.storage_warning_gib = (std::max)(0.0, rDouble(recing, "storageWarningGiB", res.storage_warning_gib));
     res.automatic_run_increment = rBool(recing, "automaticRunIncrement", res.automatic_run_increment);
-    res.increment_run_after_verified_only = rBool(recing, "incrementAfterVerifiedOnly", res.increment_run_after_verified_only);
     res.allow_overwrite = rBool(recing, "allowOverwrite", res.allow_overwrite);
     res.allow_outside_study_root = rBool(recing, "allowOutsideStudyRoot", res.allow_outside_study_root);
 

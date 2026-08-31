@@ -42,8 +42,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     main_layout->setSpacing(8);
 
     // Dashboard
-    auto* dashboard = new QGroupBox("Session Status");
-    auto* db_layout = new QGridLayout(dashboard);
+    auto [dashboard, db_layout] = makeGroup<QGridLayout>("Session Status");
     db_layout->setContentsMargins(8, 8, 8, 8);
     db_layout->setHorizontalSpacing(10);
     db_layout->setVerticalSpacing(4);
@@ -115,13 +114,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->controls_tabs->setAccessibleName("Session controls");
 
     // Session Tab
-    auto* session_page = new QWidget();
-    auto* session_layout = new QVBoxLayout(session_page);
-    session_layout->setContentsMargins(6, 6, 6, 6);
-    session_layout->setSpacing(8);
+    auto [session_page, session_layout] = makePage();
 
-    auto* preset_group = new QGroupBox("Session Settings");
-    auto* preset_layout = new QGridLayout(preset_group);
+    auto [preset_group, preset_layout] = makeGroup<QGridLayout>("Session Settings");
     ui->preset_combo = new QComboBox();
     ui->preset_combo->setEditable(true);
     ui->preset_combo->setToolTip("Saved session settings that can be used again.");
@@ -142,8 +137,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->recorder_only_check = makeCheck("Record without the Vicon bridge", "Allow recording when the Vicon bridge is not running.");
     session_layout->addWidget(ui->recorder_only_check);
 
-    auto* setup_check_group = new QGroupBox("Setup Check");
-    auto* setup_check_layout = new QVBoxLayout(setup_check_group);
+    auto [setup_check_group, setup_check_layout] = makeGroup<QVBoxLayout>("Setup Check");
     ui->setup_check_tree = new QTreeWidget();
     ui->setup_check_tree->setColumnCount(4);
     ui->setup_check_tree->setHeaderLabels({"Importance", "Part", "Result", "Details"});
@@ -165,13 +159,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->controls_tabs->addTab(scrollable(session_page), "Session");
 
     // Bridge Tab
-    auto* bridge_page = new QWidget();
-    auto* bridge_layout = new QVBoxLayout(bridge_page);
-    bridge_layout->setContentsMargins(6, 6, 6, 6);
-    bridge_layout->setSpacing(8);
+    auto [bridge_page, bridge_layout] = makePage();
 
-    auto* settings_group = new QGroupBox("Connection Settings");
-    auto* form = new QFormLayout(settings_group);
+    auto [settings_group, form] = makeGroup<QFormLayout>("Connection Settings");
     form->setContentsMargins(8, 8, 8, 8);
     form->setVerticalSpacing(4);
     ui->server_edit = new QLineEdit("localhost:801");
@@ -193,8 +183,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     bridge_buttons->addStretch(1);
     bridge_layout->addLayout(bridge_buttons);
 
-    auto* bridge_status_group = new QGroupBox("Bridge Status");
-    auto* bridge_status = new QGridLayout(bridge_status_group);
+    auto [bridge_status_group, bridge_status] = makeGroup<QGridLayout>("Bridge Status");
     ui->status_label = makeStateValue("Disconnected", "Detailed bridge state");
     ui->markers_label = makeStateValue("0", "Discovered Vicon markers");
     ui->segments_label = makeStateValue("0", "Discovered Vicon segments");
@@ -216,13 +205,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->controls_tabs->addTab(scrollable(bridge_page), "Bridge");
 
     // Recording Tab
-    auto* recording_page = new QWidget();
-    auto* recording_layout = new QVBoxLayout(recording_page);
-    recording_layout->setContentsMargins(6, 6, 6, 6);
-    recording_layout->setSpacing(8);
+    auto [recording_page, recording_layout] = makePage();
 
-    auto* destination_group = new QGroupBox("Recording Destination");
-    auto* recording_form = new QFormLayout(destination_group);
+    auto [destination_group, recording_form] = makeGroup<QFormLayout>("Recording Destination");
     recording_form->setVerticalSpacing(4);
 
     auto* root_layout = new QHBoxLayout();
@@ -275,8 +260,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     recording_form->addRow(QString(), ui->find_next_run_button);
     recording_layout->addWidget(destination_group);
 
-    auto* recorder_group = new QGroupBox("Recorder");
-    auto* recorder_layout = new QVBoxLayout(recorder_group);
+    auto [recorder_group, recorder_layout] = makeGroup<QVBoxLayout>("Recorder");
     auto* labrecorder_form = new QFormLayout();
     auto* executable_layout = new QHBoxLayout();
     ui->labrecorder_executable_edit = new QLineEdit();
@@ -333,9 +317,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->controls_tabs->addTab(scrollable(recording_page), "Recording");
 
     // Streams Tab
-    auto* streams_page = new QWidget();
-    auto* streams_layout = new QVBoxLayout(streams_page);
-    streams_layout->setContentsMargins(6, 6, 6, 6);
+    auto [streams_page, streams_layout] = makePage();
 
     auto* discovery_row = new QHBoxLayout();
     ui->discover_streams_button = makeButton("Find LSL Streams", "Find available streams and keep the details needed to reconnect.",
@@ -362,8 +344,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->stream_table->setAccessibleName("Available streams and recording choices");
     streams_layout->addWidget(ui->stream_table, 1);
 
-    auto* bindings_group = new QGroupBox("Preview Streams");
-    auto* bindings = new QGridLayout(bindings_group);
+    auto [bindings_group, bindings] = makeGroup<QGridLayout>("Preview Streams");
     const struct { const char* label; QComboBox** combo; QCheckBox** follow; } bindings_rows[] = {
         {"Markers:", &ui->marker_binding_combo, &ui->marker_follow_name_check},
         {"Segments:", &ui->segment_binding_combo, &ui->segment_follow_name_check},
@@ -385,9 +366,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->controls_tabs->addTab(scrollable(streams_page), "Streams");
 
     // Events Tab
-    auto* events_page = new QWidget();
-    auto* events_layout = new QVBoxLayout(events_page);
-    events_layout->setContentsMargins(6, 6, 6, 6);
+    auto [events_page, events_layout] = makePage();
 
     auto* filter_row = new QHBoxLayout();
     ui->event_severity_filter = new QComboBox();

@@ -114,7 +114,6 @@ struct SessionConfiguration {
     QString modality = "beh";
     double storage_warning_gib = 10.0;
     bool automatic_run_increment = false;
-    bool increment_run_after_verified_only = true;
     bool allow_overwrite = false;
     bool allow_outside_study_root = false;
 
