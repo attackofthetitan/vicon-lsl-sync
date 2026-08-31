@@ -72,7 +72,6 @@ private slots:
     void onStop();
     void onStartSession();
     void onStopSession();
-    void onEmergencyStop();
     void onBrowseStudyRoot();
     void onBrowseLabRecorder();
     void onLaunchLabRecorder();
@@ -191,8 +190,7 @@ private:
     bool closing() const { return sequence_ == SessionSequence::Closing; }
 
     SessionSequence sequence_ = SessionSequence::None;
-    vicon_lsl::gui::SessionWorkflowState workflow_ =
-        vicon_lsl::gui::SessionWorkflowState::Idle;
+    bool stop_requested_ = false;
     vicon_lsl::gui::SessionFileState file_state_ =
         vicon_lsl::gui::SessionFileState::None;
     ComponentLifecycleState bridge_lifecycle_ = ComponentLifecycleState::Idle;

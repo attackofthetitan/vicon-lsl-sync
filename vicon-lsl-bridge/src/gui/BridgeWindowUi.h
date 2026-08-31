@@ -29,7 +29,6 @@ namespace vicon_lsl::gui_detail {
 struct BridgeWindowUi {
     QSplitter* main_splitter = nullptr;
     QTabWidget* controls_tabs = nullptr;
-    QLabel* workflow_state_label = nullptr;
     QLabel* recording_indicator_label = nullptr;
     QLabel* recording_elapsed_label = nullptr;
     QLabel* recording_path_label = nullptr;
@@ -48,7 +47,6 @@ struct BridgeWindowUi {
     QPushButton* start_session_button = nullptr;
     QPushButton* stop_session_button = nullptr;
     QPushButton* run_setup_check_button = nullptr;
-    QPushButton* emergency_stop_button = nullptr;
 
     QComboBox* preset_combo = nullptr;
     QPushButton* reset_configuration_button = nullptr;

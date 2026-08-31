@@ -178,14 +178,6 @@ QString verificationStateText(RecordingVerificationState state) {
                     "Not checked");
 }
 
-QString vicon_lsl::gui::workflowStateText(SessionWorkflowState state) {
-    return enumText(state,
-                    std::array{"Idle", "Preparing", "Setup blocked", "Ready",
-                               "Starting", "Recording", "Stopping", "Checking file",
-                               "Complete", "Needs attention", "Closing"},
-                    "Idle");
-}
-
 QString vicon_lsl::gui::calibrationStateText(SessionCalibrationState state) {
     return enumText(state,
                     std::array{"Manual", "Collecting", "Current session", "Saved",

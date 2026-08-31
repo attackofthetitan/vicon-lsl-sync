@@ -52,16 +52,14 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ind_font.setBold(true);
     ind_font.setPointSize(ind_font.pointSize() + 2);
     ui->recording_indicator_label->setFont(ind_font);
-    ui->workflow_state_label = makeStateValue("Idle", "Session status");
     ui->recording_elapsed_label = makeStateValue("00:00:00", "Recording elapsed time");
     ui->run_identifier_label = makeStateValue("run 1", "Recording run number");
     ui->recording_path_label = makeStateValue("No checked destination", "Recording destination");
     ui->recording_path_label->setToolTip("The exact file path used by the recorder.");
 
     db_layout->addWidget(ui->recording_indicator_label, 0, 0);
-    addField(db_layout, 0, 1, "Session:", ui->workflow_state_label);
-    addField(db_layout, 0, 3, "Elapsed:", ui->recording_elapsed_label);
-    db_layout->addWidget(ui->run_identifier_label, 0, 5);
+    addField(db_layout, 0, 1, "Elapsed:", ui->recording_elapsed_label);
+    db_layout->addWidget(ui->run_identifier_label, 0, 3);
     addField(db_layout, 1, 0, "Destination:", ui->recording_path_label, {}, 5);
 
     ui->bridge_state_label = makeStateValue("Idle", "Bridge status");
@@ -93,9 +91,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
                                          "Stop guided session", QKeySequence("Ctrl+Shift+T"));
     ui->run_setup_check_button = makeButton("Check Setup", "Check whether the session is ready to record.",
                                           "Check session setup", QKeySequence(Qt::Key_F5));
-    ui->emergency_stop_button = makeButton("Emergency Stop Recording", "Ask the recorder to stop immediately.",
-                                           "Emergency stop recording", QKeySequence("Ctrl+Shift+S"));
-    addWidgets(db_buttons, {ui->start_session_button, ui->stop_session_button, ui->run_setup_check_button, ui->emergency_stop_button});
+    addWidgets(db_buttons, {ui->start_session_button, ui->stop_session_button, ui->run_setup_check_button});
     db_buttons->addStretch(1);
     ui->shutdown_label = makeStateValue(QString(), "Shutdown progress");
     db_buttons->addWidget(ui->shutdown_label, 1);

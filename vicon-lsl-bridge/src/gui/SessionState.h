@@ -44,20 +44,6 @@ enum class ComponentLifecycleState {
 
 namespace vicon_lsl::gui {
 
-enum class SessionWorkflowState {
-    Idle,
-    Preparing,
-    SetupBlocked,
-    Ready,
-    Starting,
-    Recording,
-    Stopping,
-    Verifying,
-    Complete,
-    Failed,
-    Closing,
-};
-
 enum class SessionCalibrationState {
     Manual,
     Collecting,
@@ -175,7 +161,6 @@ QString recorderProcessStateText(RecorderProcessState state);
 QString verificationStateText(RecordingVerificationState state);
 
 namespace vicon_lsl::gui {
-QString workflowStateText(SessionWorkflowState state);
 QString calibrationStateText(SessionCalibrationState state);
 QString fileStateText(SessionFileState state);
 } // namespace vicon_lsl::gui
@@ -186,6 +171,5 @@ Q_DECLARE_METATYPE(RecorderOperationState)
 Q_DECLARE_METATYPE(ComponentLifecycleState)
 Q_DECLARE_METATYPE(RecorderProcessState)
 Q_DECLARE_METATYPE(RecordingVerificationState)
-Q_DECLARE_METATYPE(vicon_lsl::gui::SessionWorkflowState)
 Q_DECLARE_METATYPE(vicon_lsl::gui::SessionCalibrationState)
 Q_DECLARE_METATYPE(vicon_lsl::gui::SessionFileState)
