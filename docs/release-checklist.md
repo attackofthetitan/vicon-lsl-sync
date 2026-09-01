@@ -7,8 +7,8 @@
 - Target date: 2026-09-01
 - Feature pull requests, in order: `#21`, `#22`, `#23`, `#19`
 - Documentation pull request: `#20`, after `#19`
-- Status: ready for ordered merge; hosted packaging, hardware disposition, and
-  publication checks remain pending
+- Status: ready for ordered merge; hosted packaging passed, while hardware
+  disposition and publication checks remain pending
 - Scope: guided desktop sessions, explicit recorder and stream control,
   responsive recording preview, saved session and calibration data, and
   post-recording file checks
@@ -28,6 +28,8 @@
 - [x] Whitespace and generated-file checks are clean.
 - [x] The documentation branch contains the feature branch and compares as
   documentation-only after its base is changed to `release/bridge-gui`.
+- [x] The final hosted matrix passes all seven Linux, Windows, and HoloLens jobs,
+  including Windows packaging and portable-application validation.
 
 ## Ordered merge
 
