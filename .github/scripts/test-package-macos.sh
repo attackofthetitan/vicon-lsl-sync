@@ -42,10 +42,17 @@ fi
 if [[ -d "$temp_dir/LabRecorder.app" ]]; then
   codesign --verify --deep --strict "$temp_dir/LabRecorder.app"
 fi
+if [[ -d "$temp_dir/vicon-lsl-bridge-gui.app" ]]; then
+  codesign --verify --deep --strict "$temp_dir/vicon-lsl-bridge-gui.app"
+fi
 codesign --verify "$temp_dir/vicon-lsl-bridge"
 codesign --verify "$temp_dir/vicon-lsl-bridge-gui"
 codesign --verify "$temp_dir/LabRecorder"
 codesign --verify "$temp_dir/LabRecorderCLI"
+
+# 7. Test standalone binary execution
+"$temp_dir/vicon-lsl-bridge" --help >/dev/null
+"$temp_dir/LabRecorderCLI" -h >/dev/null
 
 echo "All macOS package verification checks passed successfully."
 

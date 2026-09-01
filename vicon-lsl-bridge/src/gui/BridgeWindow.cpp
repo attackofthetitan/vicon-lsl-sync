@@ -720,7 +720,7 @@ QString BridgeWindow::resolveLabRecorderExecutable() const {
     const QFileInfo configured(configured_path);
     if (!configured_path.isEmpty() && configured.exists() && configured.isFile()) return QDir::toNativeSeparators(configured.absoluteFilePath());
     const QString app_dir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
+    QStringList candidates = {
         QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
         QDir(app_dir).filePath("labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"),
         QDir(app_dir).filePath("labrecorder/LabRecorder"),
@@ -728,6 +728,13 @@ QString BridgeWindow::resolveLabRecorderExecutable() const {
         QDir(app_dir).filePath("LabRecorder.app/Contents/MacOS/LabRecorder"),
         QDir(app_dir).filePath("LabRecorder")
     };
+    if (app_dir.endsWith("/Contents/MacOS")) {
+        const QString root = QDir(app_dir + "/../../..").canonicalPath();
+        candidates.push_back(QDir(root).filePath("labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"));
+        candidates.push_back(QDir(root).filePath("labrecorder/LabRecorder"));
+        candidates.push_back(QDir(root).filePath("LabRecorder.app/Contents/MacOS/LabRecorder"));
+        candidates.push_back(QDir(root).filePath("LabRecorder"));
+    }
     for (const QString& candidate : candidates) {
         const QFileInfo info(candidate);
         if (info.exists() && info.isFile()) return QDir::toNativeSeparators(info.absoluteFilePath());
