@@ -722,11 +722,11 @@ QString BridgeWindow::resolveLabRecorderExecutable() const {
     const QString app_dir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
         QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
-        QDir(app_dir).filePath("labrecorder/LabRecorder"),
         QDir(app_dir).filePath("labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"),
+        QDir(app_dir).filePath("labrecorder/LabRecorder"),
         QDir(app_dir).filePath("LabRecorder.exe"),
-        QDir(app_dir).filePath("LabRecorder"),
-        QDir(app_dir).filePath("LabRecorder.app/Contents/MacOS/LabRecorder")
+        QDir(app_dir).filePath("LabRecorder.app/Contents/MacOS/LabRecorder"),
+        QDir(app_dir).filePath("LabRecorder")
     };
     for (const QString& candidate : candidates) {
         const QFileInfo info(candidate);

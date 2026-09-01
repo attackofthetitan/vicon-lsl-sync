@@ -16,6 +16,9 @@ if [[ -f build-labrecorder/LabRecorder ]]; then
   cp build-labrecorder/LabRecorder package/
 elif [[ -d build-labrecorder/LabRecorder.app ]]; then
   cp -R build-labrecorder/LabRecorder.app package/
+  macdeployqt="${QT_ROOT_DIR:+$QT_ROOT_DIR/bin/macdeployqt}"
+  [[ -x "$macdeployqt" ]] || macdeployqt="$(command -v macdeployqt)"
+  "$macdeployqt" package/LabRecorder.app
   if [[ -f build-labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder ]]; then
     cp build-labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder package/LabRecorder
   fi
@@ -33,3 +36,4 @@ find package -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 # Create tar.gz archive and Apple Disk Image (.dmg)
 tar -czf "${artifact_name}.tar.gz" -C package .
 hdiutil create -volname "Vicon LSL Bridge" -srcfolder package -ov -format UDZO "${artifact_name}.dmg"
+

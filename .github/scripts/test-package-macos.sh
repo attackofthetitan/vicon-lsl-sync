@@ -32,3 +32,4 @@ file "$temp_dir/LabRecorderCLI" | grep -E "Mach-O 64-bit (executable )?arm64"
 find "$temp_dir" -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
 echo "All macOS package verification checks passed successfully."
+

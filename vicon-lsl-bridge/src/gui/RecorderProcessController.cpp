@@ -84,7 +84,7 @@ QString RecorderProcessController::bundledSelectedStreamExecutable(const QString
         const QString dir = QFileInfo(graphical_executable).absolutePath();
         candidates.push_back(QDir(dir).filePath("LabRecorderCLI.exe"));
         candidates.push_back(QDir(dir).filePath("LabRecorderCLI"));
-        candidates.push_back(QDir(dir + "/../../..").filePath("LabRecorderCLI"));
+        if (dir.endsWith("/Contents/MacOS")) candidates.push_back(QDir(dir + "/../../..").filePath("LabRecorderCLI"));
     }
     candidates.push_back(QDir(app_dir).filePath("labrecorder/LabRecorderCLI.exe"));
     candidates.push_back(QDir(app_dir).filePath("labrecorder/LabRecorderCLI"));

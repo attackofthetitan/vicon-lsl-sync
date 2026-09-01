@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify generated stream contracts
-        run: python tools/generate_stream_contracts.py --check
+        run: ${{ runner.os == 'macOS' && 'python3' || 'python' }} tools/generate_stream_contracts.py --check
 
       - name: Configure dependency-light tests
         run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON

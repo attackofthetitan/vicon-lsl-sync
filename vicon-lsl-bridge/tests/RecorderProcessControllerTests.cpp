@@ -3,7 +3,9 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QTemporaryDir>
 
 namespace labrecorder_client_tests {
 
@@ -126,9 +128,12 @@ void testBundledExecutableResolution() {
     QFile macos_cli(QDir(app3).filePath("LabRecorderCLI"));
     expect(macos_cli.open(QIODevice::WriteOnly), "create dummy sibling LabRecorderCLI");
     macos_cli.close();
+    expect(QDir(root).mkdir("app4"), "create recorder-free app directory");
     const QString resolved_cli = RecorderProcessController::bundledSelectedStreamExecutable(
-        macos_gui.fileName(), app3);
-    expect(!resolved_cli.isEmpty(), "resolves LabRecorderCLI alongside macOS LabRecorder.app bundle");
+        macos_gui.fileName(), QDir(root).filePath("app4"));
+    expect(QFileInfo(resolved_cli).canonicalFilePath() ==
+               QFileInfo(QDir(app3).filePath("LabRecorderCLI")).canonicalFilePath(),
+           "resolves LabRecorderCLI alongside macOS LabRecorder.app bundle");
 }
 
 } // namespace labrecorder_client_tests
