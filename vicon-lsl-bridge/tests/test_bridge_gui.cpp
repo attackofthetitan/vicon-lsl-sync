@@ -83,7 +83,19 @@ int main(int argc, char* argv[]) {
         const QPixmap rendered = window.grab();
         const bool rendered_at_requested_size =
             !rendered.isNull() &&
-            rendered.deviceIndependentSize().toSize() == target_size;
+            window.size() == target_size;
+
+        if (!fits || !controls_are_described || !rendered_at_requested_size) {
+            std::cerr << "GUI check failed: minimum="
+                      << minimum.width() << 'x' << minimum.height()
+                      << ", window=" << window.width() << 'x' << window.height()
+                      << ", pixmap=" << rendered.width() << 'x' << rendered.height()
+                      << ", device-independent pixmap="
+                      << rendered.deviceIndependentSize().width() << 'x'
+                      << rendered.deviceIndependentSize().height()
+                      << ", device pixel ratio=" << rendered.devicePixelRatio()
+                      << std::endl;
+        }
 
         app.exit(fits && controls_are_described && rendered_at_requested_size ? 0 : 1);
     });
