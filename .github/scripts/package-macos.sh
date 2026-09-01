@@ -114,9 +114,16 @@ for app in package/vicon-lsl-bridge-gui.app package/LabRecorder.app; do
 done
 
 # Codesign standalone Mach-O files and frameworks
-find package/Frameworks -maxdepth 1 -name '*.framework' -exec codesign --force --deep --sign - {} + 2>/dev/null || true
-find package -maxdepth 1 -name '*.framework' -exec codesign --force --deep --sign - {} + 2>/dev/null || true
-find package -maxdepth 1 -type f \( -name '*.dylib' -o -perm -u+x \) -exec codesign --force --sign - {} + 2>/dev/null || true
+if [[ -d package/Frameworks/lsl.framework ]]; then
+  codesign --force --deep --sign - package/Frameworks/lsl.framework 2>/dev/null || true
+fi
+if [[ -d package/lsl.framework ]]; then
+  codesign --force --deep --sign - package/lsl.framework 2>/dev/null || true
+fi
+find package -maxdepth 1 -name 'liblsl*.dylib' -exec codesign --force --sign - {} + 2>/dev/null || true
+find package/Frameworks -maxdepth 1 -name 'liblsl*.dylib' -exec codesign --force --sign - {} + 2>/dev/null || true
+codesign --force --sign - package/vicon-lsl-bridge
+codesign --force --sign - package/LabRecorderCLI
 
 # Create tar.gz archive and Apple Disk Image (.dmg)
 tar -czf "${artifact_name}.tar.gz" -C package .
