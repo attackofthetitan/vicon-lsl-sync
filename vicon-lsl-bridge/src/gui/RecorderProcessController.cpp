@@ -1,6 +1,5 @@
 #include "gui/RecorderProcessController.h"
 
-#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <algorithm>
@@ -77,8 +76,34 @@ void RecorderProcessController::detach() {
     kind_ = RecorderProcessKind::None;
 }
 
-QString RecorderProcessController::bundledSelectedStreamExecutable(const QString& graphical_executable,
-                                                            const QString& app_dir) {
+QString RecorderProcessController::bundledGraphicalRecorderExecutable(const QString& app_dir) {
+    QStringList candidates = {
+        QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
+        QDir(app_dir).filePath("labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"),
+        QDir(app_dir).filePath("labrecorder/LabRecorder"),
+        QDir(app_dir).filePath("LabRecorder.exe"),
+        QDir(app_dir).filePath("LabRecorder.app/Contents/MacOS/LabRecorder"),
+        QDir(app_dir).filePath("LabRecorder")
+    };
+    if (app_dir.endsWith("/Contents/MacOS")) {
+        const QString package_root = QDir(app_dir + "/../../..").canonicalPath();
+        candidates.push_back(QDir(package_root).filePath(
+            "labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"));
+        candidates.push_back(QDir(package_root).filePath("labrecorder/LabRecorder"));
+        candidates.push_back(QDir(package_root).filePath(
+            "LabRecorder.app/Contents/MacOS/LabRecorder"));
+        candidates.push_back(QDir(package_root).filePath("LabRecorder"));
+    }
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.exists() && info.isFile())
+            return QDir::toNativeSeparators(info.absoluteFilePath());
+    }
+    return {};
+}
+
+QString RecorderProcessController::bundledSelectedStreamExecutable(
+    const QString& graphical_executable, const QString& app_dir) {
     QStringList candidates;
     if (!graphical_executable.trimmed().isEmpty()) {
         const QString dir = QFileInfo(graphical_executable).absolutePath();

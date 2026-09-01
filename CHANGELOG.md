@@ -4,6 +4,32 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-02
+
+### Added
+
+- Added native Apple Silicon builds for the bridge command-line and desktop
+  applications, LabRecorder, and LabRecorderCLI.
+- Added versioned macOS ARM64 disk-image and tarball release assets with
+  bundled Qt and LSL runtime dependencies.
+
+### Changed
+
+- The desktop app now discovers bundled recorder executables in Windows,
+  Unix, and macOS application-bundle layouts.
+- The hosted build now compiles, tests, packages, signs, and validates macOS
+  ARM64 alongside the existing Windows and Linux targets.
+
+### Compatibility
+
+- Existing Windows and Linux release filenames, command-line options, LSL
+  stream layouts, timestamps, coordinates, and saved-session formats are
+  unchanged.
+- macOS packages are ad-hoc signed for integrity but are not Developer ID
+  signed or notarized. A first launch may require explicit approval in macOS.
+- Physical Vicon, HoloLens, Vuforia, and LabRecorder integration remains a
+  manual qualification step. Use `v1.11.0` as the rollback release.
+
 ## [1.11.0] - 2026-09-01
 
 ### Added
@@ -70,6 +96,7 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.5...v1.11.0
 [1.10.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.4...v1.10.5

@@ -99,41 +99,69 @@ void testBundledExecutableResolution() {
     expect(temp_dir.isValid(), "temporary directory created for resolution tests");
     const QString root = temp_dir.path();
 
-    // 1. Direct LabRecorderCLI in app directory
-    QDir(root).mkdir("app1");
-    const QString app1 = QDir(root).filePath("app1");
-    QFile cli1(QDir(app1).filePath("LabRecorderCLI"));
-    expect(cli1.open(QIODevice::WriteOnly), "create dummy flat LabRecorderCLI");
-    cli1.close();
-    expect(!RecorderProcessController::bundledSelectedStreamExecutable("", app1).isEmpty(),
-           "resolves flat LabRecorderCLI binary");
+    auto createFile = [](const QString& path) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile file(path);
+        const bool opened = file.open(QIODevice::WriteOnly);
+        file.close();
+        return opened;
+    };
+    auto sameFile = [](const QString& actual, const QString& expected) {
+        return QFileInfo(actual).canonicalFilePath() ==
+               QFileInfo(expected).canonicalFilePath();
+    };
 
-    // 2. Subdirectory labrecorder/LabRecorderCLI
-    QDir(root).mkdir("app2");
-    const QString app2 = QDir(root).filePath("app2");
-    QDir(app2).mkdir("labrecorder");
-    QFile cli2(QDir(app2).filePath("labrecorder/LabRecorderCLI"));
-    expect(cli2.open(QIODevice::WriteOnly), "create dummy nested LabRecorderCLI");
-    cli2.close();
-    expect(!RecorderProcessController::bundledSelectedStreamExecutable("", app2).isEmpty(),
-           "resolves labrecorder/LabRecorderCLI binary in subfolder");
+    const QString flat_root = QDir(root).filePath("flat");
+    const QString flat_gui = QDir(flat_root).filePath("LabRecorder");
+    const QString bundled_gui = QDir(flat_root).filePath(
+        "LabRecorder.app/Contents/MacOS/LabRecorder");
+    const QString flat_cli = QDir(flat_root).filePath("LabRecorderCLI");
+    expect(createFile(flat_gui) && createFile(bundled_gui) && createFile(flat_cli),
+           "create flat and app-bundle recorder fixtures");
+    expect(sameFile(RecorderProcessController::bundledGraphicalRecorderExecutable(
+                        flat_root), bundled_gui),
+           "prefers a macOS LabRecorder app bundle over its launcher wrapper");
+    expect(sameFile(RecorderProcessController::bundledSelectedStreamExecutable(
+                        bundled_gui, QDir(root).filePath("missing")), flat_cli),
+           "resolves LabRecorderCLI beside a macOS LabRecorder app bundle");
 
-    // 3. macOS bundle layout: LabRecorder.app/Contents/MacOS/LabRecorder with sibling LabRecorderCLI
-    QDir(root).mkdir("app3");
-    const QString app3 = QDir(root).filePath("app3");
-    expect(QDir(app3).mkpath("LabRecorder.app/Contents/MacOS"), "create macOS bundle directory");
-    QFile macos_gui(QDir(app3).filePath("LabRecorder.app/Contents/MacOS/LabRecorder"));
-    expect(macos_gui.open(QIODevice::WriteOnly), "create dummy macOS LabRecorder binary");
-    macos_gui.close();
-    QFile macos_cli(QDir(app3).filePath("LabRecorderCLI"));
-    expect(macos_cli.open(QIODevice::WriteOnly), "create dummy sibling LabRecorderCLI");
-    macos_cli.close();
-    expect(QDir(root).mkdir("app4"), "create recorder-free app directory");
-    const QString resolved_cli = RecorderProcessController::bundledSelectedStreamExecutable(
-        macos_gui.fileName(), QDir(root).filePath("app4"));
-    expect(QFileInfo(resolved_cli).canonicalFilePath() ==
-               QFileInfo(QDir(app3).filePath("LabRecorderCLI")).canonicalFilePath(),
-           "resolves LabRecorderCLI alongside macOS LabRecorder.app bundle");
+    const QString nested_root = QDir(root).filePath("nested");
+    const QString nested_gui = QDir(nested_root).filePath(
+        "labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder");
+    const QString nested_cli = QDir(nested_root).filePath("labrecorder/LabRecorderCLI");
+    expect(createFile(nested_gui) && createFile(nested_cli),
+           "create nested recorder fixtures");
+    expect(sameFile(RecorderProcessController::bundledGraphicalRecorderExecutable(
+                        nested_root), nested_gui),
+           "resolves a nested macOS LabRecorder app bundle");
+    expect(sameFile(RecorderProcessController::bundledSelectedStreamExecutable(
+                        QString{}, nested_root), nested_cli),
+           "resolves a nested LabRecorderCLI binary");
+
+    const QString package_root = QDir(root).filePath("package");
+    const QString bridge_app_dir = QDir(package_root).filePath(
+        "vicon-lsl-bridge-gui.app/Contents/MacOS");
+    const QString package_gui = QDir(package_root).filePath(
+        "LabRecorder.app/Contents/MacOS/LabRecorder");
+    const QString package_cli = QDir(package_root).filePath("LabRecorderCLI");
+    expect(QDir().mkpath(bridge_app_dir) && createFile(package_gui) &&
+               createFile(package_cli),
+           "create sibling macOS application bundle fixtures");
+    expect(sameFile(RecorderProcessController::bundledGraphicalRecorderExecutable(
+                        bridge_app_dir), package_gui),
+           "resolves LabRecorder from beside the running bridge app bundle");
+    expect(sameFile(RecorderProcessController::bundledSelectedStreamExecutable(
+                        package_gui, bridge_app_dir), package_cli),
+           "resolves LabRecorderCLI from beside sibling macOS app bundles");
+
+    const QString empty_root = QDir(root).filePath("empty");
+    expect(QDir().mkpath(empty_root), "create recorder-free application directory");
+    expect(RecorderProcessController::bundledGraphicalRecorderExecutable(
+               empty_root).isEmpty(),
+           "does not resolve a missing graphical recorder");
+    expect(RecorderProcessController::bundledSelectedStreamExecutable(
+               QString{}, empty_root).isEmpty(),
+           "does not resolve a missing selected-stream recorder");
 }
 
 } // namespace labrecorder_client_tests

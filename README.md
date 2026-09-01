@@ -16,6 +16,10 @@ The project also includes Unity scripts that send HoloLens 2 eye-gaze data direc
 
 The default Vicon server address is `localhost:801`.
 
+The macOS download requires Apple Silicon. It is ad-hoc signed but is not yet
+Developer ID signed or notarized, so macOS may ask for explicit approval on the
+first launch.
+
 ## Streams
 
 | Stream | What it contains |
@@ -261,4 +265,6 @@ Unity, Windows device APIs, Vuforia, and physical Vicon behavior still need real
 
 Release tags use the exact form `vN.N.N`. The tagged commit must already be in `main`. The tag version must match the CMake project version and a dated entry in [CHANGELOG.md](CHANGELOG.md).
 
-The release workflow builds the Windows ZIP, Windows portable app, Linux archive, and `SHA256SUMS.txt`. Follow the [release checklist](docs/release-checklist.md) before and after publishing.
+The release workflow builds the Windows ZIP, Windows portable app, Linux
+archive, macOS ARM64 disk image and archive, and `SHA256SUMS.txt`. Follow the
+[release checklist](docs/release-checklist.md) before and after publishing.
