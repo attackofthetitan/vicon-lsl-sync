@@ -80,10 +80,19 @@ int main(int argc, char* argv[]) {
         window.resize(target_size);
         window.ensurePolished();
         QApplication::processEvents(QEventLoop::AllEvents, 20);
-        const QPixmap rendered = window.grab();
+
+        const qreal device_pixel_ratio = window.devicePixelRatioF();
+        const QSize backing_size(
+            qRound(target_size.width() * device_pixel_ratio),
+            qRound(target_size.height() * device_pixel_ratio));
+        QPixmap rendered(backing_size);
+        rendered.setDevicePixelRatio(device_pixel_ratio);
+        rendered.fill(Qt::transparent);
+        window.render(&rendered);
         const bool rendered_at_requested_size =
             !rendered.isNull() &&
-            window.size() == target_size;
+            window.size() == target_size &&
+            rendered.deviceIndependentSize() == QSizeF(target_size);
 
         if (!fits || !controls_are_described || !rendered_at_requested_size) {
             std::cerr << "GUI check failed: minimum="
