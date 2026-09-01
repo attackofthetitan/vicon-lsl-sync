@@ -492,14 +492,14 @@ stateDiagram-v2
     [*] --> Idle
     Idle --> Preparing: Start Session
     Preparing --> Preparing: start bridge and preview / discover streams
-    Preparing --> PreflightBlocked: required check fails
-    PreflightBlocked --> Ready: correct checks
-    PreflightBlocked --> Ready: Record Anyway with reason
+    Preparing --> SetupBlocked: required check fails
+    SetupBlocked --> Ready: correct checks
+    SetupBlocked --> Ready: Record Anyway with reason
     Preparing --> Ready: all required checks pass
     Ready --> Starting: Start recorder
     Starting --> Recording: Start acknowledged or exact-selection recorder starts
     Starting --> Failed: recorder operation fails
-    Recording --> Stopping: Stop Session or emergency Stop
+    Recording --> Stopping: Stop Session or Stop Recording
     Stopping --> Verifying: Stop acknowledged and file finalizes
     Verifying --> Complete: file check finishes
     Verifying --> Failed: file missing or needs attention

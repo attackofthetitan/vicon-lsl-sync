@@ -123,8 +123,8 @@ closing the recorder.
 8. Select **Stop Recording** or **Stop Session** when finished.
 
 **Recording Destination** shows the final full path checked by the app, sent to
-the recorder, and saved in the session details. The
-app appends `.xdf` when needed and blocks paths that escape the study folder,
+the recorder, and saved in the session details. The app appends `.xdf` when
+needed and blocks paths that escape the study folder,
 reserved Windows names, unwritable paths, existing files that were not approved,
 and destinations outside the study root. **Find Next Run** finds an unused run
 number. Low storage is a visible warning at the chosen threshold.

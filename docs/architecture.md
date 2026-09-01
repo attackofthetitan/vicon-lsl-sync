@@ -94,7 +94,9 @@ label text.
 QSettings ----> SessionConfiguration ----> bridge, preview, recorder, filename
                        |
                        v
-BridgeWindow ----> SessionController ----> status, setup check, shutdown, event log
+BridgeWindow ----> SessionEventLog / SetupCheckResult
+     |
+     +----> dashboard, setup check, shutdown sequence
      |
      +----> BridgeWorker / PreviewStreamWorker / file workers
 ```
@@ -105,11 +107,11 @@ The main desktop components are:
   preview inputs at the bridge outputs unless external preview streams are
   selected. Window size, splitter position, tabs, and recent paths live in
   `SessionUiState` and are not part of presets.
-- `SessionController` stores the dashboard, setup-check result, limited event
-  log, last error, and the stop result for each part of the app.
-- `BridgeWindow` owns the shared settings object and passes it to `PreviewPanel`.
-  The window and panel create their workers directly; no service wrapper or
-  worker factory is needed.
+- `BridgeWindow` owns the setup-check result, limited event log, last error,
+  dashboard values, shutdown sequence, and shared settings object. It passes the
+  settings object to `PreviewPanel`.
+- The window and panel create their workers directly; no service wrapper,
+  controller object, or worker factory is needed.
 - `BridgeWorker` runs one `ViconLSLBridge` away from the window thread and reports
   bridge state and status.
 - `PreviewStreamWorker` opens the selected LSL streams and keeps only the newest
