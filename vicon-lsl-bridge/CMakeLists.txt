@@ -114,7 +114,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         set(Boost_USE_STATIC_LIBS ON)
         set(CMAKE_MACOSX_RPATH ON)
         set(CMAKE_INSTALL_RPATH "@executable_path;@loader_path;@executable_path/../Frameworks;@loader_path/Frameworks")
-        set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
     endif()
 
     add_subdirectory(
