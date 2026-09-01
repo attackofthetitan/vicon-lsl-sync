@@ -31,5 +31,21 @@ file "$temp_dir/LabRecorderCLI" | grep -E "Mach-O 64-bit (executable )?arm64"
 # 4. Verify liblsl shared library is packaged
 find "$temp_dir" -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
+# 5. Verify config file placement
+test -f "$temp_dir/LabRecorder.cfg"
+if [[ -d "$temp_dir/LabRecorder.app" ]]; then
+  test -f "$temp_dir/LabRecorder.app/Contents/Resources/LabRecorder.cfg"
+  test ! -f "$temp_dir/LabRecorder.app/Contents/MacOS/LabRecorder.cfg"
+fi
+
+# 6. Verify code signature validity
+if [[ -d "$temp_dir/LabRecorder.app" ]]; then
+  codesign --verify --deep --strict "$temp_dir/LabRecorder.app"
+fi
+codesign --verify "$temp_dir/vicon-lsl-bridge"
+codesign --verify "$temp_dir/vicon-lsl-bridge-gui"
+codesign --verify "$temp_dir/LabRecorder"
+codesign --verify "$temp_dir/LabRecorderCLI"
+
 echo "All macOS package verification checks passed successfully."
 
