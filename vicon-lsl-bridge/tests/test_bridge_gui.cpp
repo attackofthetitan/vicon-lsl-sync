@@ -12,6 +12,7 @@
 #include <QSlider>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QWidget>
 
 #include <iostream>
 #include <memory>
@@ -69,7 +70,9 @@ int main(int argc, char* argv[]) {
     configuration.recorder_automatic_launch = false;
     vicon_lsl::gui::SessionConfigurationStore::save(*settings, configuration);
 
-    BridgeWindow window(nullptr, true, std::move(settings));
+    QWidget render_host;
+    render_host.setAttribute(Qt::WA_DontShowOnScreen);
+    BridgeWindow window(&render_host, true, std::move(settings));
 
     QTimer::singleShot(0, [&app, &window]() {
         const QSize target_size(800, 600);
