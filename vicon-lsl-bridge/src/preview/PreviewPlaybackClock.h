@@ -22,17 +22,9 @@ public:
     double position(double monotonic_seconds) const;
     double duration() const;
     bool atEnd(double monotonic_seconds) const;
-    bool isPlaying() const { return playing_; }
-    bool isLooping() const { return looping_; }
 
 private:
-    bool timelineEmpty() const;
-    std::size_t timelineSize() const;
-    double relativeTimestamp(std::size_t index) const;
-
     std::vector<double> timeline_;
-    const std::vector<PreviewFrame>* frame_timeline_ = nullptr;
-    double frame_timeline_origin_ = 0.0;
     bool playing_ = false;
     double speed_ = 1.0;
     double paused_position_ = 0.0;

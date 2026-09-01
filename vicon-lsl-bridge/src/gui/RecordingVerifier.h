@@ -1,6 +1,5 @@
 #pragma once
 
-#include "gui/PerformanceBudgets.h"
 #include "gui/SessionConfiguration.h"
 #include "gui/SessionState.h"
 
@@ -63,7 +62,7 @@ struct RecordingVerificationReport {
 
 struct RecordingVerificationRequest {
     QString path;
-    QVector<StreamIdentity> preflight_inventory;
+    QVector<StreamIdentity> setup_check_inventory;
     QVector<StreamBinding> expected_streams;
     bool record_every_visible_stream = true;
     std::function<QDateTime()> now_utc;

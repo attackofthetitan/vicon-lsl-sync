@@ -42,6 +42,26 @@ enum class ComponentLifecycleState {
     Failed,
 };
 
+namespace vicon_lsl::gui {
+
+enum class SessionCalibrationState {
+    Manual,
+    Collecting,
+    AutomaticSession,
+    SavedProfile,
+    Failed,
+};
+
+enum class SessionFileState {
+    None,
+    Loading,
+    Loaded,
+    Canceled,
+    Failed,
+};
+
+} // namespace vicon_lsl::gui
+
 enum class RecorderProcessState {
     External,
     Launching,
@@ -69,7 +89,7 @@ enum class EventSeverity {
     Error,
 };
 
-enum class PreflightLevel {
+enum class SetupCheckLevel {
     Required,
     Warning,
     Information,
@@ -102,7 +122,6 @@ public:
     QString toText(EventSeverity minimum = EventSeverity::Information,
                    const QVector<SessionComponent>& components = {}) const;
     QJsonArray toJson() const;
-    std::size_t maximumEntries() const { return maximum_entries_; }
 
     static QString componentText(SessionComponent component);
     static QString severityText(EventSeverity severity);
@@ -114,24 +133,22 @@ private:
     std::function<QDateTime()> clock_;
 };
 
-struct PreflightItem {
-    QString id;
+struct SetupCheckItem {
     SessionComponent component = SessionComponent::Application;
-    PreflightLevel level = PreflightLevel::Information;
+    SetupCheckLevel level = SetupCheckLevel::Information;
     bool passed = true;
     QString message;
     QString corrective_action;
 };
 
-struct PreflightResult {
+struct SetupCheckResult {
     QDateTime completed_at;
-    QVector<PreflightItem> items;
+    QVector<SetupCheckItem> items;
     bool override_used = false;
     QString override_reason;
 
     bool hasRequiredFailures() const;
     bool hasWarnings() const;
-    bool canStart() const;
     QString summary() const;
     QJsonObject toJson() const;
 };
@@ -143,9 +160,16 @@ QString componentLifecycleStateText(ComponentLifecycleState state);
 QString recorderProcessStateText(RecorderProcessState state);
 QString verificationStateText(RecordingVerificationState state);
 
+namespace vicon_lsl::gui {
+QString calibrationStateText(SessionCalibrationState state);
+QString fileStateText(SessionFileState state);
+} // namespace vicon_lsl::gui
+
 Q_DECLARE_METATYPE(RecorderConnectionState)
 Q_DECLARE_METATYPE(RecorderRecordingState)
 Q_DECLARE_METATYPE(RecorderOperationState)
 Q_DECLARE_METATYPE(ComponentLifecycleState)
 Q_DECLARE_METATYPE(RecorderProcessState)
 Q_DECLARE_METATYPE(RecordingVerificationState)
+Q_DECLARE_METATYPE(vicon_lsl::gui::SessionCalibrationState)
+Q_DECLARE_METATYPE(vicon_lsl::gui::SessionFileState)

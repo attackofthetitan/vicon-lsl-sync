@@ -325,7 +325,7 @@ void testRecorderDuplicateAndShutdownProtocol() {
         expect(waitUntil([&client]() {
                    return client.recordingState() ==
                           RecorderRecordingState::Stopped;
-               }) && client.activeOperation().isEmpty(),
+               }) && client.operationState() == RecorderOperationState::Idle,
                "Stop settles in Idle");
     }
 

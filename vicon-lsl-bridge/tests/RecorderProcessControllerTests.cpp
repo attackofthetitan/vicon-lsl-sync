@@ -1,4 +1,3 @@
-#include "gui/PerformanceBudgets.h"
 #include "gui/RecorderProcessController.h"
 #include "LabRecorderClientTestSupport.h"
 
@@ -51,7 +50,7 @@ void testRecorderProcessControllerLifecycle() {
     expect(waitUntil([&exited]() { return exited; }, 2000) && !expected_exit,
            "unrequested recorder process exit is reported as unexpected");
     const QByteArray output = controller.boundedOutput();
-    expect(output.size() <= PerformanceBudgets::MaximumProcessOutputBytes,
+    expect(output.size() <= 64 * 1024,
            "recorder process output buffer stays within its fixed bound");
     expect(output.contains("cwd=" + QFileInfo(fixture).absolutePath().toLocal8Bit()),
            "recorder process uses the executable directory as its working directory");
@@ -62,22 +61,22 @@ void testRecorderProcessControllerLifecycle() {
     stream.selected = true;
     exited = false;
     expected_exit = false;
-    expect(controller.launchAllowlistRecorder(
+    expect(controller.launchSelectedStreamRecorder(
                fixture, QDir::temp().filePath("process-test.xdf"), {stream}, &error),
-           "allowlist recorder launch accepts an exact stream identity");
+           "selected-stream recorder launch accepts an exact stream identity");
     expect(waitUntil([&controller]() {
                return controller.state() == RecorderProcessState::OwnedRunning;
            }),
-           "allowlist recorder reports owned running state");
-    expect(controller.stopAllowlistRecording(),
-           "allowlist Stop is accepted exactly once");
-    expect(!controller.stopAllowlistRecording(),
-           "duplicate allowlist Stop is rejected");
+           "selected-stream recorder reports owned running state");
+    expect(controller.stopSelectedStreamRecording(),
+           "selected-stream Stop is accepted exactly once");
+    expect(!controller.stopSelectedStreamRecording(),
+           "duplicate selected-stream Stop is rejected");
     expect(waitUntil([&exited]() { return exited; }, 2000) && expected_exit,
-           "requested allowlist exit is reported as expected");
+           "requested selected-stream exit is reported as expected");
 
     exited = false;
-    expect(controller.launchAllowlistRecorder(
+    expect(controller.launchSelectedStreamRecorder(
                fixture, QDir::temp().filePath("detached-test.xdf"), {stream}, &error),
            "second owned recorder can launch after prior exit");
     expect(waitUntil([&controller]() {

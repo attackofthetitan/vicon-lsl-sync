@@ -28,7 +28,6 @@ public:
     // effective rate is below the requested fraction of a valid nominal rate.
     bool belowNominalRate(double nominal_rate, double fraction) const;
     std::size_t sampleCount() const;
-    double windowSeconds() const { return window_seconds_; }
 
 private:
     double window_seconds_;

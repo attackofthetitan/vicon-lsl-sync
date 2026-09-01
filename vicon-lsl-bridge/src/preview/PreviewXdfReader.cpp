@@ -345,7 +345,7 @@ void enforceIndexMemoryBudget(std::map<std::uint32_t, XdfStreamData>& streams,
         if (total <= maximum_memory_bytes) return;
         if (candidate == streams.end()) {
             throw std::runtime_error(
-                "XDF indexed cache exceeds the configured memory budget at minimum display density");
+                "The XDF preview memory limit is too small even at minimum detail");
         }
         compactStoredSamples(candidate->second, preserve_last);
     }
@@ -427,7 +427,7 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path,
         reader.seek(chunk_end);
     }
 
-    reportProgress(options, PreviewLoadStage::Metadata,
+    reportProgress(options, PreviewLoadStage::StreamDetails,
                    streams_by_id.size(), streams_by_id.size(), "XDF streams");
     std::size_t finalized_streams = 0;
     for (auto& item : streams_by_id) {

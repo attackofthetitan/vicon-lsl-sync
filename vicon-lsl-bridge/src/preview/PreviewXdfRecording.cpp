@@ -124,8 +124,9 @@ std::string buildSummary(const XdfLoadResult& xdf,
                          const XdfStreamData* target_stream) {
     std::ostringstream summary;
     summary << xdf.streams.size() << " stream(s), " << frame_count << " frame(s)";
-    summary << "; indexed cache " << xdf.estimated_memory_bytes / (1024 * 1024)
-            << " MiB from " << xdf.file_size_bytes / (1024 * 1024) << " MiB file";
+    summary << "; used " << xdf.estimated_memory_bytes / (1024 * 1024)
+            << " MiB while reading a " << xdf.file_size_bytes / (1024 * 1024)
+            << " MiB file";
     if (xdf.truncated_tail_ignored) {
         summary << "; incomplete final chunk ignored";
     }
@@ -147,8 +148,8 @@ std::string buildSummary(const XdfLoadResult& xdf,
                         ? "stream_" + std::to_string(stream.stream_id)
                         : stream.name)
                 << ": " << stream.sample_count << " sample(s), "
-                << stream.samples.size() << " cached at stride "
-                << stream.stored_sample_stride << ", "
+                << stream.samples.size() << " loaded, keeping every "
+                << stream.stored_sample_stride << " sample(s), "
                 << stream.channel_count << " channel(s), " << roleName(stream.role)
                 << ", source " << (stream.source_id.empty() ? "<missing>" : stream.source_id)
                 << ", range " << stream.start_timestamp << ".." << stream.end_timestamp
@@ -282,9 +283,10 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                         << unmatched_percent << "%";
         recording.summary += mapping_summary.str();
     }
-    recording.summary += "; playback cache " +
+    recording.summary += "; " +
         std::to_string(recording.estimated_memory_bytes / (1024 * 1024)) +
-        " MiB at stride " + std::to_string(recording.stored_frame_stride);
+        " MiB loaded, showing every " +
+        std::to_string(recording.stored_frame_stride) + " frame(s)";
     return recording;
 }
 

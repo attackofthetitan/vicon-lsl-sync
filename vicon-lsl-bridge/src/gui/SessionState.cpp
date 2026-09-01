@@ -1,16 +1,21 @@
 #include "gui/SessionState.h"
 
 #include <algorithm>
+#include <array>
 
 namespace {
 
-QString preflightLevelText(PreflightLevel level) {
-    switch (level) {
-        case PreflightLevel::Required: return "required";
-        case PreflightLevel::Warning: return "warning";
-        case PreflightLevel::Information: return "information";
-    }
-    return "information";
+template <typename Enum, std::size_t Size>
+QString enumText(Enum value,
+                 const std::array<const char*, Size>& labels,
+                 const char* fallback) {
+    const auto index = static_cast<std::size_t>(value);
+    return QString::fromLatin1(index < Size ? labels[index] : fallback);
+}
+
+QString setupCheckLevelText(SetupCheckLevel level) {
+    return enumText(level, std::array{"required", "warning", "information"},
+                    "information");
 }
 
 } // namespace
@@ -68,48 +73,32 @@ QJsonArray SessionEventLog::toJson() const {
 }
 
 QString SessionEventLog::componentText(SessionComponent component) {
-    switch (component) {
-        case SessionComponent::Application: return "application";
-        case SessionComponent::Bridge: return "bridge";
-        case SessionComponent::Recorder: return "recorder";
-        case SessionComponent::Preview: return "preview";
-        case SessionComponent::Calibration: return "calibration";
-        case SessionComponent::File: return "file";
-        case SessionComponent::Path: return "path";
-        case SessionComponent::Streams: return "streams";
-        case SessionComponent::Verification: return "verification";
-    }
-    return "application";
+    return enumText(component,
+                    std::array{"application", "bridge", "recorder", "preview",
+                               "calibration", "file", "path", "streams",
+                               "verification"},
+                    "application");
 }
 
 QString SessionEventLog::severityText(EventSeverity severity) {
-    switch (severity) {
-        case EventSeverity::Information: return "info";
-        case EventSeverity::Warning: return "warning";
-        case EventSeverity::Error: return "error";
-    }
-    return "info";
+    return enumText(severity, std::array{"info", "warning", "error"}, "info");
 }
 
-bool PreflightResult::hasRequiredFailures() const {
-    return std::any_of(items.begin(), items.end(), [](const PreflightItem& item) {
-        return item.level == PreflightLevel::Required && !item.passed;
+bool SetupCheckResult::hasRequiredFailures() const {
+    return std::any_of(items.begin(), items.end(), [](const SetupCheckItem& item) {
+        return item.level == SetupCheckLevel::Required && !item.passed;
     });
 }
 
-bool PreflightResult::hasWarnings() const {
-    return std::any_of(items.begin(), items.end(), [](const PreflightItem& item) {
-        return item.level == PreflightLevel::Warning && !item.passed;
+bool SetupCheckResult::hasWarnings() const {
+    return std::any_of(items.begin(), items.end(), [](const SetupCheckItem& item) {
+        return item.level == SetupCheckLevel::Warning && !item.passed;
     });
 }
 
-bool PreflightResult::canStart() const {
-    return !hasRequiredFailures() || (override_used && !override_reason.trimmed().isEmpty());
-}
-
-QString PreflightResult::summary() const {
+QString SetupCheckResult::summary() const {
     QStringList failures;
-    for (const PreflightItem& item : items) {
+    for (const SetupCheckItem& item : items) {
         if (!item.passed) {
             QString text = item.message;
             if (!item.corrective_action.isEmpty()) {
@@ -119,22 +108,21 @@ QString PreflightResult::summary() const {
         }
     }
     if (failures.isEmpty()) {
-        return "Preflight passed";
+        return "Setup check passed";
     }
     QString result = failures.join("\n");
     if (override_used) {
-        result += "\nOverride: " + override_reason;
+        result += "\nRecorded anyway because: " + override_reason;
     }
     return result;
 }
 
-QJsonObject PreflightResult::toJson() const {
+QJsonObject SetupCheckResult::toJson() const {
     QJsonArray serialized_items;
-    for (const PreflightItem& item : items) {
+    for (const SetupCheckItem& item : items) {
         serialized_items.push_back(QJsonObject{
-            {"id", item.id},
             {"component", SessionEventLog::componentText(item.component)},
-            {"level", preflightLevelText(item.level)},
+            {"level", setupCheckLevelText(item.level)},
             {"passed", item.passed},
             {"message", item.message},
             {"correctiveAction", item.corrective_action},
@@ -151,67 +139,55 @@ QJsonObject PreflightResult::toJson() const {
 }
 
 QString recorderConnectionStateText(RecorderConnectionState state) {
-    switch (state) {
-        case RecorderConnectionState::Disconnected: return "Disconnected";
-        case RecorderConnectionState::Connecting: return "Connecting";
-        case RecorderConnectionState::Connected: return "Connected";
-        case RecorderConnectionState::Error: return "Error";
-    }
-    return "Unknown";
+    return enumText(state,
+                    std::array{"Disconnected", "Connecting", "Connected", "Error"},
+                    "Unknown");
 }
 
 QString recorderRecordingStateText(RecorderRecordingState state) {
-    switch (state) {
-        case RecorderRecordingState::Unknown: return "Unknown";
-        case RecorderRecordingState::Stopped: return "Stopped";
-        case RecorderRecordingState::Recording: return "Recording";
-    }
-    return "Unknown";
+    return enumText(state, std::array{"Unknown", "Stopped", "Recording"},
+                    "Unknown");
 }
 
 QString recorderOperationStateText(RecorderOperationState state) {
-    switch (state) {
-        case RecorderOperationState::Idle: return "Idle";
-        case RecorderOperationState::Refreshing: return "Refreshing";
-        case RecorderOperationState::UpdatingFilename: return "Updating filename";
-        case RecorderOperationState::Starting: return "Starting";
-        case RecorderOperationState::Stopping: return "Stopping";
-        case RecorderOperationState::ShuttingDown: return "Shutting down";
-    }
-    return "Idle";
+    return enumText(state,
+                    std::array{"Idle", "Refreshing", "Updating filename", "Starting",
+                               "Stopping", "Shutting down"},
+                    "Idle");
 }
 
 QString componentLifecycleStateText(ComponentLifecycleState state) {
-    switch (state) {
-        case ComponentLifecycleState::Idle: return "Idle";
-        case ComponentLifecycleState::Starting: return "Starting";
-        case ComponentLifecycleState::Running: return "Running";
-        case ComponentLifecycleState::Stopping: return "Stopping";
-        case ComponentLifecycleState::Stopped: return "Stopped";
-        case ComponentLifecycleState::Failed: return "Failed";
-    }
-    return "Idle";
+    return enumText(state,
+                    std::array{"Idle", "Starting", "Running", "Stopping", "Stopped",
+                               "Failed"},
+                    "Idle");
 }
 
 QString recorderProcessStateText(RecorderProcessState state) {
-    switch (state) {
-        case RecorderProcessState::External: return "External";
-        case RecorderProcessState::Launching: return "Launching";
-        case RecorderProcessState::OwnedRunning: return "Owned running";
-        case RecorderProcessState::OwnedExited: return "Owned exited";
-        case RecorderProcessState::LaunchFailed: return "Launch failed";
-        case RecorderProcessState::Detached: return "Detached";
-    }
-    return "External";
+    return enumText(state,
+                    std::array{"External", "Starting", "Started here",
+                               "Started here, now stopped", "Could not start",
+                               "Disconnected from app"},
+                    "External");
 }
 
 QString verificationStateText(RecordingVerificationState state) {
-    switch (state) {
-        case RecordingVerificationState::NotRun: return "Not verified";
-        case RecordingVerificationState::Running: return "Verifying";
-        case RecordingVerificationState::Verified: return "Verified";
-        case RecordingVerificationState::VerifiedWithWarnings: return "Verified with warnings";
-        case RecordingVerificationState::NeedsAttention: return "Needs attention";
-    }
-    return "Not verified";
+    return enumText(state,
+                    std::array{"Not checked", "Checking", "Checked",
+                               "Checked with warnings", "Needs attention"},
+                    "Not checked");
+}
+
+QString vicon_lsl::gui::calibrationStateText(SessionCalibrationState state) {
+    return enumText(state,
+                    std::array{"Manual", "Collecting", "Current session", "Saved",
+                               "Needs attention"},
+                    "Manual");
+}
+
+QString vicon_lsl::gui::fileStateText(SessionFileState state) {
+    return enumText(state,
+                    std::array{"No file loaded", "Loading", "Loaded", "Canceled",
+                               "Needs attention"},
+                    "No file loaded");
 }

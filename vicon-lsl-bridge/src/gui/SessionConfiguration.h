@@ -57,6 +57,7 @@ struct StreamBinding {
     double expected_nominal_rate = 0.0;
     QString expected_coordinate_frame;
 
+    bool matches(const StreamIdentity& identity) const;
     QJsonObject toJson() const;
     static StreamBinding fromJson(const QJsonObject& object);
 };
@@ -65,6 +66,7 @@ struct StreamIdentitySelection {
     int index = -1;
     bool ambiguous = false;
     bool used_name_fallback = false;
+    bool should_warn = false;
     QString explanation;
 };
 
@@ -112,7 +114,6 @@ struct SessionConfiguration {
     QString modality = "beh";
     double storage_warning_gib = 10.0;
     bool automatic_run_increment = false;
-    bool increment_run_after_verified_only = true;
     bool allow_overwrite = false;
     bool allow_outside_study_root = false;
 
@@ -131,7 +132,6 @@ struct SessionUiState {
     QByteArray geometry;
     QByteArray splitter_state;
     int active_control_tab = 0;
-    int active_preview_tab = 0;
     QStringList recent_recordings;
     QString recent_preset_directory;
     QString recent_diagnostic_directory;
@@ -152,7 +152,6 @@ public:
                            const QString& name,
                            SessionConfiguration& configuration,
                            QString* error = nullptr);
-    static bool removePreset(QSettings& settings, const QString& name);
     static bool exportConfiguration(const QString& path,
                                     const SessionConfiguration& configuration,
                                     QString* error = nullptr);

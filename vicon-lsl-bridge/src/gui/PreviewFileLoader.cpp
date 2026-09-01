@@ -87,7 +87,7 @@ void PreviewFileLoader::run() {
                                           vicon_transform_, gaze_transform_, options);
         } else {
             XdfLoadResult xdf = loadXdfNumericStreams(path_.toStdString(), options);
-            emit progressChanged("metadata", 100, "Inventoried all XDF streams");
+            emit progressChanged("stream details", 100, "Found all XDF streams");
             const XdfMappingAnalysis analysis = analyzeXdfStreamMapping(xdf);
             XdfStreamMapping mapping;
             if (analysis.requires_explicit_mapping) {
@@ -96,13 +96,13 @@ void PreviewFileLoader::run() {
             emit progressChanged("calibration", 0,
                                  "Evaluating recorded stair-target calibration");
             emit progressChanged("frame preparation", 0,
-                                 "Assembling the bounded playback cache");
+                                 "Preparing frames for playback");
             loaded = buildXdfPreviewRecording(xdf, vicon_transform_, gaze_transform_,
                                               match_tolerance_seconds_, mapping, options);
             emit progressChanged("calibration", 100,
                                  "Recorded calibration evaluated");
             emit progressChanged("frame preparation", 100,
-                                 "Playback cache ready");
+                                 "Recording ready");
         }
         if (canceled()) {
             throw std::runtime_error("Preview load canceled");

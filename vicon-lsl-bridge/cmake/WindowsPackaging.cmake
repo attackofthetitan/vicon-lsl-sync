@@ -19,6 +19,7 @@ function(vicon_lsl_configure_windows_gui_packaging bridge_source_dir lsl_target)
                 "$<TARGET_FILE_DIR:vicon-lsl-bridge-gui>/$<TARGET_FILE_NAME:${lsl_target}>"
             COMMAND "${VICON_LSL_WINDEPLOYQT}"
                 --compiler-runtime
+                --no-opengl-sw
                 --no-translations
                 "$<TARGET_FILE:vicon-lsl-bridge-gui>"
             COMMAND "${VICON_LSL_POWERSHELL}"
@@ -100,6 +101,7 @@ function(vicon_lsl_configure_windows_gui_packaging bridge_source_dir lsl_target)
             "${VICON_LSL_PORTABLE_STAGE}/$<TARGET_FILE_NAME:${lsl_target}>"
         COMMAND "${VICON_LSL_WINDEPLOYQT}"
             --compiler-runtime
+            --no-opengl-sw
             --no-translations
             --dir "${VICON_LSL_PORTABLE_STAGE}"
             "${VICON_LSL_PORTABLE_STAGE}/vicon-lsl-bridge-gui.exe"

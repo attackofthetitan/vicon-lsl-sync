@@ -12,8 +12,6 @@ int main(int argc, char** argv) {
     run("rendered filename", testRenderedFilenameUsesSharedSanitization);
     run("unresolved placeholders", testUnresolvedFilenamePlaceholders);
     run("start commands", testStartRecordingCommands);
-    run("window settings", testBridgeWindowSettingsContract);
-    run("runtime policy", testRuntimePolicy);
     run("TCP command sequence", testTcpCommandSequence);
     run("TCP Start sequence", testTcpStartRecordingSequenceWithSelectAll);
     run("fragmented reply", testFragmentedReplyControlsCommandProgress);
@@ -23,9 +21,9 @@ int main(int argc, char** argv) {
     run("reconnect", testConnectionStateTracksIdleDisconnectAndReconnect);
     run("normalized path policy", testNormalizedPathPolicy);
     run("session configuration", testSessionConfiguration);
-    run("session controller", testSessionControllerStateModel);
+    run("session event log", testSessionEventLog);
     run("calibration profiles", testCalibrationProfileStore);
-    run("recorder allowlist", testRecorderAllowlistPolicy);
+    run("selected-stream recorder", testSelectedStreamRecorderPolicy);
     run("duplicate and shutdown protocol", testRecorderDuplicateAndShutdownProtocol);
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);

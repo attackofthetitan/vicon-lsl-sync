@@ -4,15 +4,15 @@
 #include "gui/PreviewWidget.h"
 #include "gui/PreviewFileLoader.h"
 #include "gui/CalibrationProfileStore.h"
-#include "gui/GuiServices.h"
 #include "gui/SessionConfiguration.h"
-#include "gui/SessionController.h"
+#include "gui/SessionState.h"
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewPlaybackClock.h"
 
 #include <QElapsedTimer>
 #include <QWidget>
 
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -23,6 +23,7 @@ class QPushButton;
 class QSpinBox;
 class QTimer;
 class QProgressBar;
+class QSettings;
 class QSlider;
 class QCheckBox;
 class QComboBox;
@@ -35,13 +36,10 @@ class PreviewPanel : public QWidget {
     Q_OBJECT
 
 public:
-    explicit PreviewPanel(QWidget* parent = nullptr,
-                          gui::GuiServices services = gui::defaultGuiServices());
+    PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings);
     ~PreviewPanel() override;
 
     bool stairModelLoaded() const { return stair_model_loaded_; }
-    bool configurableTooltipsPresent() const;
-    bool accessibilityContractSatisfied() const;
     ComponentLifecycleState lifecycleState() const { return lifecycle_state_; }
     QVector<vicon_lsl::gui::StreamIdentity> streamInventory() const;
     void applySessionConfiguration(const vicon_lsl::gui::SessionConfiguration& configuration);
@@ -49,11 +47,9 @@ public:
     void requestShutdown();
     bool shutdownReady() const;
     bool fileLoadActive() const { return file_loader_ != nullptr; }
-    vicon_lsl::gui::SessionCalibrationState sessionCalibrationState() const;
-    QString calibrationQualityText() const;
-    bool calibrationMetadataCompatible() const { return calibration_metadata_compatible_; }
-    PreviewDeliveryMetrics deliveryMetrics() const;
-    QString currentRecordingPath() const { return current_recording_path_; }
+    vicon_lsl::gui::SessionCalibrationState sessionCalibrationState() const {
+        return calibration_state_;
+    }
     void openRecording(const QString& path);
 
 public slots:
@@ -190,7 +186,8 @@ private:
     QString pending_recording_path_;
     bool stair_model_loaded_ = false;
     ComponentLifecycleState lifecycle_state_ = ComponentLifecycleState::Idle;
-    CalibrationState calibration_state_ = CalibrationState::Manual;
+    gui::SessionCalibrationState calibration_state_ =
+        gui::SessionCalibrationState::Manual;
     PreviewTransformProfile automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;
     gui::StreamBinding marker_binding_;
@@ -204,8 +201,7 @@ private:
     bool calibration_metadata_compatible_ = true;
     QElapsedTimer calibration_progress_throttle_;
     PreviewDeliveryMetrics last_delivery_metrics_;
-    QString current_recording_path_;
-    gui::GuiServices services_;
+    std::shared_ptr<QSettings> settings_;
 };
 
 } // namespace vicon_lsl

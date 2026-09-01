@@ -1,10 +1,12 @@
 #include "gui/StreamDiscoveryWorker.h"
 
 #include "StreamDefaults.h"
+#include "gui/LslStreamIdentity.h"
 
 #include <lsl_cpp.h>
 
 #include <QDateTime>
+#include <QHash>
 #include <QStringList>
 
 #include <algorithm>
@@ -71,56 +73,37 @@ void StreamDiscoveryWorker::run() {
                 emit lifecycleChanged(ComponentLifecycleState::Stopped, "Stream discovery canceled");
                 return;
             }
-            gui::StreamIdentity identity;
+            gui::StreamIdentity identity = gui::identityFromStreamInfo(stream);
             identity.role = inferRole(stream, configuration_);
-            identity.name = QString::fromStdString(stream.name());
-            identity.type = QString::fromStdString(stream.type());
-            identity.source_id = QString::fromStdString(stream.source_id());
-            identity.hostname = QString::fromStdString(stream.hostname());
-            identity.session_id = QString::fromStdString(stream.session_id());
-            identity.uid = QString::fromStdString(stream.uid());
-            identity.publisher_created_at = stream.created_at();
-            identity.channel_count = stream.channel_count();
-            identity.nominal_rate = std::isfinite(stream.nominal_srate())
-                ? stream.nominal_srate() : 0.0;
-            const char* coordinate_frame = stream.desc()
-                .child("acquisition")
-                .child_value("coordinate_frame");
-            identity.coordinate_frame = coordinate_frame
-                ? QString::fromUtf8(coordinate_frame) : QString();
-            identity.metadata_complete = !identity.source_id.isEmpty() &&
-                                         identity.channel_count > 0 &&
-                                         (identity.role != "gaze" && identity.role != "calibration" ||
-                                          !identity.coordinate_frame.isEmpty());
+            identity.metadata_complete = gui::identityDescribesItself(
+                identity, identity.role == "gaze" || identity.role == "calibration");
             identity.schema_compatible = expectedSchema(identity);
             identity.present = true;
             identity.freshness_ms = -1;
-            identity.discovered_at = QDateTime::currentDateTimeUtc();
             QStringList identity_warnings;
             if (!identity.metadata_complete) {
                 identity_warnings.push_back(
-                    identity.name + " has incomplete identity or channel metadata");
+                    identity.name + " is missing source or channel details");
             }
             if (!identity.schema_compatible) {
                 identity_warnings.push_back(
-                    identity.name + " has an incompatible channel schema");
+                    identity.name + " has an unexpected channel layout");
             }
-            identity_warnings.push_back(
-                identity.name + " sample freshness has not yet been measured");
             identity.warning = identity_warnings.join("; ");
             warnings.append(identity_warnings);
             result.push_back(std::move(identity));
         }
-        for (int left = 0; left < result.size(); ++left) {
-            int duplicate_count = 0;
-            for (const gui::StreamIdentity& candidate : result) {
-                if (candidate.name == result[left].name) ++duplicate_count;
-            }
-            if (duplicate_count > 1) {
-                result[left].warning = "Duplicate stream name; bind by source ID or enable Follow by name";
-                warnings.push_back(result[left].name + " has " +
-                                   QString::number(duplicate_count) + " visible identities");
-            }
+        QHash<QString, int> streams_per_name;
+        for (const gui::StreamIdentity& identity : result) ++streams_per_name[identity.name];
+        for (gui::StreamIdentity& identity : result) {
+            const int duplicates = streams_per_name.value(identity.name);
+            if (duplicates <= 1) continue;
+            const QString message =
+                "Several streams share this name; choose one by source ID or select Follow by name";
+            identity.warning = identity.warning.isEmpty() ? message
+                                                          : identity.warning + "; " + message;
+            warnings.push_back(identity.name + " has " + QString::number(duplicates) +
+                               " visible sources");
         }
         emit discoveryFinished(result, warnings.join("; "));
         emit lifecycleChanged(ComponentLifecycleState::Stopped,
