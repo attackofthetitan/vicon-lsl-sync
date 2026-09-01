@@ -7,8 +7,8 @@
 - Target date: 2026-09-01
 - Feature pull requests, in order: `#21`, `#22`, `#23`, `#19`
 - Documentation pull request: `#20`, after `#19`
-- Status: ready for ordered merge; hosted packaging passed, while hardware
-  disposition and publication checks remain pending
+- Status: ready for ordered merge; hosted packaging passed and the hardware
+  disposition is recorded, while publication checks remain pending
 - Scope: guided desktop sessions, explicit recorder and stream control,
   responsive recording preview, saved session and calibration data, and
   post-recording file checks
@@ -87,11 +87,20 @@ branch is already present.
 
 ## Hardware disposition
 
-- [ ] Run the [hardware test guide](device-parity-runbook.md), or record an
+- [x] Run the [hardware test guide](device-parity-runbook.md), or record an
   explicit decision to publish without the physical HoloLens 2, Vuforia, Vicon,
   and LabRecorder setup.
-- [ ] Record the tested hardware and software versions, results, exceptions, and
+- [x] Record the tested hardware and software versions, results, exceptions, and
   approver before creating the tag.
+
+Publication was authorized on 2026-09-01 without a physical HoloLens 2,
+Vuforia, Vicon, or LabRecorder qualification run. Version `1.11.0` passed the
+device-independent HoloLens suite, the complete Linux and Windows hosted matrix,
+the 74-check local Windows suite, and the Windows packaging assertions. The
+known exception is that physical device, tracking-volume, and recorder
+integration behavior was not exercised for this release. The repository
+operator approved publication with this limitation and `v1.10.5` remains the
+rollback release.
 
 This release does not intentionally change an SDK revision, dependency revision,
 LSL stream layout, timestamp rule, coordinate rule, command-line option, build
