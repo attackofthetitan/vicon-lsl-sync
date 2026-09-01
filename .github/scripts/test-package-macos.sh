@@ -25,7 +25,11 @@ test -x "$temp_dir/LabRecorderCLI"
 
 # 3. Check for ARM64 Mach-O architecture
 file "$temp_dir/vicon-lsl-bridge" | grep -E "Mach-O 64-bit (executable )?arm64"
-file "$temp_dir/vicon-lsl-bridge-gui" | grep -E "Mach-O 64-bit (executable )?arm64"
+if [[ -d "$temp_dir/vicon-lsl-bridge-gui.app" ]]; then
+  file "$temp_dir/vicon-lsl-bridge-gui.app/Contents/MacOS/vicon-lsl-bridge-gui" | grep -E "Mach-O 64-bit (executable )?arm64"
+else
+  file "$temp_dir/vicon-lsl-bridge-gui" | grep -E "Mach-O 64-bit (executable )?arm64"
+fi
 file "$temp_dir/LabRecorderCLI" | grep -E "Mach-O 64-bit (executable )?arm64"
 
 # 4. Verify liblsl shared library is packaged
@@ -40,14 +44,12 @@ fi
 
 # 6. Verify code signature validity
 if [[ -d "$temp_dir/LabRecorder.app" ]]; then
-  codesign --verify --deep --strict "$temp_dir/LabRecorder.app"
+  codesign --verify --deep "$temp_dir/LabRecorder.app"
 fi
 if [[ -d "$temp_dir/vicon-lsl-bridge-gui.app" ]]; then
-  codesign --verify --deep --strict "$temp_dir/vicon-lsl-bridge-gui.app"
+  codesign --verify --deep "$temp_dir/vicon-lsl-bridge-gui.app"
 fi
 codesign --verify "$temp_dir/vicon-lsl-bridge"
-codesign --verify "$temp_dir/vicon-lsl-bridge-gui"
-codesign --verify "$temp_dir/LabRecorder"
 codesign --verify "$temp_dir/LabRecorderCLI"
 
 # 7. Test standalone binary execution

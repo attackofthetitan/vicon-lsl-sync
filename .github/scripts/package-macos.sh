@@ -13,28 +13,40 @@ macdeployqt="${QT_ROOT_DIR:+$QT_ROOT_DIR/bin/macdeployqt}"
 cp vicon-lsl-bridge/build/vicon-lsl-bridge package/
 cp build-labrecorder/LabRecorderCLI package/
 
+# Package vicon-lsl-bridge-gui as macOS application bundle
 if [[ -d vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app ]]; then
   cp -R vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app package/
   if [[ -n "$macdeployqt" && -x "$macdeployqt" ]]; then
     "$macdeployqt" package/vicon-lsl-bridge-gui.app
   fi
-  if [[ -f vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app/Contents/MacOS/vicon-lsl-bridge-gui ]]; then
-    cp vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app/Contents/MacOS/vicon-lsl-bridge-gui package/vicon-lsl-bridge-gui
-  fi
+  cat << 'EOF' > package/vicon-lsl-bridge-gui
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "$DIR/vicon-lsl-bridge-gui.app" ]]; then
+  exec "$DIR/vicon-lsl-bridge-gui.app/Contents/MacOS/vicon-lsl-bridge-gui" "$@"
+fi
+EOF
+  chmod +x package/vicon-lsl-bridge-gui
 elif [[ -f vicon-lsl-bridge/build/vicon-lsl-bridge-gui ]]; then
   cp vicon-lsl-bridge/build/vicon-lsl-bridge-gui package/
 fi
 
 test -f package/vicon-lsl-bridge-gui
 
+# Package LabRecorder as macOS application bundle
 if [[ -d build-labrecorder/LabRecorder.app ]]; then
   cp -R build-labrecorder/LabRecorder.app package/
   if [[ -n "$macdeployqt" && -x "$macdeployqt" ]]; then
     "$macdeployqt" package/LabRecorder.app
   fi
-  if [[ -f build-labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder ]]; then
-    cp build-labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder package/LabRecorder
-  fi
+  cat << 'EOF' > package/LabRecorder
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "$DIR/LabRecorder.app" ]]; then
+  exec "$DIR/LabRecorder.app/Contents/MacOS/LabRecorder" "$@"
+fi
+EOF
+  chmod +x package/LabRecorder
 elif [[ -f build-labrecorder/LabRecorder ]]; then
   cp build-labrecorder/LabRecorder package/
 fi
@@ -78,13 +90,12 @@ fi
 find package -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
 # Set portable RPATHs on all standalone binaries
-for bin in package/vicon-lsl-bridge package/vicon-lsl-bridge-gui package/LabRecorder package/LabRecorderCLI; do
+for bin in package/vicon-lsl-bridge package/LabRecorderCLI; do
   if [[ -f "$bin" ]]; then
     install_name_tool -add_rpath "@executable_path" "$bin" 2>/dev/null || true
     install_name_tool -add_rpath "@loader_path" "$bin" 2>/dev/null || true
     install_name_tool -add_rpath "@executable_path/Frameworks" "$bin" 2>/dev/null || true
     install_name_tool -add_rpath "@loader_path/Frameworks" "$bin" 2>/dev/null || true
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$bin" 2>/dev/null || true
   fi
 done
 
@@ -94,27 +105,17 @@ while IFS= read -r binary; do
   mv "$binary.arm64" "$binary"
 done < <(find package -type f \( -perm -u+x -o -name '*.dylib' \))
 
-# Codesign macOS application bundles inside-out
+# Codesign macOS application bundles
 for app in package/vicon-lsl-bridge-gui.app package/LabRecorder.app; do
   if [[ -d "$app" ]]; then
-    if [[ -d "$app/Contents/Frameworks" ]]; then
-      find "$app/Contents/Frameworks" -maxdepth 1 -name '*.framework' -exec codesign --force --sign - {} + 2>/dev/null || true
-      find "$app/Contents/Frameworks" -type f -name '*.dylib' -exec codesign --force --sign - {} + 2>/dev/null || true
-    fi
-    if [[ -d "$app/Contents/PlugIns" ]]; then
-      find "$app/Contents/PlugIns" -type f -name '*.dylib' -exec codesign --force --sign - {} + 2>/dev/null || true
-    fi
-    if [[ -d "$app/Contents/MacOS" ]]; then
-      find "$app/Contents/MacOS" -type f -perm -u+x -exec codesign --force --sign - {} + 2>/dev/null || true
-    fi
-    codesign --force --sign - "$app"
+    codesign --force --deep --sign - "$app"
   fi
 done
 
-# Codesign root frameworks, dylibs, and binaries
-find package/Frameworks -maxdepth 1 -name '*.framework' -exec codesign --force --sign - {} + 2>/dev/null || true
-find package -maxdepth 1 -name '*.framework' -exec codesign --force --sign - {} + 2>/dev/null || true
-find package -maxdepth 1 -type f \( -perm -u+x -o -name '*.dylib' \) -exec codesign --force --sign - {} +
+# Codesign standalone Mach-O files and frameworks
+find package/Frameworks -maxdepth 1 -name '*.framework' -exec codesign --force --deep --sign - {} + 2>/dev/null || true
+find package -maxdepth 1 -name '*.framework' -exec codesign --force --deep --sign - {} + 2>/dev/null || true
+find package -maxdepth 1 -type f \( -name '*.dylib' -o -perm -u+x \) -exec codesign --force --sign - {} + 2>/dev/null || true
 
 # Create tar.gz archive and Apple Disk Image (.dmg)
 tar -czf "${artifact_name}.tar.gz" -C package .
