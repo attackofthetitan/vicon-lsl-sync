@@ -9,8 +9,10 @@ The project also includes Unity scripts that send HoloLens 2 eye-gaze data direc
 1. Download the latest package from the [Releases page](https://github.com/attackofthetitan/vicon-lsl-sync/releases/latest).
 2. Start your Vicon DataStream server.
 3. Run `vicon-lsl-bridge-gui`.
-4. Enter the Vicon server address and select **Start Streaming**.
-5. Open the included LabRecorder app to record the streams.
+4. Choose the study folder and session values, then select **Start Session**.
+5. Review the setup check. Fix required failures, or enter a reason and choose
+   **Record Anyway** when the exception is deliberate.
+6. Select **Stop Session** when the run is complete and review the XDF file check.
 
 The default Vicon server address is `localhost:801`.
 
@@ -31,13 +33,28 @@ If Vicon subjects, markers, or segments change during a session, the bridge clos
 
 The desktop app lets you:
 
-- Start and stop the Vicon bridge.
-- View live marker, segment, gaze, and stair-target data.
-- Open merged CSV or XDF recordings for a visual check.
-- Align HoloLens gaze with the Vicon world.
-- Start, control, and stop LabRecorder.
+- Start and stop a complete session or control the bridge, preview, and recorder
+  independently.
+- Find LSL streams and choose each source by its source ID. You can deliberately
+  follow a stream name when source IDs change between runs.
+- Check the final XDF path and selected streams before Start.
+- Keep bridge, recorder, preview, calibration, path, storage, stream health,
+  errors, and file-check results visible.
+- Open, seek, step, loop, and visually inspect merged CSV or XDF recordings.
+- Align HoloLens gaze with the Vicon world and manage saved calibrations.
+- Connect to an external recorder or start an included recorder without freezing
+  the window.
 
-The preview reads the same LSL streams that LabRecorder records. By default, it looks for `ViconMarkers`, `ViconSegments`, `HoloLensGaze`, and `HoloLensModelTargetPose`.
+By default, the marker and segment preview use the bridge output names, while
+gaze and calibration use `HoloLensGaze` and
+`HoloLensModelTargetPose`. The **Streams** tab shows name, type, source ID, host,
+session, channels, expected and measured rates, coordinate name, sample age, and
+warnings. When names are duplicated, the app does not silently choose one.
+
+Session presets contain the recording setup. Import, Export, Reset, Save Preset,
+and Load Preset do not include window size, splitter position, tab selection, or
+recent paths. The saved file format starts at version 1; settings from older
+application releases are not imported.
 
 The built-in XDF reader is for visual checks. Use [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) for scientific analysis.
 
@@ -62,36 +79,92 @@ In the desktop preview:
 4. Select **Calibrate from Stair Target**.
 5. Hold the target still while the app collects 20 good samples.
 
-The result lasts only for the current preview session. Select **Use Manual Transform** to return to the saved translation and rotation controls.
+The result lasts only for the current desktop session. Select **Use Manual Transform** to return to the saved translation and rotation controls.
+
+An automatic solution stays session-only until you select **Save Session
+Calibration**. A saved calibration records a setup name, stair model and
+measured pose, coordinate names, transform, notes, creation time, and position
+and angle error. Saved calibrations can be applied, copied, hidden, imported,
+and exported. Confirm missing coordinate details deliberately; quality and
+compatibility remain visible as stream status changes.
 
 Restarting the HoloLens app can create a new Unity world, so run the alignment again after a restart. If the physical stairs move, update the fixed Vicon stair pose before relying on the result.
 
-The gaze publisher keeps the original device capture time. It drops duplicate, old, invalid, or out-of-order readings. If processing falls more than 25 ms behind, it drops the older queued readings and keeps the newest one. This leaves a visible time gap instead of replaying old gaze data. See [How time and coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
+The Unity app keeps the original device capture time. It drops duplicate, old,
+invalid, or out-of-order readings. If processing falls more than 25 ms behind,
+it drops the older queued readings and keeps the newest one. This leaves a
+visible time gap instead of replaying old gaze data. See [How time and
+coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
 
 ## Record with LabRecorder
 
-The desktop app talks to LabRecorder through its remote-control connection. The default address is `localhost:22345`.
+The default recorder remote-control address is `localhost:22345`. Before
+automatic launch, the desktop app checks that address so it does not start a
+duplicate recorder. A recorder started from the desktop app is shown as
+**Started here**; one that was already running is shown as **External** and is
+never closed by the desktop app. **Disconnect / Detach** disconnects without
+closing the recorder.
 
 1. Start the Vicon bridge.
 2. In **Recording**, choose the study folder and filename pattern.
 3. Fill in the participant, session, task, run, acquisition, and modality fields.
-4. Start the included LabRecorder, or connect to one that already has remote control enabled.
-5. Select **Refresh Streams** and check that the expected streams appear.
-6. Select **Start Recording**.
-7. Select **Stop Recording** when finished.
+4. In **Streams**, select **Find LSL Streams**, review each source and its status,
+   and mark the streams that should be recorded or are required.
+5. Choose how to record:
 
-Before each start, the app asks LabRecorder to refresh its stream list and select every visible stream. This includes streams that started after LabRecorder opened.
+   - The default uses the included recorder and saves only the selected streams.
+   - **Use external graphical recorder** uses its remote-control connection and
+     deliberately records everything visible after an immediate refresh.
+
+6. Select **Check Setup** and review every required, warning, and information
+   item.
+7. Select **Start Recording**, or use **Start Session** to run the guided bridge,
+   preview, stream search, setup check, and recording steps.
+8. Select **Stop Recording** or **Stop Session** when finished.
+
+**Recording Destination** shows the final full path checked by the app, sent to
+the recorder, and saved in the session details. The app appends `.xdf` when
+needed and blocks paths that escape the study folder,
+reserved Windows names, unwritable paths, existing files that were not approved,
+and destinations outside the study root. **Find Next Run** finds an unused run
+number. Low storage is a visible warning at the chosen threshold.
 
 Check these items before recording:
 
 - The bridge is streaming.
-- LabRecorder remote control is enabled and connected.
-- `ViconMarkers` is visible when you expect marker data.
-- `ViconSegments` is visible when you expect segment data.
-- `HoloLensGaze` is visible when the Unity app is running.
+- The selected recorder is connected or available and is not busy with another
+  command.
+- Required streams are present, recent, have the expected channel layout, and
+  use the expected coordinate names.
+- `ViconMarkers`, `ViconSegments`, and `HoloLensGaze` show healthy measured
+  rates when those roles are required.
 - The filename preview points to the intended `.xdf` file.
 
-An invalid folder, empty field, or unresolved filename token blocks recording until you fix it. A LabRecorder error does not stop the Vicon bridge.
+An invalid folder, value, filename pattern, or selection explains the problem
+and how to fix it. A recorder error does not stop the Vicon bridge. Repeated
+Start or Stop requests are refused, and closing while Start is in progress
+either cancels it before it is sent or sends one final Stop.
+
+After a successful Stop, the app waits for the XDF file and checks the selected
+streams, source IDs, channel layouts, time ranges, rates, gaps, and sample times
+in the background. The run becomes **Checked**, **Checked with warnings**, or
+**Needs attention**. This check never rewrites the recording; use **Open
+Recording in Preview** for a visual review or export the session details.
+
+## Review a recording
+
+Open a merged CSV or XDF from **Preview**, drag a file onto the window, or choose
+a recent file. Reading the file, finding stream details, correcting time, calibration,
+and frame preparation run in the background with progress and cancellation. The
+previous usable source remains visible unless the new file finishes successfully.
+
+CSV and XDF share play/pause, a timeline, current time and frame position,
+single-frame steps, start/end and selected-time jumps, speed, and an explicit
+loop option. Long recordings use a configurable memory limit and draw fewer
+frames when needed; reported file timing remains exact. XDF files with several
+possible streams ask the user to choose the main time source and the streams to
+use.
+Compatible pieces from a source that restarted are joined in a predictable way.
 
 ## Use the command line
 
@@ -124,7 +197,7 @@ You need:
 - A C++17 compiler.
 - Boost thread and chrono libraries, plus the Boost headers.
 - The Vicon DataStream SDK linked repository (Git submodule).
-- Qt 6 Core, Widgets, Network, and OpenGLWidgets if you want the desktop app.
+- Qt 6 Core, Widgets, and Network if you want the desktop app.
 
 CMake downloads liblsl when an installed copy is not available.
 

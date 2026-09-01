@@ -12,7 +12,7 @@ Related guides:
 - [How services start, stop, and recover](runtime-state-machines.md)
 - [How time and coordinates work](time-and-coordinate-semantics.md)
 
-## Code owned by this project
+## Code in this project
 
 | Path | What it does | What it may use |
 | --- | --- | --- |
@@ -78,22 +78,74 @@ ViconLSLBridge -----------------> MarkerStream / SegmentStream
 
 Each class has one main job:
 
-- `ViconClient` turns Vicon SDK results into types owned by this project. SDK result values do not pass beyond this class, except as text in error messages.
+- `ViconClient` turns Vicon SDK results into the project's own types. SDK result
+  values do not pass beyond this class, except as text in error messages.
 - `ViconFrameMapper` keeps Vicon discovery order, decides whether values are valid, creates fixed-size invalid values, gathers errors, and keeps timestamps increasing.
 - `MarkerStream` and `SegmentStream` keep their existing public interfaces. A shared private helper creates the common LSL information, checks sample size, owns the output stream, and handles send errors.
 - `ViconLSLBridge` owns the connection loop, retries, layout checks, stream replacement, source IDs, status messages, and cleanup order.
 
 ## Desktop app work
 
-The desktop app runs three separate jobs:
+`BridgeWindow` connects the controls to the session data and background work. It
+stores the real session state directly instead of trying to read it back from
+label text.
 
-1. `BridgeWorker` runs one `ViconLSLBridge` on a background thread and sends status back to `BridgeWindow`.
-2. `PreviewStreamWorker` reads LSL streams on another background thread. It sends complete `PreviewFrame` values to the drawing code on the main GUI thread.
-3. `LabRecorderClient` and the optional LabRecorder process stay on the main GUI thread. They control recording; they do not write XDF files themselves.
+```text
+QSettings ----> SessionConfiguration ----> bridge, preview, recorder, filename
+                       |
+                       v
+BridgeWindow ----> SessionEventLog / SetupCheckResult
+     |
+     +----> dashboard, setup check, shutdown sequence
+     |
+     +----> BridgeWorker / PreviewStreamWorker / file workers
+```
 
-The preview only reads streams. It must not change the timestamps or layouts sent by producers.
+The main desktop components are:
 
-The built-in XDF reader is for visual checks. The official XDF tools remain the right choice for scientific analysis.
+- `SessionConfiguration` is the saved session setup. It points marker and segment
+  preview inputs at the bridge outputs unless external preview streams are
+  selected. Window size, splitter position, tabs, and recent paths live in
+  `SessionUiState` and are not part of presets.
+- `BridgeWindow` owns the setup-check result, limited event log, last error,
+  dashboard values, shutdown sequence, and shared settings object. It passes the
+  settings object to `PreviewPanel`.
+- The window and panel create their workers directly; no service wrapper,
+  controller object, or worker factory is needed.
+- `BridgeWorker` runs one `ViconLSLBridge` away from the window thread and reports
+  bridge state and status.
+- `PreviewStreamWorker` opens the selected LSL streams and keeps only the newest
+  frame waiting for display. A 30 or 60 Hz timer draws it; stream-rate tracking
+  and calibration samples continue separately.
+- `StreamDiscoveryWorker` finds visible streams immediately before recording.
+  `RecorderProcessController` starts and stops only recorder processes launched
+  by this app. `LabRecorderClient` runs one remote command group at a time.
+- `PreviewFileLoader` reads CSV or XDF files, corrects time, applies calibration,
+  and prepares a memory-limited set of frames away from the window thread.
+  `RecordingVerifier` reads the finished XDF and reports sample and timing health.
+
+The preview only reads streams. It must not change source timestamps or layouts.
+Recorded playback may draw fewer frames, but exact counts, start and end times,
+gaps, clock corrections, and timestamp repairs are kept for the file check.
+
+### Playback storage
+
+CSV loading keeps one memory-limited set of decoded frames. XDF loading can
+temporarily keep a file index, selected stream data, and decoded frames. Each
+uses the configured playback limit. Peak XDF memory is therefore about three
+times that limit, plus stream details and library overhead. After loading, only
+the decoded frames remain in the panel.
+
+The built-in XDF reader is for visual and basic file checks. It is not a
+replacement for scientific XDF analysis libraries.
+
+### Drawing the preview
+
+The preview is a lightweight visual check, so `PreviewWidget` is a regular
+`QWidget` painted with `QPainter`. It does not need OpenGL. It provides Fit View,
+Reset Camera, expanding bounds, axis and unit labels, valid-value counts, trail
+cleanup, readable colors, and drawing checks without a visible display. Hidden
+surface removal, mesh lighting, and object picking are not supported.
 
 ## How HoloLens data moves
 
@@ -123,14 +175,16 @@ VuforiaModelTargetPoseOutlet -> separate LSL stream
 
 Gaze and target pose use separate LSL streams, but they share one coordinate system. Gaze never passes through the desktop bridge.
 
-## Which thread owns what
+## Where work runs
 
 | Owner | What it owns | Rule to keep |
 | --- | --- | --- |
 | Command-line process | `ViconLSLBridge` and the stop request | `stop()` only changes the run flag. The bridge loop cleans up connections and streams. |
 | `BridgeWorker` | The running bridge | It updates the GUI only through queued Qt signals. |
-| Main GUI thread | Widgets, settings, timers, `LabRecorderClient`, and an optional LabRecorder process | These objects stay on the main GUI thread. |
-| `PreviewStreamWorker` | Four LSL inputs and the latest samples | It resolves and reads streams. Transform updates use a lock. |
+| Main window thread | Widgets, session data, settings, timers, `LabRecorderClient`, and `QProcess` control | It never waits forever. Normal close remains in Closing until required work finishes. |
+| `PreviewStreamWorker` | Four LSL inputs, stream-rate tracking, and the newest waiting frame | Stream searches and detail reads have time limits, sample reads do not wait, and transform updates use a lock. |
+| `PreviewFileLoader` | CSV/XDF reading, stream choice, calibration, and memory-limited frame preparation | It checks for cancellation between small groups of lines, chunks, and samples. It returns a result only after a complete load. |
+| `RecordingVerifier` | XDF stream list and health report after Stop | It never edits or deletes a recording and uses exact counts even when the preview draws fewer frames. |
 | Unity main thread | Unity transforms, Vuforia objects, and `SpatialGraphNode.TryLocate` | It performs world conversion and reads scene objects. |
 | `GazePublisherWorker` | Gaze timing, encoding, and LSL sends | It uses the capture time already stored in each sample. |
 | HoloLens tracker guard | Tracker sessions, watcher versions, and both queues | Old callbacks and old samples cannot enter a new tracker session. |
@@ -143,7 +197,7 @@ Keep the existing header paths, names, and function signatures for:
 
 - `Config`, command-line results, and command-line parsing and formatting.
 - `ViconLSLBridge`, `BridgeState`, `BridgeStatus`, and the status callback.
-- `ViconClient` and its project-owned read results.
+- `ViconClient` and its local read-result types.
 - `MarkerStream`, `SegmentStream`, `StreamOutlet`, `StreamOutletFactory`, and `StreamPushResult`.
 - `StreamSchema`, sample types, frame mapping, discovery, and error-reporting types and functions.
 - Preview types and functions under `src/preview`.
@@ -166,7 +220,7 @@ Unity scenes and assets store type and field names. Keep these names unless the 
 The following are public behavior even though they are not source-code interfaces:
 
 - Command-line options, defaults, useful messages, and exit codes.
-- LSL stream names, layouts, metadata, timing, coordinates, and replacement behavior.
+- LSL stream names, layouts, stream details, timing, coordinates, and replacement behavior.
 - LabRecorder command order and reply handling.
 - Saved settings names and values.
 - CSV and XDF preview rules.
@@ -190,17 +244,28 @@ The repository checks:
 
 - Command-line behavior, stream layouts, Vicon mapping and time handling, preview parsing and math, calibration, CSV/XDF loading, playback, and rate display.
 - Stream creation and send failure, empty layouts, expected rates, and timestamp forwarding.
-- LabRecorder command order, broken-up replies, timeouts, disconnects, filename rules, window state, and saved setting names.
-- Packaged GUI layout, local LSL discovery, optional LabRecorder startup, and stair assets.
+- Recorder operation and requested/confirmed states, button rules, repeated
+  commands, broken-up and malformed replies, timeouts, replacement connections,
+  closing during Start, which recorder processes the app may close, exact path
+  rules, setup checks, file checks, current settings format, and saved
+  calibrations.
+- Memory limits for short, one-hour, and multi-hour previews; CSV/XDF
+  cancellation and file limits; joining restarted streams; keeping only the
+  newest live frame; playback seeking; drawing checks at small and scaled sizes;
+  readable colors; keyboard and screen-reader labels; and preview stopping.
+- Packaged GUI layout, local LSL discovery, bundled/custom recorder lookup, portable paths, optional recorder startup, and stair assets.
 - HoloLens channel and pose encoding, coordinate conversion, time handling, queue rules, publishing, cancellation, and recovery without Unity or hardware.
-- Generated-file freshness, cross-platform builds, and Windows package contents.
+- Generated files being up to date, cross-platform builds, and Windows package
+  contents.
 
 Important gaps remain:
 
 - There is no saved, normalized XML example for every complete LSL stream description.
 - There is no single saved example that sends the same fake samples through both live and XDF preview paths while keeping their different clock rules.
 - Unity, Windows device APIs, Vuforia, and physical hardware still need the [hardware test guide](device-parity-runbook.md).
-- The bridge checks cover first-frame, send-failure, and stop paths. A single fake-client scenario does not yet cover every repeating layout check and discovery error from start to finish.
+- Physical display, remote-desktop, virtual-machine, Vicon, HoloLens, and Vuforia
+  behavior still needs the device list in the hardware guide. The regular
+  `QWidget` drawing path lets the automated checks run without a GPU display.
 
 ## Main source files
 

@@ -164,13 +164,12 @@ stateDiagram-v2
 `connectToServer()` replaces the old connection:
 
 1. Stop both timers.
-2. Clear queued command groups.
-3. Fail active work as replaced without starting another group.
-4. Clear unsent command data and partial replies.
-5. Close the old socket now.
-6. Store separate connection and command timeouts.
-7. Set recording state to `Unknown`.
-8. Set connection state to `Connecting`, begin connecting, and start the connection timer if still needed.
+2. Fail active work as replaced.
+3. Clear unsent command data and partial replies.
+4. Close the old socket now.
+5. Store separate connection and command timeouts.
+6. Set recording state to `Unknown`.
+7. Set connection state to `Connecting`, begin connecting, and start the connection timer if still needed.
 
 After the socket connects, connection state is `Connected`. Recording state stays `Unknown` until this client receives a good reply to Start or Stop.
 
@@ -187,26 +186,54 @@ stateDiagram-v2
     Stopped --> Unknown: reconnect or failure
 ```
 
-Buttons use the current state; they do not guess what LabRecorder is doing:
+The last confirmed state is only part of the decision. `LabRecorderClient` also
+tracks the state it wants and one current operation:
 
-- Refresh is available when connected and not `Recording`.
-- Start is available when connected, not `Recording`, and the filename is valid.
-- Stop is available when connected and not `Stopped`.
+- `Idle`
+- `Refreshing`
+- `UpdatingFilename`
+- `Starting`
+- `Stopping`
+- `ShuttingDown`
 
-Both Start and Stop may therefore be available while the state is `Unknown`.
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Refreshing: Refresh
+    Idle --> UpdatingFilename: delayed valid filename edit
+    Idle --> Starting: Start accepted
+    Refreshing --> Idle: acknowledged
+    UpdatingFilename --> Idle: newest filename acknowledged
+    Starting --> Idle: complete or failed
+    Starting --> Stopping: close waits for Start, then sends Stop
+    Idle --> Stopping: Stop accepted
+    Stopping --> Idle: acknowledged
+    Idle --> ShuttingDown: close with no remote Stop required
+    Stopping --> ShuttingDown: close waits for existing Stop
+```
+
+Controls use the connection, confirmed state, requested state, current operation,
+output-path check, and closing state together. Only one command group can run.
+A second Start or Stop, a refresh, or a filename change is refused while that
+group is active.
+
+While the confirmed state is `Unknown`, recovery Start or Stop is possible only
+when the connection is active and no other operation is running. The window
+always shows `Starting`, `Recording`, `Stopping`, `Stopped`, or `Unknown` and the
+command number that is waiting for a reply.
 
 ### Command groups
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Queued
-    Queued --> Writing: connected and no active group
+    [*] --> Writing: group accepted
     Writing --> AwaitingReply: full command and newline accepted
     AwaitingReply --> Writing: reply starts with OK and commands remain
     AwaitingReply --> Complete: reply starts with OK and group is done
     Writing --> Failed: write error
     AwaitingReply --> Failed: timeout, disconnect, or bad reply
-    Complete --> Writing: next queued group
+    Complete --> [*]
+    Failed --> [*]
 ```
 
 Keep these rules:
@@ -217,54 +244,107 @@ Keep these rules:
 - Keep reply pieces until `OK` can be checked.
 - Ignore leading carriage returns, line feeds, spaces, and tabs.
 - The two bytes `OK` are enough. Do not wait for the rest of the line.
-- A failure clears later queued work and closes the connection.
+- A failure ends the group and closes the connection.
 - A good group changes recording state only when the group declares a state other than `Unknown`.
+- Start is one indivisible `update`, `select all`, `filename`, `start` group for record-every-visible mode.
+- Closing while Start is active lets that one group finish, then sends exactly one
+  Stop. All new work is refused after closing begins.
+- A timeout, malformed reply, disconnect, or permitted replacement connection
+  fails active work and returns confirmed and requested state to `Unknown`.
+  Replacement is refused while connected recording work is active; reconnect
+  after loss remembers that Start may have reached the recorder until Stop is
+  confirmed.
 
 ### Start the included LabRecorder
 
-1. After the window is ready, a zero-delay timer starts automatic setup.
-2. Use a valid user-selected program first. Otherwise, look for `labrecorder/LabRecorder.exe` beside the desktop app.
-3. Mark a successfully started process as owned by the desktop app.
-4. Retry the remote connection every 250 ms.
-5. Do not retry while connected or already connecting.
-6. Stop after 15 seconds and report that remote control was not ready.
+1. Check the configured remote-control address first. Never start a duplicate process when that address is already reachable.
+2. Launch only when automatic launch is enabled and nothing answers at that
+   address.
+3. Use a valid user-selected program first. Otherwise, look for `labrecorder/LabRecorder.exe` beside the desktop app.
+4. Start it without blocking the window and use the program's directory as its
+   working directory. State is `External`, `Launching`, `OwnedRunning`,
+   `OwnedExited`, `LaunchFailed`, or `Detached`.
+5. Drain standard output and error into the event log while retaining at most 64 KiB of process output and 4 KiB per emitted line.
+6. Retry remote control every 250 ms only while neither connected nor connecting, for at most 15 seconds.
+7. Disconnecting from an external process never ends it. Detach leaves a
+   recorder started here running and prevents the app from closing it later.
+
+These internal state names appear in the interface as plain descriptions such
+as **External**, **Starting here**, and **Started here**.
+
+Exact-selection mode starts the included `LabRecorderCLI` without blocking the
+window. It passes one full output path and one search for each selected stream.
+The search uses source ID when available and otherwise limits the name by host.
+Pressing Stop sends Enter to the program. The app owns this process and does not
+confuse it with an external graphical recorder.
 
 ### LabRecorder checks
 
-- [ ] Replacing a connection fails active work and clears queued work.
+- [ ] Replacing a connection fails active work.
 - [ ] The connection timeout does not change the command timeout.
 - [ ] Partial writes and split `OK` replies move forward by exactly one command.
 - [ ] A bad reply closes the connection and reports no more than its first 80 bytes.
 - [ ] Start sends `update`, `select all`, `filename`, and `start` in that order.
 - [ ] A timeout or disconnect stops all later commands in the group.
 - [ ] Recording state changes only after a confirmed Start or Stop.
-- [ ] The included-program fallback and 15-second limit stay the same.
+- [ ] Double Start and Stop produce exactly one remote operation.
+- [ ] Close during every Start command lets the group finish and then sends one
+  final `stop`.
+- [ ] Connection replacement, malformed reply, disconnect, and process exit
+  leave a clear state and recovery action.
+- [ ] The app checks the address before launch; custom and included program
+  lookup, working directory, limited output, detach, and the 15-second deadline
+  remain correct.
 
 ## Closing the desktop window
 
 ```mermaid
 stateDiagram-v2
     [*] --> Open
-    Open --> ClosePending: closeEvent
-    ClosePending --> ClosePending: check every 50 ms
-    ClosePending --> Finalizing: bridge and recording are done
-    ClosePending --> Finalizing: 4 s or 15 s limit is reached
-    Finalizing --> Closed: stop owned LabRecorder and close later
+    Open --> Closing: first closeEvent
+    Closing --> Closing: repeated close / report current deadlines
+    Closing --> Closing: a component reports progress
+    Closing --> Finalizing: all required components stop
+    Finalizing --> Closed: final close
 ```
 
 On the first close request:
 
-- Mark closing as pending and restart the elapsed timer.
-- Ask the bridge worker to stop when one exists.
-- Ask LabRecorder to stop only when recording state is exactly `Recording`.
-- Start a 50 ms timer that checks whether closing can finish.
-- Ignore the first immediate close event.
+- Enter `Closing` once and ignore repeated close requests.
+- Refuse new Start, stream search, filename, and guided work.
+- Record which bridge, preview, file, stream-search, file-check, and recorder work
+  must stop, along with request times and deadlines.
+- Call `LabRecorderClient::beginShutdown()`. It cancels a Start that has not reached `start`; otherwise it arranges or waits for one final Stop. An already active Stop is never duplicated.
+- Ask the preview and bridge to stop without blocking, cancel file and stream
+  work, and keep the window responsive.
+- Poll state every 50 ms only to update the visible component and remaining-time display. No poll declares a still-running worker destroyed.
 
-The bridge is done when `worker_ == nullptr`, or its four-second wait has ended. Recording is done when no Stop was needed, LabRecorder reports `Stopped`, or its 15-second wait has ended.
+The visible deadlines are four seconds for the bridge, two seconds for preview
+and file work, and 15 seconds for the recorder. These times report a delay; they
+do not make the window wait. A Vicon call that cannot be canceled may continue
+after four seconds. The window stays responsive and shows it until the call
+returns. LSL stream searches are limited to 50 ms, stream-detail reads to 250 ms,
+and sample reads do not wait.
 
-When both sides are done or out of time, stop only an owned LabRecorder process and post a later final close.
+A recorder started by the app may be ended only after remote Stop is settled or
+the 15-second recorder deadline is exceeded. It receives one further second to
+close before the app forces it to end. An external process is never ended. If
+the remote connection is already lost, an external recorder settles locally
+with a recorded `RecorderConnectionLost` result; a recorder started here waits
+for the deadline.
 
-Check normal replies, bridge timeout, recorder timeout, unknown recorder state, an outside LabRecorder process, and repeated close requests.
+Normal cleanup does not wait for active work. A still-running worker cleans itself
+up when it finishes. Backup cleanup waits at most two seconds, followed by one
+final 100 ms attempt, but the normal close path does not destroy active workers.
+
+Normal work on the window thread should finish within 50 ms. A Stop request only
+sets a cancel flag and returns. SDK, LSL, file, process, and file-check cleanup
+runs away from the window thread.
+
+Check normal replies, every Start command, active Stop, disconnect, rules for
+recorders started here or elsewhere, bridge connection and retry delays,
+preview search and calibration, file opening, canceled file checks, and repeated
+close requests.
 
 ## Preview
 
@@ -273,21 +353,35 @@ Check normal replies, bridge timeout, recorder timeout, unknown recorder state, 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Running: Start Preview
-    Running --> Stopping: Stop Preview
-    Running --> Stopping: Open CSV or XDF and remember it
-    Stopping --> Idle: worker finishes
-    Idle --> OfflineLoaded: CSV or XDF loads
+    Idle --> Starting: Start Preview
+    Starting --> Running: worker starts
+    Starting --> Stopping: Stop or close
+    Running --> Stopping: Stop or close
+    Running --> Stopping: Open CSV or XDF and remember request
+    Stopping --> Stopped: worker actually finishes
+    Stopped --> Starting: Start Preview
+    Idle --> OfflineLoaded: file load succeeds
+    Stopped --> OfflineLoaded: pending file load succeeds
     OfflineLoaded --> Playing: Play Recording
     Playing --> OfflineLoaded: Pause Recording
-    OfflineLoaded --> Running: Start Preview
+    OfflineLoaded --> Starting: Start Preview
+    Starting --> Failed: worker fails
+    Failed --> Starting: retry
 ```
 
-- Starting live preview stops playback, clears old trails, discards the session-only alignment, starts a new alignment collection, copies controls into `PreviewWorkerConfig`, and starts a worker.
-- Stop restores the manual transform before asking the worker to stop.
-- If a worker takes longer than one second, the panel stays in `Stopping`. Restart and file-open buttons stay disabled until the worker truly ends.
+- Starting live preview stops playback, clears old trails, copies the selected
+  streams and controls into `PreviewWorkerConfig`, keeps one newest frame for
+  display, and starts a worker. Calibration collection begins only when the user
+  selects **Calibrate from Stair Target**.
+- Stop only sets a cancel flag and returns within the normal 50 ms window target.
+  The panel stays in `Stopping`, with restart and file-open controls
+  disabled, until the worker truly ends. The two-second preview deadline is a
+  visible delay report, not a forced stop.
 - Opening a CSV or XDF while live stores one pending file, asks the worker to stop, and loads the file only after `finished` arrives.
 - CSV and XDF use the same playback storage and clock after loading.
+- Live drawing runs at 30 or 60 Hz and uses only the newest waiting frame. Stream
+  rate, skipped older input, calibration samples, replaced display frames, and
+  display delay remain separate counts.
 
 ### One live stream
 
@@ -305,25 +399,149 @@ stateDiagram-v2
     Stale --> Resolving: input error
 ```
 
-Connection and freshness are different. `PreviewFrame::*_stream_present` means an input is connected even when it has no sample or its last sample is old.
+Connection and sample age are different. `PreviewFrame::*_stream_present` means
+an input is connected even when it has no sample or its last sample is old.
+
+Resolution normally requires the saved source ID. If the same source returns in
+several publisher instances, choose the newest creation time and report the
+recovery. A missing identity never silently degrades to a name-only match.
+**Follow by name** permits a predictable name match and reports duplicates or a
+fallback. Stream searches use a 50 ms timeout, stream-detail reads use 250 ms,
+sample reads do not wait, and a missing stream retries after one second.
+
+### Load a recorded file and choose streams
+
+```mermaid
+stateDiagram-v2
+    [*] --> StableSource
+    StableSource --> Loading: Open CSV/XDF or drop file
+    Loading --> Reading
+    Reading --> Indexing
+    Indexing --> StreamDetails
+    StreamDetails --> Mapping: several possible XDF streams
+    Mapping --> Timestamps: user supplies master and groups
+    StreamDetails --> Timestamps: one clear choice
+    Timestamps --> Calibration
+    Calibration --> FramePreparation
+    FramePreparation --> Loaded: publish complete result
+    Reading --> StableSource: cancel or error
+    Indexing --> StableSource: cancel or error
+    Mapping --> StableSource: cancel
+    Timestamps --> StableSource: cancel or error
+    Calibration --> StableSource: cancel or error
+    FramePreparation --> StableSource: cancel or error
+    Loaded --> StableSource: current source replaced
+```
+
+The worker handles reading, indexing, stream details, time correction, stream
+choice, calibration, and memory-limited frame preparation. It checks
+cancellation between at most 1,024 lines, chunks, samples, or sample groups, and
+reports progress for every stage. The 250 ms cancellation target includes time
+waiting for a stream choice, which cancellation ends immediately. Failure or cancellation retains the
+previous usable source and never publishes a partial recording.
+
+Before preparing XDF frames, group possible streams by role, source ID, name,
+host, and channel layout. Compatible pieces are joined. The same source ID on
+different hosts, or several incompatible streams for one role, requires the user
+to choose. The choice sets the main timeline and included streams. The summary
+records the main ID, selected and excluded IDs, joined pieces, time ranges,
+unmatched samples, and clock corrections. If no supported stream exists, loading
+fails instead of choosing an unrelated numeric stream.
+
+Playback is `Loaded`, `Playing`, or `Paused`. A seek updates the shared CSV/XDF
+clock without changing speed. Start/end, one-frame and configurable-time steps,
+loop-off end behavior, loop-on wrapping, recent-file opening, drag-and-drop, and
+current-image export are explicit choices. The configured memory limit caps the
+decoded result, and drawing fewer frames does not change file-check numbers.
 
 ### Stair alignment
 
 ```mermaid
 stateDiagram-v2
     [*] --> Manual
-    Manual --> Collecting: preview starts or user selects Calibrate
+    Manual --> Collecting: user selects Calibrate
     Collecting --> Collecting: add a stable tracked pose
     Collecting --> Collecting: target is lost or moves / restart collection
     Collecting --> Manual: math or quality check fails
     Collecting --> AutomaticSession: 20 good samples solve alignment
-    AutomaticSession --> Manual: Use Manual Transform or stop source
+    AutomaticSession --> SavedProfile: Save Session Calibration
+    AutomaticSession --> Manual: Use Manual Transform
+    SavedProfile --> Manual: Use Manual Transform
+    Manual --> SavedProfile: Apply saved calibration
 ```
+
+`SavedProfile` is the internal state name; the interface shows **Saved calibration**.
 
 - Losing the target clears the collected poses.
 - A pose outside the allowed movement from the first pose restarts collection from that new pose.
-- Automatic alignment stays in memory and is not saved.
+- Missing or incompatible coordinate details pause collection for an explicit
+  fallback confirmation. Compatibility and the rejection reason remain visible.
+- Automatic alignment stays in memory for the desktop session and is not saved
+  unless the user explicitly creates a complete saved calibration.
 - Transform changes reach the worker through a lock. The drawing area then asks to fit the view again.
+- Saved-calibration import/export, **Copy**, **Hide**, stair-pose editing, and
+  **Apply** preserve the record ID, version, physical setup, stair identity,
+  coordinate names, notes, creation time, sample count, and position/angle error.
+- Calibration progress is emitted no faster than every 100 ms so the target
+  stream cannot dominate GUI work.
+
+## Check the setup and record a session
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Preparing: Start Session
+    Preparing --> Preparing: start bridge and preview / discover streams
+    Preparing --> SetupBlocked: required check fails
+    SetupBlocked --> Ready: correct checks
+    SetupBlocked --> Ready: Record Anyway with reason
+    Preparing --> Ready: all required checks pass
+    Ready --> Starting: Start recorder
+    Starting --> Recording: Start acknowledged or exact-selection recorder starts
+    Starting --> Failed: recorder operation fails
+    Recording --> Stopping: Stop Session or Stop Recording
+    Stopping --> Verifying: Stop acknowledged and file finalizes
+    Verifying --> Complete: file check finishes
+    Verifying --> Failed: file missing or needs attention
+    Failed --> Idle: recover or begin another run
+    Complete --> Idle: begin another run
+```
+
+Setup items are `Required`, `Warning`, or `Information`. Required bridge,
+recorder, path, selected stream, sample age, and channel-layout failures block
+Start. Recorder-only mode turns the bridge requirement into information.
+Warnings such as low storage, missing stream details, duplicate choices, or a
+low expected rate stay visible but do not block. A blocked result can be bypassed
+only with a reason; both the result and reason enter the session log and export.
+
+The guided action starts bridge, preview, stream search, setup check, and recorder
+in order while preserving independent controls. Its reverse action stops the
+recorder, waits for the file check, then stops preview and bridge. Any partially
+completed state remains visible and independently stoppable.
+
+## Check the file after recording
+
+```mermaid
+stateDiagram-v2
+    [*] --> NotRun
+    NotRun --> WaitingForFile: successful Stop
+    WaitingForFile --> Running: exact XDF appears
+    WaitingForFile --> NeedsAttention: finalization deadline expires
+    Running --> Verified: all required data passes
+    Running --> VerifiedWithWarnings: data present with warnings
+    Running --> NeedsAttention: missing/incompatible data or read failure
+    Running --> NeedsAttention: canceled by close
+```
+
+The last diagram uses internal state names. The interface shows `Verified` as
+**Checked** and `VerifiedWithWarnings` as **Checked with warnings**.
+
+The file check runs away from the window thread and never changes the recording.
+It compares the recorded streams with the list saved before Start, then reports
+source ID, channel layout, sample count, range, duration, measured rate, gaps,
+clock corrections, repaired timestamps, and recovery from a cut-off file ending.
+The report can be exported and links to playback. Automatic run increment occurs
+only after the output exists and the selected completion rule passes.
 
 ## HoloLens tracker and provider
 

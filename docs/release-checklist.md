@@ -1,69 +1,124 @@
-# v1.10.5 release record
+# v1.11.0 release checklist
 
 ## Release details
 
-- Version: `1.10.5`
-- Previous release: `v1.10.4`
-- Release branch: `release/v1.10.0`
-- Main commit: `72a1d93b108459e728b59b8140d2943e82d8af70`
-- Published: 2026-08-23
-- [Release page](https://github.com/attackofthetitan/vicon-lsl-sync/releases/tag/v1.10.5)
-- Scope: code organization, safer packaging, more checks, and new technical guides, with no intended behavior change
+- Version: `1.11.0`
+- Previous release: `v1.10.5`
+- Target date: 2026-09-01
+- Feature pull requests, in order: `#21`, `#22`, `#23`, `#19`
+- Documentation pull request: `#20`, after `#19`
+- Status: ready for ordered merge; hosted packaging passed and the hardware
+  disposition is recorded, while publication checks remain pending
+- Scope: guided desktop sessions, explicit recorder and stream control,
+  responsive recording preview, saved session and calibration data, and
+  post-recording file checks
 
-## Checks completed before merge
+## Pre-merge checks
 
-- [x] The CMake version and changelog version match.
+- [x] The CMake version and dated changelog section both use `1.11.0`.
 - [x] Generated C++ and C# stream files are current.
-- [x] The C++ suite that needs no desktop dependencies passes with and without Catch2.
-- [x] The full Windows Release build passes for the bridge, desktop app, start/stop, recovery, and LabRecorder targets.
-- [x] The device-independent HoloLens timing, coordinate, encoding, publishing, and recovery suite passes with warnings treated as errors.
-- [x] Windows package path and file checks pass in Windows PowerShell 5.1 and PowerShell 7.
-- [x] The current portable launcher extracts a good embedded ZIP, rejects a changed one, and handles extra certificate data added by Windows signing.
-- [x] Workflow YAML, PowerShell scripts, and Bash scripts parse successfully.
-- [x] Documentation links, generated files, whitespace, and third-party submodule revisions are clean.
-- [x] The code cleanup was reviewed as separate commits for generated HoloLens streams, native code ownership, package safety, and release documentation.
-- [x] The final hosted Windows and Linux build set passed.
-- [x] The hardware decision below was recorded before the tag.
-- [x] Version `1.10.5` remained the intended patch version.
-- [x] The approved commit was merged into `main` before tagging.
+- [x] The dependency-light C++ build passes without Catch2.
+- [x] The full Windows Release build and all 74 registered checks pass.
+- [x] The device-independent HoloLens timing, coordinate, encoding, publishing,
+  cancellation, and recovery suite passes all 15 checks.
+- [x] Windows package path and file safety checks pass all 26 assertions.
+- [x] The scaled desktop layout that failed on `#20` passes with the reviewed
+  top-branch fixes.
+- [x] The three third-party submodule revisions match `main`.
+- [x] Whitespace and generated-file checks are clean.
+- [x] The documentation branch contains the feature branch and compares as
+  documentation-only after its base is changed to `release/bridge-gui`.
+- [x] The final hosted matrix passes all seven Linux, Windows, and HoloLens jobs,
+  including Windows packaging and portable-application validation.
 
-## Hardware decision
+## Ordered merge
 
-The physical HoloLens 2, Vuforia, Vicon, and LabRecorder test was not run for `v1.10.5` because that hardware setup was not available on 2026-08-23.
+- [ ] Merge `#21` into `main` after its hosted checks remain green.
+- [ ] Change `#22` to target `main`, confirm the diff and hosted checks, then
+  merge it.
+- [ ] Change `#23` to target `main`, confirm the diff and hosted checks, then
+  merge it.
+- [ ] Change `#19` to target `main`, confirm the complete Windows, Linux, and
+  HoloLens matrix, then merge it.
+- [ ] Change `#20` to target `main`, confirm that it contains only documentation,
+  then merge it.
+- [ ] Confirm `main` contains every reviewed commit and has no uncommitted
+  release-only change.
 
-The release used these checks instead:
+Do not merge the stack out of order. Each later branch assumes the earlier
+branch is already present.
 
-- Generated C++ and C# stream layouts match.
-- Device-independent timing, coordinate, encoding, publishing, and recovery checks pass.
-- Native frame mapping, start/stop, and recovery checks pass.
-- LabRecorder command and state checks pass.
-- Windows package and portable-file checks pass.
+## Desktop-session qualification
 
-This release does not intentionally change an SDK, dependency, public interface, saved Unity field, stream layout, timestamp rule, coordinate rule, setting name, or release filename.
+### Configuration and evidence
 
-Real Unity, Windows device API, Vuforia, and physical Vicon behavior cannot be proved without the equipment. If an integration problem appears, return to `v1.10.4` and complete the [hardware test guide](device-parity-runbook.md) before publishing a correction.
+- [ ] Reset, Save, Load, Import, and Export preserve every session field in the
+  version-1 JSON format and reject unsupported versions without rewriting them.
+- [ ] Saved calibrations round-trip their ID, version, setup, stair identity and
+  pose, coordinate names, transform, notes, creation time, quality, fallback
+  confirmation, and hidden state.
+- [ ] The displayed path exactly matches the recorder destination after
+  extension, traversal, reserved-name, trailing-character, length, writeability,
+  storage, collision, overwrite, and Find Next Run checks.
+- [ ] Exported session details preserve setup-check results, any Record Anyway
+  reason, selected streams, recorder ownership, file-check findings, and run
+  increment outcome.
 
-## Publication checks
+### State and shutdown
 
-- [x] Annotated tag `v1.10.5` points to the approved commit in `main`.
-- [x] The release workflow published the Windows ZIP, Windows portable GUI, Linux archive, and `SHA256SUMS.txt`.
-- [x] Fresh downloads of all four files match the checksums in `SHA256SUMS.txt`.
-- [x] The downloaded Windows command-line app opens its help successfully.
-- [x] The downloaded Windows desktop app and portable app complete their built-in test mode.
-- [x] The portable app extracts to a new folder, and its 118 payload files match the Windows ZIP.
-- [x] The downloaded Linux command-line app opens its help on Ubuntu 24.04 and loads the included `liblsl.so.2`.
-- [x] The published release notes cover the same changes and hardware limit as [CHANGELOG.md](../CHANGELOG.md).
+- [ ] Repeated or conflicting recorder commands, split or malformed replies,
+  timeouts, reconnects, replacement connections, process exit, and detach have
+  predictable visible results.
+- [ ] Closing before or during Start, while recording, during Stop, after a
+  disconnect, or during background preview and file work remains responsive and
+  sends no duplicate final recorder command.
+- [ ] Only a recorder started by this application is closed by it; an external
+  recorder is detached and left running.
 
-The hosted release run is saved on the [build page](https://github.com/attackofthetitan/vicon-lsl-sync/actions/runs/32633388765).
+### Selection, preview, and accessibility
 
-## Changes that need a separate move plan
+- [ ] Source-ID selection, explicit follow-by-name, duplicate names, restarted
+  sources, and same source IDs on different hosts remain visible and predictable.
+- [ ] CSV and XDF loading, cancellation, stream choice, long-file memory limits,
+  seeking beyond two hours, playback controls, and exact file-check numbers pass.
+- [ ] Small, default, and scaled layouts keep controls reachable; keyboard focus,
+  shortcuts, labels, light and dark themes, high contrast, and screen-reader names
+  are usable.
 
-Do not include any of these in normal patch-level code cleanup:
+## Hardware disposition
 
-- Dependency or framework updates.
-- Stream name, layout, time, or coordinate changes.
-- Saved Unity field changes.
-- Thread-ownership changes.
-- Public command, source interface, setting, build target, or release filename changes.
+- [x] Run the [hardware test guide](device-parity-runbook.md), or record an
+  explicit decision to publish without the physical HoloLens 2, Vuforia, Vicon,
+  and LabRecorder setup.
+- [x] Record the tested hardware and software versions, results, exceptions, and
+  approver before creating the tag.
 
-For one of these changes, write down the old and new behavior. Explain how existing users or files move forward and which checks prove the move is safe.
+Publication was authorized on 2026-09-01 without a physical HoloLens 2,
+Vuforia, Vicon, or LabRecorder qualification run. Version `1.11.0` passed the
+device-independent HoloLens suite, the complete Linux and Windows hosted matrix,
+the 74-check local Windows suite, and the Windows packaging assertions. The
+known exception is that physical device, tracking-volume, and recorder
+integration behavior was not exercised for this release. The repository
+operator approved publication with this limitation and `v1.10.5` remains the
+rollback release.
+
+This release does not intentionally change an SDK revision, dependency revision,
+LSL stream layout, timestamp rule, coordinate rule, command-line option, build
+target, or release filename. It does change desktop recording orchestration, so
+device-independent checks cannot prove physical integration behavior. If the
+hardware setup is unavailable, document that limitation in the release notes and
+use `v1.10.5` as the rollback release.
+
+## Publication
+
+- [ ] The release commit is merged into `main` before tagging.
+- [ ] An annotated `v1.11.0` tag points to that exact commit in `main`.
+- [ ] The hosted release run publishes the Windows ZIP, Windows portable GUI,
+  Linux archive, and `SHA256SUMS.txt`.
+- [ ] Fresh downloads match `SHA256SUMS.txt`.
+- [ ] The downloaded Windows command-line, desktop, and portable applications
+  start successfully, and the portable payload matches the Windows ZIP.
+- [ ] The downloaded Linux command-line application opens its help on the target
+  Ubuntu version and loads the included `liblsl.so.2`.
+- [ ] The published notes match [CHANGELOG.md](../CHANGELOG.md) and state the
+  hardware disposition and rollback version.
