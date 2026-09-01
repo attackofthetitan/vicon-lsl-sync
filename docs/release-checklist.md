@@ -6,7 +6,7 @@
 - Previous release: `v1.11.0`
 - Target date: 2026-09-02
 - Feature pull request: `#24`
-- Status: pre-merge review complete; final hosted checks and publication checks
+- Status: ready to merge; hardware/signing disposition and publication checks
   remain pending
 - Scope: native Apple Silicon build, test, packaging, and release support
 
@@ -25,18 +25,18 @@
 - [x] The original macOS CI artifact was downloaded to an Apple Silicon Mac;
   its archive, disk image, signatures, ARM64 executables, dependency loading,
   and command-line startup passed locally.
-- [ ] The final pull-request commit passes every hosted job after the review
+- [x] The final pull-request commit passes every hosted job after the review
   changes.
-- [ ] The final hosted macOS artifact is downloaded and passes the package test
+- [x] The final hosted macOS artifact is downloaded and passes the package test
   on a separate Apple Silicon Mac.
 - [x] Generated C++ and C# stream files are current and `git diff --check` is
   clean.
 
 ## Merge
 
-- [ ] PR `#24` is not a draft, is mergeable into `main`, and has no unresolved
+- [x] PR `#24` is not a draft, is mergeable into `main`, and has no unresolved
   review thread.
-- [ ] Required checks are green on the exact commit being merged.
+- [x] Required checks are green on the exact commit being merged.
 - [ ] `main` contains the reviewed commit with no release-only change left on a
   side branch.
 
