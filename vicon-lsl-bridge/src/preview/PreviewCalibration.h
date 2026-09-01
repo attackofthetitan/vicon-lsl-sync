@@ -12,6 +12,7 @@ enum class CalibrationState {
     Manual,
     Collecting,
     AutomaticSession,
+    SavedProfile,
 };
 
 struct PreviewRigidTransform {

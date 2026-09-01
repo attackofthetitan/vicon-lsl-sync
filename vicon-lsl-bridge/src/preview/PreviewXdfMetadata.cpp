@@ -114,6 +114,8 @@ void parseStreamHeaderMetadata(XdfStreamData& stream, const std::string& xml) {
         "stream_" + std::to_string(stream.stream_id));
     stream.type = xmlTagValue(xml, "type").value_or("");
     stream.source_id = xmlTagValue(xml, "source_id").value_or("");
+    stream.hostname = xmlTagValue(xml, "hostname").value_or("");
+    stream.session_id = xmlTagValue(xml, "session_id").value_or("");
     stream.channel_count = parseIntTag(xml, "channel_count", 0);
     stream.nominal_srate = parseDoubleTag(xml, "nominal_srate", 0.0);
     stream.channel_format = xmlTagValue(xml, "channel_format").value_or("double64");
