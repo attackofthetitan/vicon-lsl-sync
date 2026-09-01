@@ -43,6 +43,7 @@ if [[ -d "$temp_dir/LabRecorder.app" ]]; then
 fi
 
 # 6. Verify code signature validity
+echo "Checking code signatures..."
 if [[ -d "$temp_dir/LabRecorder.app" ]]; then
   codesign --verify --deep "$temp_dir/LabRecorder.app"
 fi
@@ -53,8 +54,9 @@ codesign --verify "$temp_dir/vicon-lsl-bridge"
 codesign --verify "$temp_dir/LabRecorderCLI"
 
 # 7. Test standalone binary execution
-"$temp_dir/vicon-lsl-bridge" --help >/dev/null
-"$temp_dir/LabRecorderCLI" -h >/dev/null
+echo "Testing CLI binary execution..."
+(cd "$temp_dir" && ./vicon-lsl-bridge --help >/dev/null)
+(cd "$temp_dir" && ./LabRecorderCLI -h >/dev/null)
 
 echo "All macOS package verification checks passed successfully."
 

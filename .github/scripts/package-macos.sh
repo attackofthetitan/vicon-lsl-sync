@@ -89,6 +89,13 @@ fi
 # Verify shared library presence
 find package -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
+# Thin fat binaries to arm64 architecture
+while IFS= read -r binary; do
+  [[ "$(lipo -archs "$binary" 2>/dev/null)" == *" "* ]] || continue
+  lipo -thin arm64 "$binary" -output "$binary.arm64"
+  mv "$binary.arm64" "$binary"
+done < <(find package -type f \( -perm -u+x -o -name '*.dylib' \))
+
 # Set portable RPATHs on all standalone binaries
 for bin in package/vicon-lsl-bridge package/LabRecorderCLI; do
   if [[ -f "$bin" ]]; then
@@ -98,12 +105,6 @@ for bin in package/vicon-lsl-bridge package/LabRecorderCLI; do
     install_name_tool -add_rpath "@loader_path/Frameworks" "$bin" 2>/dev/null || true
   fi
 done
-
-while IFS= read -r binary; do
-  [[ "$(lipo -archs "$binary" 2>/dev/null)" == *" "* ]] || continue
-  lipo -thin arm64 "$binary" -output "$binary.arm64"
-  mv "$binary.arm64" "$binary"
-done < <(find package -type f \( -perm -u+x -o -name '*.dylib' \))
 
 # Codesign macOS application bundles
 for app in package/vicon-lsl-bridge-gui.app package/LabRecorder.app; do
