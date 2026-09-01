@@ -4,9 +4,45 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
-### Documentation
+## [1.11.0] - 2026-09-01
 
-- Rewrote the project guides and README files in plain English. Commands, paths, settings, stream layouts, timing rules, and release promises did not change.
+### Added
+
+- Added one guided desktop-session path that starts the bridge and preview,
+  discovers streams, checks the recording setup, starts recording, and stops
+  each owned component in order.
+- Added versioned session presets, managed calibration profiles, explicit stream
+  identities, recording-destination checks, and post-recording XDF verification.
+- Added responsive CSV and XDF loading with cancellation, bounded memory use,
+  stream mapping, seeking, frame stepping, playback speed, and optional looping.
+
+### Changed
+
+- Recorder commands now run one operation at a time, wait for explicit replies,
+  and distinguish a recorder started by the desktop app from an external one.
+- The desktop app now keeps session state in one place, exposes setup and file
+  check results, and keeps background preview and shutdown work off the window
+  thread.
+- Rewrote the project guides and README files in plain English. Commands, paths,
+  stream layouts, timing rules, and release filenames did not change.
+
+### Fixed
+
+- Fixed selected-stream query errors being cleared by later terms, incorrect
+  path-field diagnostics, canceled file checks being reported as failures, stale
+  stair-model readiness, and incomplete preview timelines surviving rejection.
+- Fixed stream-health warnings obscuring measured freshness and made duplicate
+  stream names require an explicit identity choice.
+
+### Compatibility
+
+- Existing command-line options, LSL stream names and layouts, timestamp and
+  coordinate rules, build targets, and release filenames remain unchanged.
+- Session presets and saved calibration files use their first versioned format;
+  desktop settings from releases before `v1.11.0` are not imported.
+- Physical HoloLens 2, Vuforia, Vicon, and LabRecorder qualification remains a
+  publication gate when that equipment is available. Use `v1.10.5` as the
+  rollback release if an integration problem appears.
 
 ## [1.10.5] - 2026-08-23
 
@@ -34,5 +70,6 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.5...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.5...v1.11.0
 [1.10.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.4...v1.10.5
