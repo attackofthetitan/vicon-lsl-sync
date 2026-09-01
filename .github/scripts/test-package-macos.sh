@@ -56,7 +56,7 @@ codesign --verify "$temp_dir/LabRecorderCLI"
 # 7. Test standalone binary execution
 echo "Testing CLI binary execution..."
 (cd "$temp_dir" && ./vicon-lsl-bridge --help >/dev/null)
-(cd "$temp_dir" && ./LabRecorderCLI -h >/dev/null)
+(cd "$temp_dir" && ./LabRecorderCLI -h 2>&1 | grep -q "Usage:")
 
 echo "All macOS package verification checks passed successfully."
 
