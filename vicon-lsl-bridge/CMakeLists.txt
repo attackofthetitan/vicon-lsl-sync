@@ -143,6 +143,19 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     if(VICON_LSL_BRIDGE_BUILD_GUI)
         find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
         if(Qt6_FOUND)
+            # Some Qt 6 macOS packages still expose the removed AGL framework
+            # through WrapOpenGL, which breaks linking on current macOS SDKs.
+            if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+                get_target_property(_wrap_gl_libs
+                    WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+                if(_wrap_gl_libs)
+                    list(FILTER _wrap_gl_libs EXCLUDE REGEX ".*AGL.*")
+                    set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES
+                        INTERFACE_LINK_LIBRARIES "${_wrap_gl_libs}")
+                endif()
+                unset(_wrap_gl_libs)
+            endif()
+
             add_library(vicon-lsl-bridge-gui-components STATIC
                 src/gui/BridgeWindow.cpp
                 src/gui/BridgeWindowUi.cpp
