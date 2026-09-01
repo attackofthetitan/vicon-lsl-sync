@@ -23,25 +23,25 @@ bool RecorderProcessController::ownsRunningProcess() const {
            (state_ == RecorderProcessState::Launching || state_ == RecorderProcessState::OwnedRunning);
 }
 
-bool RecorderProcessController::allowlistRecording() const {
-    return ownsRunningProcess() && kind_ == RecorderProcessKind::AllowlistRecorder && !stop_requested_;
+bool RecorderProcessController::selectedStreamRecording() const {
+    return ownsRunningProcess() && kind_ == RecorderProcessKind::SelectedStreamRecorder && !stop_requested_;
 }
 
 bool RecorderProcessController::launchGraphicalRecorder(const QString& executable, QString* error) {
     return startProcess(RecorderProcessKind::GraphicalRecorder, executable, {}, error);
 }
 
-bool RecorderProcessController::launchAllowlistRecorder(const QString& executable,
+bool RecorderProcessController::launchSelectedStreamRecorder(const QString& executable,
                                                        const QString& absolute_output_path,
                                                        const QVector<StreamIdentity>& selected_streams,
                                                        QString* error) {
-    const QStringList arguments = allowlistArguments(absolute_output_path, selected_streams, error);
-    return !arguments.isEmpty() && startProcess(RecorderProcessKind::AllowlistRecorder, executable, arguments, error);
+    const QStringList arguments = selectedStreamArguments(absolute_output_path, selected_streams, error);
+    return !arguments.isEmpty() && startProcess(RecorderProcessKind::SelectedStreamRecorder, executable, arguments, error);
 }
 
-bool RecorderProcessController::stopAllowlistRecording() {
+bool RecorderProcessController::stopSelectedStreamRecording() {
     if (!process_ || process_->state() == QProcess::NotRunning ||
-        kind_ != RecorderProcessKind::AllowlistRecorder || stop_requested_) return false;
+        kind_ != RecorderProcessKind::SelectedStreamRecorder || stop_requested_) return false;
     stop_requested_ = true;
     process_->write("\n");
     process_->closeWriteChannel();
@@ -52,8 +52,8 @@ bool RecorderProcessController::stopAllowlistRecording() {
 void RecorderProcessController::endOwnedProcess() {
     if (!ownsRunningProcess() || ending_owned_process_) return;
     ending_owned_process_ = true;
-    if (kind_ == RecorderProcessKind::AllowlistRecorder && !stop_requested_) {
-        stopAllowlistRecording();
+    if (kind_ == RecorderProcessKind::SelectedStreamRecorder && !stop_requested_) {
+        stopSelectedStreamRecording();
     } else {
         process_->terminate();
     }
@@ -77,7 +77,7 @@ void RecorderProcessController::detach() {
     kind_ = RecorderProcessKind::None;
 }
 
-QString RecorderProcessController::bundledAllowlistExecutable(const QString& graphical_executable,
+QString RecorderProcessController::bundledSelectedStreamExecutable(const QString& graphical_executable,
                                                             const QString& app_dir) {
     QStringList candidates;
     if (!graphical_executable.trimmed().isEmpty()) {
@@ -94,7 +94,7 @@ QString RecorderProcessController::bundledAllowlistExecutable(const QString& gra
     return {};
 }
 
-QStringList RecorderProcessController::allowlistArguments(const QString& absolute_output_path,
+QStringList RecorderProcessController::selectedStreamArguments(const QString& absolute_output_path,
                                                         const QVector<StreamIdentity>& selected_streams,
                                                         QString* error) {
     const QFileInfo output(absolute_output_path);
@@ -105,13 +105,18 @@ QStringList RecorderProcessController::allowlistArguments(const QString& absolut
     QStringList arguments{QDir::toNativeSeparators(output.absoluteFilePath())};
     for (const StreamIdentity& identity : selected_streams) {
         if (!identity.selected) continue;
-        QString query, literal_error;
+        QString literal_error;
+        auto term = [&](const QString& key, const QString& value) {
+            const QString literal = queryLiteral(value, &literal_error);
+            return literal_error.isEmpty() ? key + "=" + literal : QString();
+        };
+        QString query;
         if (!identity.source_id.trimmed().isEmpty()) {
-            query = "source_id=" + queryLiteral(identity.source_id.trimmed(), &literal_error);
+            query = term("source_id", identity.source_id.trimmed());
         } else {
-            query = "name=" + queryLiteral(identity.name, &literal_error);
-            if (!identity.hostname.trimmed().isEmpty()) {
-                query += " and hostname=" + queryLiteral(identity.hostname.trimmed(), &literal_error);
+            query = term("name", identity.name);
+            if (literal_error.isEmpty() && !identity.hostname.trimmed().isEmpty()) {
+                query += " and " + term("hostname", identity.hostname.trimmed());
             }
         }
         if (!literal_error.isEmpty()) {
@@ -136,8 +141,8 @@ void RecorderProcessController::drainOutput() {
 
 void RecorderProcessController::onStarted() {
     setState(RecorderProcessState::OwnedRunning,
-             kind_ == RecorderProcessKind::AllowlistRecorder ? "Selected-stream recorder started" : "Recorder started");
-    if (kind_ == RecorderProcessKind::AllowlistRecorder) emit recordingStateChanged(RecorderRecordingState::Recording);
+             kind_ == RecorderProcessKind::SelectedStreamRecorder ? "Selected-stream recorder started" : "Recorder started");
+    if (kind_ == RecorderProcessKind::SelectedStreamRecorder) emit recordingStateChanged(RecorderRecordingState::Recording);
 }
 
 void RecorderProcessController::onError(QProcess::ProcessError) {
@@ -154,7 +159,7 @@ void RecorderProcessController::onFinished(int exit_code, QProcess::ExitStatus s
     terminate_deadline_.stop();
     const RecorderProcessKind finished_kind = kind_;
     const bool expected = stop_requested_ || ending_owned_process_;
-    if (finished_kind == RecorderProcessKind::AllowlistRecorder) {
+    if (finished_kind == RecorderProcessKind::SelectedStreamRecorder) {
         emit recordingStateChanged(RecorderRecordingState::Stopped);
     }
     setState(RecorderProcessState::OwnedExited,
@@ -205,7 +210,7 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind, const QSt
     output_buffer_.clear();
     partial_line_.clear();
     setState(RecorderProcessState::Launching,
-             kind == RecorderProcessKind::AllowlistRecorder ? "Starting selected-stream recorder" : "Starting recorder");
+             kind == RecorderProcessKind::SelectedStreamRecorder ? "Starting selected-stream recorder" : "Starting recorder");
     process_->start(QDir::toNativeSeparators(info.absoluteFilePath()), arguments, QIODevice::ReadWrite);
     if (error) error->clear();
     return true;

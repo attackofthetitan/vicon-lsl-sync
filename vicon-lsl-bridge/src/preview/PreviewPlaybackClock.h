@@ -24,13 +24,7 @@ public:
     bool atEnd(double monotonic_seconds) const;
 
 private:
-    bool timelineEmpty() const;
-    std::size_t timelineSize() const;
-    double relativeTimestamp(std::size_t index) const;
-
     std::vector<double> timeline_;
-    const std::vector<PreviewFrame>* frame_timeline_ = nullptr;
-    double frame_timeline_origin_ = 0.0;
     bool playing_ = false;
     double speed_ = 1.0;
     double paused_position_ = 0.0;

@@ -95,14 +95,6 @@ QStringList relativeComponents(const QString& relative_path) {
     return QDir::fromNativeSeparators(relative_path).split('/', Qt::SkipEmptyParts);
 }
 
-QString fieldNameForProtocolValue(const LabRecorderFilenameFields& fields,
-                                  const QString& value) {
-    for (const RecordingField& field : kRecordingFields) {
-        if (value == fields.*(field.value)) return QLatin1String(field.label);
-    }
-    return "recording field";
-}
-
 } // namespace
 
 bool RecordingPathResult::valid() const {
@@ -203,7 +195,7 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
     for (const RecordingField& recording_field : kRecordingFields) {
         const QString& value = fields.*(recording_field.value);
         if (containsProtocolBreakingChar(value)) {
-            const QString field = fieldNameForProtocolValue(fields, value);
+            const QString field = QLatin1String(recording_field.label);
             addIssue(result, RecordingPathIssueLevel::Error, field,
                      field + " contains a brace or line break that cannot be sent safely.",
                      "Remove '{', '}', and line breaks.");

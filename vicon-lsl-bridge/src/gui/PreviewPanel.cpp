@@ -1,5 +1,6 @@
 #include "gui/PreviewPanel.h"
 #include "gui/PreviewFileLoader.h"
+#include "gui/WidgetHelpers.h"
 
 #include "preview/ObjMesh.h"
 #include "preview/PreviewCsv.h"
@@ -7,6 +8,8 @@
 #include "preview/PreviewMath.h"
 #include "preview/PreviewXdf.h"
 #include "StreamDefaults.h"
+
+#include <exception>
 
 #include <QCoreApplication>
 #include <QAbstractButton>
@@ -50,48 +53,11 @@
 namespace vicon_lsl {
 namespace {
 
+using namespace vicon_lsl::gui_detail;
+
 constexpr int kDefaultRenderHz = 30;
 constexpr int kMaximumLivePreviewDelayMs = 100;
 constexpr int kMaximumRenderHz = 60;
-
-QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QString& tooltip) {
-    auto* label = new QLabel(text);
-    label->setToolTip(tooltip);
-    if (control) {
-        label->setBuddy(control);
-        control->setToolTip(tooltip);
-        QString acc = text;
-        acc.remove('&');
-        acc.remove(':');
-        control->setAccessibleName(acc.trimmed());
-    }
-    return label;
-}
-
-QPushButton* makeButton(const QString& text, const QString& tooltip, const QString& acc_name = {}) {
-    auto* btn = new QPushButton(text);
-    btn->setToolTip(tooltip);
-    if (!acc_name.isEmpty()) btn->setAccessibleName(acc_name);
-    return btn;
-}
-
-void addField(QGridLayout* layout, int row, int col, const QString& label, QWidget* control, const QString& tooltip) {
-    layout->addWidget(makeTooltipLabel(label, control, tooltip), row, col);
-    layout->addWidget(control, row, col + 1);
-}
-
-void addWidgets(QBoxLayout* layout, std::initializer_list<QWidget*> widgets) {
-    for (QWidget* w : widgets) layout->addWidget(w);
-}
-
-QDoubleSpinBox* makeDoubleSpin(double min, double max, int dec, double step, double val) {
-    auto* spin = new QDoubleSpinBox();
-    spin->setRange(min, max);
-    spin->setDecimals(dec);
-    spin->setSingleStep(step);
-    spin->setValue(val);
-    return spin;
-}
 
 QDoubleSpinBox* makeDistanceSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 3, 0.01, val); }
 QDoubleSpinBox* makeAngleSpin(double val = 0.0) { return makeDoubleSpin(-360.0, 360.0, 2, 1.0, val); }
@@ -111,8 +77,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     widget_ = new PreviewWidget();
     layout->addWidget(widget_, 1);
 
-    auto* controls_group = new QGroupBox("Live Preview");
-    auto* controls_layout = new QVBoxLayout(controls_group);
+    auto [controls_group, controls_layout] = makeGroup<QVBoxLayout>("Live Preview");
     controls_layout->setContentsMargins(8, 8, 8, 8);
     controls_layout->setSpacing(6);
 
@@ -143,9 +108,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     cache_megabytes_spin_->setSuffix(" MiB");
     cache_megabytes_spin_->setValue(128);
 
-    trail_points_spin_ = new QSpinBox();
-    trail_points_spin_->setRange(2, 500);
-    trail_points_spin_->setValue(24);
+    trail_points_spin_ = makeSpin(2, 500, 24);
     playback_speed_spin_ = makeDoubleSpin(0.1, 4.0, 1, 0.1, 1.0);
 
     addField(stream_grid, 0, 0, "Markers:", marker_stream_edit_, "LSL stream containing Vicon marker samples for the preview.");
@@ -169,24 +132,12 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     gaze_rx_spin_ = makeAngleSpin();
     gaze_ry_spin_ = makeAngleSpin();
     gaze_rz_spin_ = makeAngleSpin();
-    auto* translation_label = new QLabel("HoloLens T:");
-    translation_label->setToolTip("Manual HoloLens translation in metres (X, Y, Z).\nUsed when manual transform mode is selected.");
-    gaze_tx_spin_->setToolTip("Manual HoloLens translation X in metres.");
-    gaze_ty_spin_->setToolTip("Manual HoloLens translation Y in metres.");
-    gaze_tz_spin_->setToolTip("Manual HoloLens translation Z in metres.");
-    transforms->addWidget(translation_label, 0, 0);
-    transforms->addWidget(gaze_tx_spin_, 0, 1);
-    transforms->addWidget(gaze_ty_spin_, 0, 2);
-    transforms->addWidget(gaze_tz_spin_, 0, 3);
-    auto* rotation_label = new QLabel("HoloLens R:");
-    rotation_label->setToolTip("Manual HoloLens rotation in degrees about X, Y, and Z.\nUsed when manual transform mode is selected.");
-    gaze_rx_spin_->setToolTip("Manual HoloLens rotation X in degrees.");
-    gaze_ry_spin_->setToolTip("Manual HoloLens rotation Y in degrees.");
-    gaze_rz_spin_->setToolTip("Manual HoloLens rotation Z in degrees.");
-    transforms->addWidget(rotation_label, 1, 0);
-    transforms->addWidget(gaze_rx_spin_, 1, 1);
-    transforms->addWidget(gaze_ry_spin_, 1, 2);
-    transforms->addWidget(gaze_rz_spin_, 1, 3);
+    addSpinRow(transforms, 0, "HoloLens T:",
+               "Manual HoloLens translation in metres (X, Y, Z).\nUsed when manual transform mode is selected.",
+               {gaze_tx_spin_, gaze_ty_spin_, gaze_tz_spin_});
+    addSpinRow(transforms, 1, "HoloLens R:",
+               "Manual HoloLens rotation in degrees about X, Y, and Z.\nUsed when manual transform mode is selected.",
+               {gaze_rx_spin_, gaze_ry_spin_, gaze_rz_spin_});
     alignment_layout->addLayout(transforms);
 
     auto* calibration_row = new QHBoxLayout();
@@ -196,21 +147,17 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     calibration_row->addStretch(1);
     alignment_layout->addLayout(calibration_row);
 
-    auto* profiles_group = new QGroupBox("Saved Calibration");
-    auto* profiles_layout = new QVBoxLayout(profiles_group);
+    auto [profiles_group, profiles_layout] = makeGroup<QVBoxLayout>("Saved Calibration");
     auto* profile_form = new QFormLayout();
     calibration_profile_combo_ = new QComboBox();
     calibration_profile_combo_->setToolTip("Saved calibration setup. Automatic results remain available only for this session until saved.");
-    calibration_profile_name_edit_ = new QLineEdit();
-    calibration_profile_name_edit_->setToolTip("Name shown for this saved calibration.");
-    calibration_setup_id_edit_ = new QLineEdit();
-    calibration_setup_id_edit_->setToolTip("Name used to identify this stair, room, and tracker arrangement.");
-    calibration_notes_edit_ = new QLineEdit();
-    calibration_notes_edit_->setToolTip("Setup notes needed to reproduce the physical alignment.");
-    gaze_frame_edit_ = new QLineEdit("hololens_stationary_shared_with_gaze");
-    target_frame_edit_ = new QLineEdit("hololens_stationary_shared_with_gaze");
-    gaze_frame_edit_->setToolTip("Coordinate name expected on the gaze stream.");
-    target_frame_edit_->setToolTip("Coordinate name expected on the stair-target stream.");
+    calibration_profile_name_edit_ = makeEdit("Name shown for this saved calibration.");
+    calibration_setup_id_edit_ = makeEdit("Name used to identify this stair, room, and tracker arrangement.");
+    calibration_notes_edit_ = makeEdit("Setup notes needed to reproduce the physical alignment.");
+    gaze_frame_edit_ = makeEdit("Coordinate name expected on the gaze stream.",
+                                "hololens_stationary_shared_with_gaze");
+    target_frame_edit_ = makeEdit("Coordinate name expected on the stair-target stream.",
+                                  "hololens_stationary_shared_with_gaze");
     profile_form->addRow("Saved calibration:", calibration_profile_combo_);
     profile_form->addRow("Name:", calibration_profile_name_edit_);
     profile_form->addRow("Setup name:", calibration_setup_id_edit_);
@@ -228,18 +175,10 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     stair_qz_spin_ = makeQuaternionSpin();
     stair_qw_spin_ = makeQuaternionSpin(1.0);
     const QString pose_tooltip = "Measured rigid pose of the stair target in Vicon coordinates. Translation is metres; rotation is a quaternion.";
-    for (QWidget* c : {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_, stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_}) {
-        c->setToolTip(pose_tooltip);
-    }
-    pose_grid->addWidget(new QLabel("Measured stair T (m):"), 0, 0);
-    pose_grid->addWidget(stair_tx_spin_, 0, 1);
-    pose_grid->addWidget(stair_ty_spin_, 0, 2);
-    pose_grid->addWidget(stair_tz_spin_, 0, 3);
-    pose_grid->addWidget(new QLabel("Measured stair Q:"), 1, 0);
-    pose_grid->addWidget(stair_qx_spin_, 1, 1);
-    pose_grid->addWidget(stair_qy_spin_, 1, 2);
-    pose_grid->addWidget(stair_qz_spin_, 1, 3);
-    pose_grid->addWidget(stair_qw_spin_, 1, 4);
+    addSpinRow(pose_grid, 0, "Measured stair T (m):", pose_tooltip,
+               {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_});
+    addSpinRow(pose_grid, 1, "Measured stair Q:", pose_tooltip,
+               {stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_});
     profiles_layout->addLayout(pose_grid);
 
     auto* profile_buttons = new QHBoxLayout();
@@ -327,8 +266,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     jump_seconds_spin_->setValue(5.0);
     jump_seconds_spin_->setSuffix(" s");
     jump_seconds_spin_->setToolTip("Time used by the backward and forward Jump controls.");
-    loop_playback_check_ = new QCheckBox("Loop");
-    loop_playback_check_->setToolTip("Restart explicitly at the end of the recording.");
+    loop_playback_check_ = makeCheck("Loop", "Restart explicitly at the end of the recording.");
     playback_position_label_ = new QLabel("0.000 / 0.000 s | frame 0/0");
     playback_row->addWidget(jump_start_button);
     playback_row->addWidget(step_back_button);
@@ -1077,7 +1015,10 @@ void PreviewPanel::reloadStairModel() {
         widget_->setStairMesh(mesh, stairTransform());
         stair_model_loaded_ = true;
         setStatus("Stair model loaded: " + QFileInfo(path).fileName());
-    } catch (...) {}
+    } catch (const std::exception& ex) {
+        stair_model_loaded_ = false;
+        setStatus("Stair model could not be read: " + QString::fromUtf8(ex.what()));
+    }
 }
 
 PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
@@ -1340,7 +1281,10 @@ void PreviewPanel::updateMeasuredStairPose() {
         const PreviewMesh mesh = loadObjMesh(QDir::toNativeSeparators(stair_model_edit_->text()).toStdString());
         widget_->setStairMesh(mesh, stairTransform());
         widget_->requestViewRefit();
-    } catch (...) {}
+    } catch (const std::exception& ex) {
+        stair_model_loaded_ = false;
+        setStatus("Stair model could not be read: " + QString::fromUtf8(ex.what()));
+    }
 }
 
 void PreviewPanel::updateCalibrationPersistentStatus(gui::SessionCalibrationState state, const QString& text, bool metadata_compatible) {

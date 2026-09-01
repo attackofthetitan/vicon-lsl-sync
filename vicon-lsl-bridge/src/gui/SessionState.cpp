@@ -13,7 +13,7 @@ QString enumText(Enum value,
     return QString::fromLatin1(index < Size ? labels[index] : fallback);
 }
 
-QString preflightLevelText(PreflightLevel level) {
+QString setupCheckLevelText(SetupCheckLevel level) {
     return enumText(level, std::array{"required", "warning", "information"},
                     "information");
 }
@@ -84,21 +84,21 @@ QString SessionEventLog::severityText(EventSeverity severity) {
     return enumText(severity, std::array{"info", "warning", "error"}, "info");
 }
 
-bool PreflightResult::hasRequiredFailures() const {
-    return std::any_of(items.begin(), items.end(), [](const PreflightItem& item) {
-        return item.level == PreflightLevel::Required && !item.passed;
+bool SetupCheckResult::hasRequiredFailures() const {
+    return std::any_of(items.begin(), items.end(), [](const SetupCheckItem& item) {
+        return item.level == SetupCheckLevel::Required && !item.passed;
     });
 }
 
-bool PreflightResult::hasWarnings() const {
-    return std::any_of(items.begin(), items.end(), [](const PreflightItem& item) {
-        return item.level == PreflightLevel::Warning && !item.passed;
+bool SetupCheckResult::hasWarnings() const {
+    return std::any_of(items.begin(), items.end(), [](const SetupCheckItem& item) {
+        return item.level == SetupCheckLevel::Warning && !item.passed;
     });
 }
 
-QString PreflightResult::summary() const {
+QString SetupCheckResult::summary() const {
     QStringList failures;
-    for (const PreflightItem& item : items) {
+    for (const SetupCheckItem& item : items) {
         if (!item.passed) {
             QString text = item.message;
             if (!item.corrective_action.isEmpty()) {
@@ -117,12 +117,12 @@ QString PreflightResult::summary() const {
     return result;
 }
 
-QJsonObject PreflightResult::toJson() const {
+QJsonObject SetupCheckResult::toJson() const {
     QJsonArray serialized_items;
-    for (const PreflightItem& item : items) {
+    for (const SetupCheckItem& item : items) {
         serialized_items.push_back(QJsonObject{
             {"component", SessionEventLog::componentText(item.component)},
-            {"level", preflightLevelText(item.level)},
+            {"level", setupCheckLevelText(item.level)},
             {"passed", item.passed},
             {"message", item.message},
             {"correctiveAction", item.corrective_action},
@@ -176,14 +176,6 @@ QString verificationStateText(RecordingVerificationState state) {
                     std::array{"Not checked", "Checking", "Checked",
                                "Checked with warnings", "Needs attention"},
                     "Not checked");
-}
-
-QString vicon_lsl::gui::workflowStateText(SessionWorkflowState state) {
-    return enumText(state,
-                    std::array{"Idle", "Preparing", "Setup blocked", "Ready",
-                               "Starting", "Recording", "Stopping", "Checking file",
-                               "Complete", "Needs attention", "Closing"},
-                    "Idle");
 }
 
 QString vicon_lsl::gui::calibrationStateText(SessionCalibrationState state) {

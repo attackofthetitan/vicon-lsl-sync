@@ -235,7 +235,7 @@ void RecordingVerifier::run() {
             }
         }
 
-        for (const StreamIdentity& expected : request_.preflight_inventory) {
+        for (const StreamIdentity& expected : request_.setup_check_inventory) {
             if (!expected.selected) continue;
             const bool found = std::any_of(loaded.streams.begin(), loaded.streams.end(),
                 [&expected](const XdfStreamData& stream) {
@@ -244,7 +244,7 @@ void RecordingVerifier::run() {
             if (!found) {
                 addFinding(report, expected.required ? EventSeverity::Error
                                                      : EventSeverity::Warning,
-                           "preflight-selection-missing", expected.name,
+                           "setup-check-selection-missing", expected.name,
                            "A stream selected during the setup check is absent from the recording: " +
                                expected.displayText(),
                            "Check which stream source reconnected and what the recorder selected.");
@@ -265,14 +265,19 @@ void RecordingVerifier::run() {
         emit lifecycleChanged(ComponentLifecycleState::Stopped, report.summary());
     } catch (const std::exception& ex) {
         report.completed_at = now_utc();
+        if (cancel_requested_.load()) {
+            report.state = RecordingVerificationState::NotRun;
+            emit verificationFinished(report);
+            emit lifecycleChanged(ComponentLifecycleState::Stopped,
+                                  "Recording file check canceled");
+            return;
+        }
         report.state = RecordingVerificationState::NeedsAttention;
         addFinding(report, EventSeverity::Error, "verification-failure", {},
                    QString::fromUtf8(ex.what()),
                    "Keep the recording unchanged and inspect the detailed error.");
         emit verificationFinished(report);
-        emit lifecycleChanged(cancel_requested_.load() ? ComponentLifecycleState::Stopped
-                                                       : ComponentLifecycleState::Failed,
-                              QString::fromUtf8(ex.what()));
+        emit lifecycleChanged(ComponentLifecycleState::Failed, QString::fromUtf8(ex.what()));
     } catch (...) {
         report.completed_at = now_utc();
         report.state = RecordingVerificationState::NeedsAttention;

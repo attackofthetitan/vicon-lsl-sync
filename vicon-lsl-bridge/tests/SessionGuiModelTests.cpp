@@ -334,7 +334,7 @@ void testCalibrationProfileStore() {
            "rejects unsupported future calibration profile versions");
 }
 
-void testRecorderAllowlistPolicy() {
+void testSelectedStreamRecorderPolicy() {
     using vicon_lsl::gui::RecorderProcessController;
     QVector<vicon_lsl::gui::StreamIdentity> streams;
     vicon_lsl::gui::StreamIdentity source_bound;
@@ -356,28 +356,28 @@ void testRecorderAllowlistPolicy() {
     const QString absolute =
         QDir::toNativeSeparators(QDir::temp().absoluteFilePath("run.xdf"));
     const QStringList arguments =
-        RecorderProcessController::allowlistArguments(
+        RecorderProcessController::selectedStreamArguments(
             absolute, streams, &error);
     expect(error.isEmpty() && arguments.size() == 3 &&
                QFileInfo(arguments.front()).isAbsolute(),
-           "allowlist arguments contain one absolute output and selected identities only");
+           "selected-stream arguments contain one absolute output and selected identities only");
     expect(arguments[1] == "source_id='gaze-source'",
            "source ID is the primary exact recorder predicate");
     expect(arguments[2] ==
                "name='Markers' and hostname='capture'",
            "name fallback is constrained by host identity");
     expect(!arguments.join(" ").contains("Unrelated"),
-           "unselected visible streams never enter the allowlist");
+           "unselected visible streams never enter the selection");
 
     source_bound.source_id = "has'both\"quotes";
     streams = {source_bound};
-    expect(RecorderProcessController::allowlistArguments(
+    expect(RecorderProcessController::selectedStreamArguments(
                absolute, streams, &error).isEmpty() &&
                !error.isEmpty(),
            "unsafe stream identity cannot form a shell-like query literal");
-    expect(RecorderProcessController::allowlistArguments(
+    expect(RecorderProcessController::selectedStreamArguments(
                "relative.xdf", {name_bound}, &error).isEmpty(),
-           "allowlist recorder rejects a relative destination");
+           "selected-stream recorder rejects a relative destination");
 }
 
 } // namespace labrecorder_client_tests

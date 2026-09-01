@@ -59,7 +59,7 @@ void testNormalizedPathPolicy();
 void testSessionConfiguration();
 void testSessionEventLog();
 void testCalibrationProfileStore();
-void testRecorderAllowlistPolicy();
+void testSelectedStreamRecorderPolicy();
 void testRecorderDuplicateAndShutdownProtocol();
 void testRecordingVerifierOutcomes();
 void testRecorderProcessControllerLifecycle();
