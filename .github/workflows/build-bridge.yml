@@ -138,17 +138,17 @@ jobs:
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -DBUILD_TESTING=ON
+        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (macOS)
         if: runner.os == 'macOS'
-        run: cmake -B build -DBUILD_TESTING=ON
+        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON
+        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
         shell: cmd
 
