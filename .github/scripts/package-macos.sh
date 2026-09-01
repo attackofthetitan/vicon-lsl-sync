@@ -33,6 +33,23 @@ find build-labrecorder -name 'liblsl*.dylib' -exec cp -P {} package/ \; || true
 # Verify shared library presence
 find package -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
+while IFS= read -r binary; do
+  [[ "$(lipo -archs "$binary" 2>/dev/null)" == *" "* ]] || continue
+  lipo -thin arm64 "$binary" -output "$binary.arm64"
+  mv "$binary.arm64" "$binary"
+done < <(find package -type f \( -perm -u+x -o -name '*.dylib' \))
+
+if [[ -d package/LabRecorder.app/Contents/Frameworks ]]; then
+  find package/LabRecorder.app/Contents/Frameworks -maxdepth 1 -name '*.framework' -exec codesign --force --sign - {} +
+fi
+if [[ -d package/LabRecorder.app/Contents/PlugIns ]]; then
+  find package/LabRecorder.app/Contents/PlugIns -type f -name '*.dylib' -exec codesign --force --sign - {} +
+fi
+if [[ -d package/LabRecorder.app ]]; then
+  codesign --force --sign - package/LabRecorder.app
+fi
+find package -maxdepth 1 -type f \( -perm -u+x -o -name '*.dylib' \) -exec codesign --force --sign - {} +
+
 # Create tar.gz archive and Apple Disk Image (.dmg)
 tar -czf "${artifact_name}.tar.gz" -C package .
 hdiutil create -volname "Vicon LSL Bridge" -srcfolder package -ov -format UDZO "${artifact_name}.dmg"
