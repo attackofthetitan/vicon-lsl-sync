@@ -7,8 +7,8 @@
 - Target date: 2026-09-01
 - Feature pull requests, in order: `#21`, `#22`, `#23`, `#19`
 - Documentation pull request: `#20`, after `#19`
-- Status: ready for ordered merge; hosted packaging passed and the hardware
-  disposition is recorded, while publication checks remain pending
+- Status: merged and ready for the `v1.11.0` tag; hosted packaging passed and
+  the hardware disposition is recorded, while publication checks remain pending
 - Scope: guided desktop sessions, explicit recorder and stream control,
   responsive recording preview, saved session and calibration data, and
   post-recording file checks
@@ -33,16 +33,16 @@
 
 ## Ordered merge
 
-- [ ] Merge `#21` into `main` after its hosted checks remain green.
-- [ ] Change `#22` to target `main`, confirm the diff and hosted checks, then
+- [x] Merge `#21` into `main` after its hosted checks remain green.
+- [x] Change `#22` to target `main`, confirm the diff and hosted checks, then
   merge it.
-- [ ] Change `#23` to target `main`, confirm the diff and hosted checks, then
+- [x] Change `#23` to target `main`, confirm the diff and hosted checks, then
   merge it.
-- [ ] Change `#19` to target `main`, confirm the complete Windows, Linux, and
+- [x] Change `#19` to target `main`, confirm the complete Windows, Linux, and
   HoloLens matrix, then merge it.
-- [ ] Change `#20` to target `main`, confirm that it contains only documentation,
+- [x] Change `#20` to target `main`, confirm that it contains only documentation,
   then merge it.
-- [ ] Confirm `main` contains every reviewed commit and has no uncommitted
+- [x] Confirm `main` contains every reviewed commit and has no uncommitted
   release-only change.
 
 Do not merge the stack out of order. Each later branch assumes the earlier
@@ -111,7 +111,7 @@ use `v1.10.5` as the rollback release.
 
 ## Publication
 
-- [ ] The release commit is merged into `main` before tagging.
+- [x] The release commit is merged into `main` before tagging.
 - [ ] An annotated `v1.11.0` tag points to that exact commit in `main`.
 - [ ] The hosted release run publishes the Windows ZIP, Windows portable GUI,
   Linux archive, and `SHA256SUMS.txt`.
