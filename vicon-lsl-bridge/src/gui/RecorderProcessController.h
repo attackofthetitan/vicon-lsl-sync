@@ -37,8 +37,9 @@ public:
     void endOwnedProcess();
     void detach();
 
+    static QString bundledGraphicalRecorderExecutable(const QString& application_directory);
     static QString bundledSelectedStreamExecutable(const QString& graphical_executable,
-                                              const QString& application_directory);
+                                                    const QString& application_directory);
     static QStringList selectedStreamArguments(const QString& absolute_output_path,
                                           const QVector<StreamIdentity>& selected_streams,
                                           QString* error = nullptr);

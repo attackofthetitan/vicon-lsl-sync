@@ -719,8 +719,8 @@ QString BridgeWindow::resolveLabRecorderExecutable() const {
     const QString configured_path = ui_->labrecorder_executable_edit->text().trimmed();
     const QFileInfo configured(configured_path);
     if (!configured_path.isEmpty() && configured.exists() && configured.isFile()) return QDir::toNativeSeparators(configured.absoluteFilePath());
-    const QFileInfo bundled(QDir(QCoreApplication::applicationDirPath()).filePath("labrecorder/LabRecorder.exe"));
-    return bundled.exists() && bundled.isFile() ? QDir::toNativeSeparators(bundled.absoluteFilePath()) : QString{};
+    return vicon_lsl::gui::RecorderProcessController::bundledGraphicalRecorderExecutable(
+        QCoreApplication::applicationDirPath());
 }
 
 QString BridgeWindow::resolveSelectedStreamExecutable() const {

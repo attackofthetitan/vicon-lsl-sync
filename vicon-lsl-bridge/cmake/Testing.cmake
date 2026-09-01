@@ -58,6 +58,11 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     else()
         list(APPEND VICON_LSL_QT_TEST_ENV "QT_QPA_PLATFORM=set:offscreen")
     endif()
+    if(APPLE)
+        list(APPEND VICON_LSL_QT_TEST_ENV
+            "DYLD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>"
+            "DYLD_FRAMEWORK_PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
+    endif()
 
     add_executable(vicon-lsl-recorder-process-fixture
         tests/RecorderProcessFixture.cpp)
@@ -122,6 +127,11 @@ endif()
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     set(VICON_LSL_RUNTIME_TEST_ENV
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
+    if(APPLE)
+        list(APPEND VICON_LSL_RUNTIME_TEST_ENV
+            "DYLD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>"
+            "DYLD_FRAMEWORK_PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
+    endif()
 
     add_executable(vicon-lsl-bridge-lifecycle-tests
         tests/test_bridge_lifecycle.cpp

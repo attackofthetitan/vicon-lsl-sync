@@ -3,6 +3,10 @@ name: Build Vicon LSL Bridge
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -33,8 +37,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        fetch_catch2: [ON, OFF]
+        include:
+          - os: ubuntu-latest
+            fetch_catch2: ON
+          - os: ubuntu-latest
+            fetch_catch2: OFF
+          - os: windows-latest
+            fetch_catch2: ON
+          - os: macos-latest
+            fetch_catch2: ON
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -43,13 +54,13 @@ jobs:
           persist-credentials: false
 
       - name: Verify generated stream contracts
-        run: python tools/generate_stream_contracts.py --check
+        run: ${{ runner.os == 'macOS' && 'python3' || 'python' }} tools/generate_stream_contracts.py --check
 
       - name: Configure dependency-light tests
         run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
 
       - name: Build dependency-light tests
-        run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests
+        run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests --parallel
 
       - name: Run dependency-light tests
         run: ctest --test-dir build-logic --build-config Release --output-on-failure
@@ -64,12 +75,14 @@ jobs:
           - os: windows-latest
             triplet: x64-windows-static-md
             artifact: vicon-lsl-bridge-windows-x64
+          - os: macos-latest
+            artifact: vicon-lsl-bridge-macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
       - name: Test packaging safety helpers (Windows)
@@ -93,7 +106,11 @@ jobs:
 
       - name: Install Boost (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libboost-all-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libboost-thread-dev libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-system-dev libboost-atomic-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
+
+      - name: Install Boost (macOS)
+        if: runner.os == 'macOS'
+        run: brew install boost
 
       - name: Bootstrap pinned vcpkg (Windows)
         if: runner.os == 'Windows'
@@ -121,17 +138,22 @@ jobs:
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -DBUILD_TESTING=ON
+        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        working-directory: vicon-lsl-bridge
+
+      - name: Configure bridge (macOS)
+        if: runner.os == 'macOS'
+        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON
+        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
         shell: cmd
 
       - name: Build bridge
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
         working-directory: vicon-lsl-bridge
 
       - name: Test bridge
@@ -169,6 +191,14 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/package-linux.sh "${{ matrix.artifact }}"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: bash .github/scripts/package-macos.sh "${{ matrix.artifact }}"
+
+      - name: Test package (macOS)
+        if: runner.os == 'macOS'
+        run: bash .github/scripts/test-package-macos.sh "${{ matrix.artifact }}"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -269,6 +299,12 @@ jobs:
         with:
           name: vicon-lsl-bridge-windows-x64
           path: artifacts/vicon-lsl-bridge-windows-x64
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: vicon-lsl-bridge-macos-arm64
+          path: artifacts/vicon-lsl-bridge-macos-arm64
 
       - name: Assemble versioned release assets
         shell: bash

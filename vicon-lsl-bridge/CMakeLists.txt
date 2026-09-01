@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.11.0 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.12.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -110,6 +110,12 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         set(VICON_LSL_LIB_TARGET lsl)
     endif()
 
+    if(APPLE)
+        set(Boost_USE_STATIC_LIBS ON)
+        set(CMAKE_MACOSX_RPATH ON)
+        set(CMAKE_INSTALL_RPATH "@executable_path;@loader_path;@executable_path/../Frameworks;@loader_path/Frameworks")
+    endif()
+
     add_subdirectory(
         "${VICON_DATASTREAM_SDK_DIR}"
         "${CMAKE_CURRENT_BINARY_DIR}/external/vicon-datastream-sdk"
@@ -143,6 +149,19 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     if(VICON_LSL_BRIDGE_BUILD_GUI)
         find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
         if(Qt6_FOUND)
+            # Some Qt 6 macOS packages still expose the removed AGL framework
+            # through WrapOpenGL, which breaks linking on current macOS SDKs.
+            if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
+                get_target_property(_wrap_gl_libs
+                    WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
+                if(_wrap_gl_libs)
+                    list(FILTER _wrap_gl_libs EXCLUDE REGEX ".*AGL.*")
+                    set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES
+                        INTERFACE_LINK_LIBRARIES "${_wrap_gl_libs}")
+                endif()
+                unset(_wrap_gl_libs)
+            endif()
+
             add_library(vicon-lsl-bridge-gui-components STATIC
                 src/gui/BridgeWindow.cpp
                 src/gui/BridgeWindowUi.cpp
@@ -170,7 +189,17 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
             )
             target_include_directories(vicon-lsl-bridge-gui-components PUBLIC src)
 
-            add_executable(vicon-lsl-bridge-gui src/gui/main_gui.cpp)
+            if(APPLE)
+                add_executable(vicon-lsl-bridge-gui MACOSX_BUNDLE src/gui/main_gui.cpp)
+                set_target_properties(vicon-lsl-bridge-gui PROPERTIES
+                    MACOSX_BUNDLE_BUNDLE_NAME "Vicon LSL Bridge"
+                    MACOSX_BUNDLE_GUI_IDENTIFIER "com.vicon.lslbridge"
+                    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+                    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+                )
+            else()
+                add_executable(vicon-lsl-bridge-gui src/gui/main_gui.cpp)
+            endif()
             target_link_libraries(vicon-lsl-bridge-gui PRIVATE
                 vicon-lsl-bridge-gui-components)
             target_compile_definitions(vicon-lsl-bridge-gui PRIVATE
