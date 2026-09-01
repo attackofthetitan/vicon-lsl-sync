@@ -17,7 +17,7 @@ cp build-labrecorder/LabRecorderCLI package/
 if [[ -d vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app ]]; then
   cp -R vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app package/
   if [[ -n "$macdeployqt" && -x "$macdeployqt" ]]; then
-    "$macdeployqt" package/vicon-lsl-bridge-gui.app
+    "$macdeployqt" package/vicon-lsl-bridge-gui.app -libpath=vicon-lsl-bridge/build/_deps/liblsl-build -libpath=package/Frameworks 2>/dev/null || "$macdeployqt" package/vicon-lsl-bridge-gui.app
   fi
   cat << 'EOF' > package/vicon-lsl-bridge-gui
 #!/usr/bin/env bash
@@ -37,7 +37,7 @@ test -f package/vicon-lsl-bridge-gui
 if [[ -d build-labrecorder/LabRecorder.app ]]; then
   cp -R build-labrecorder/LabRecorder.app package/
   if [[ -n "$macdeployqt" && -x "$macdeployqt" ]]; then
-    "$macdeployqt" package/LabRecorder.app
+    "$macdeployqt" package/LabRecorder.app -libpath=build-labrecorder/_deps/liblsl-build -libpath=package/Frameworks 2>/dev/null || "$macdeployqt" package/LabRecorder.app
   fi
   cat << 'EOF' > package/LabRecorder
 #!/usr/bin/env bash

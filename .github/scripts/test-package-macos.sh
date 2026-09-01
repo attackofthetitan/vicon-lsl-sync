@@ -61,7 +61,7 @@ if ! (cd "$temp_dir" && ./vicon-lsl-bridge --help >/dev/null); then
   otool -l "$temp_dir/vicon-lsl-bridge" | grep -A2 LC_RPATH >&2
   exit 1
 fi
-if ! (cd "$temp_dir" && ./LabRecorderCLI -h 2>&1 | grep -q "Usage:"); then
+if ! (cd "$temp_dir" && (./LabRecorderCLI -h 2>&1 || true) | grep -q "Usage:"); then
   echo "LabRecorderCLI execution failed!" >&2
   (cd "$temp_dir" && ./LabRecorderCLI -h || true) >&2
   otool -L "$temp_dir/LabRecorderCLI" >&2
