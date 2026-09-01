@@ -91,4 +91,44 @@ void testRecorderProcessControllerLifecycle() {
            "detached process exit is no longer treated as an owned lifecycle event");
 }
 
+void testBundledExecutableResolution() {
+    using namespace vicon_lsl::gui;
+    QTemporaryDir temp_dir;
+    expect(temp_dir.isValid(), "temporary directory created for resolution tests");
+    const QString root = temp_dir.path();
+
+    // 1. Direct LabRecorderCLI in app directory
+    QDir(root).mkdir("app1");
+    const QString app1 = QDir(root).filePath("app1");
+    QFile cli1(QDir(app1).filePath("LabRecorderCLI"));
+    expect(cli1.open(QIODevice::WriteOnly), "create dummy flat LabRecorderCLI");
+    cli1.close();
+    expect(!RecorderProcessController::bundledSelectedStreamExecutable("", app1).isEmpty(),
+           "resolves flat LabRecorderCLI binary");
+
+    // 2. Subdirectory labrecorder/LabRecorderCLI
+    QDir(root).mkdir("app2");
+    const QString app2 = QDir(root).filePath("app2");
+    QDir(app2).mkdir("labrecorder");
+    QFile cli2(QDir(app2).filePath("labrecorder/LabRecorderCLI"));
+    expect(cli2.open(QIODevice::WriteOnly), "create dummy nested LabRecorderCLI");
+    cli2.close();
+    expect(!RecorderProcessController::bundledSelectedStreamExecutable("", app2).isEmpty(),
+           "resolves labrecorder/LabRecorderCLI binary in subfolder");
+
+    // 3. macOS bundle layout: LabRecorder.app/Contents/MacOS/LabRecorder with sibling LabRecorderCLI
+    QDir(root).mkdir("app3");
+    const QString app3 = QDir(root).filePath("app3");
+    expect(QDir(app3).mkpath("LabRecorder.app/Contents/MacOS"), "create macOS bundle directory");
+    QFile macos_gui(QDir(app3).filePath("LabRecorder.app/Contents/MacOS/LabRecorder"));
+    expect(macos_gui.open(QIODevice::WriteOnly), "create dummy macOS LabRecorder binary");
+    macos_gui.close();
+    QFile macos_cli(QDir(app3).filePath("LabRecorderCLI"));
+    expect(macos_cli.open(QIODevice::WriteOnly), "create dummy sibling LabRecorderCLI");
+    macos_cli.close();
+    const QString resolved_cli = RecorderProcessController::bundledSelectedStreamExecutable(
+        macos_gui.fileName(), app3);
+    expect(!resolved_cli.isEmpty(), "resolves LabRecorderCLI alongside macOS LabRecorder.app bundle");
+}
+
 } // namespace labrecorder_client_tests

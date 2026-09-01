@@ -719,8 +719,20 @@ QString BridgeWindow::resolveLabRecorderExecutable() const {
     const QString configured_path = ui_->labrecorder_executable_edit->text().trimmed();
     const QFileInfo configured(configured_path);
     if (!configured_path.isEmpty() && configured.exists() && configured.isFile()) return QDir::toNativeSeparators(configured.absoluteFilePath());
-    const QFileInfo bundled(QDir(QCoreApplication::applicationDirPath()).filePath("labrecorder/LabRecorder.exe"));
-    return bundled.exists() && bundled.isFile() ? QDir::toNativeSeparators(bundled.absoluteFilePath()) : QString{};
+    const QString app_dir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
+        QDir(app_dir).filePath("labrecorder/LabRecorder"),
+        QDir(app_dir).filePath("labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"),
+        QDir(app_dir).filePath("LabRecorder.exe"),
+        QDir(app_dir).filePath("LabRecorder"),
+        QDir(app_dir).filePath("LabRecorder.app/Contents/MacOS/LabRecorder")
+    };
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.exists() && info.isFile()) return QDir::toNativeSeparators(info.absoluteFilePath());
+    }
+    return {};
 }
 
 QString BridgeWindow::resolveSelectedStreamExecutable() const {

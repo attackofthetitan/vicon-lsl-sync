@@ -63,5 +63,6 @@ void testSelectedStreamRecorderPolicy();
 void testRecorderDuplicateAndShutdownProtocol();
 void testRecordingVerifierOutcomes();
 void testRecorderProcessControllerLifecycle();
+void testBundledExecutableResolution();
 
 } // namespace labrecorder_client_tests

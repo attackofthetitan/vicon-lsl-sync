@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         fetch_catch2: [ON, OFF]
     runs-on: ${{ matrix.os }}
 
@@ -64,6 +64,8 @@ jobs:
           - os: windows-latest
             triplet: x64-windows-static-md
             artifact: vicon-lsl-bridge-windows-x64
+          - os: macos-latest
+            artifact: vicon-lsl-bridge-macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -95,6 +97,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libboost-all-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
 
+      - name: Install Boost (macOS)
+        if: runner.os == 'macOS'
+        run: brew install boost
+
       - name: Bootstrap pinned vcpkg (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -121,6 +127,11 @@ jobs:
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
+        run: cmake -B build -DBUILD_TESTING=ON
+        working-directory: vicon-lsl-bridge
+
+      - name: Configure bridge (macOS)
+        if: runner.os == 'macOS'
         run: cmake -B build -DBUILD_TESTING=ON
         working-directory: vicon-lsl-bridge
 
@@ -169,6 +180,14 @@ jobs:
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/package-linux.sh "${{ matrix.artifact }}"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: bash .github/scripts/package-macos.sh "${{ matrix.artifact }}"
+
+      - name: Test package (macOS)
+        if: runner.os == 'macOS'
+        run: bash .github/scripts/test-package-macos.sh "${{ matrix.artifact }}"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -269,6 +288,12 @@ jobs:
         with:
           name: vicon-lsl-bridge-windows-x64
           path: artifacts/vicon-lsl-bridge-windows-x64
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: vicon-lsl-bridge-macos-arm64
+          path: artifacts/vicon-lsl-bridge-macos-arm64
 
       - name: Assemble versioned release assets
         shell: bash

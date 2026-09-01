@@ -27,6 +27,7 @@ int main(int argc, char** argv) {
     run("duplicate and shutdown protocol", testRecorderDuplicateAndShutdownProtocol);
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);
+    run("bundled executable resolution", testBundledExecutableResolution);
 
     if (g_failures > 0) {
         std::cerr << g_failures << " test failure(s)" << std::endl;
