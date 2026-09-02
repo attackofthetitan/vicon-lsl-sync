@@ -95,7 +95,6 @@ private slots:
     void retireCalibrationProfile();
     void importCalibrationProfile();
     void exportCalibrationProfile();
-    void updateMeasuredStairPose();
 
 private:
     PreviewTransformProfile gazeTransform() const;

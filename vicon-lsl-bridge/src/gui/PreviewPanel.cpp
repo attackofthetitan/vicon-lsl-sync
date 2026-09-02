@@ -62,6 +62,7 @@ constexpr int kMaximumLivePreviewDelayMs = 100;
 constexpr int kMaximumRenderHz = 60;
 
 QDoubleSpinBox* makeDistanceSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 3, 0.01, val); }
+QDoubleSpinBox* makePoseSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 6, 0.001, val); }
 QDoubleSpinBox* makeQuaternionSpin(double val = 0.0) { return makeDoubleSpin(-1.0, 1.0, 6, 0.01, val); }
 
 } // namespace
@@ -157,14 +158,14 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     profile_form->addRow("Target frame:", target_frame_edit_);
     profiles_layout->addLayout(profile_form);
 
-    stair_tx_spin_ = makeDistanceSpin();
-    stair_ty_spin_ = makeDistanceSpin();
-    stair_tz_spin_ = makeDistanceSpin();
+    stair_tx_spin_ = makePoseSpin();
+    stair_ty_spin_ = makePoseSpin();
+    stair_tz_spin_ = makePoseSpin();
     stair_qx_spin_ = makeQuaternionSpin();
     stair_qy_spin_ = makeQuaternionSpin();
     stair_qz_spin_ = makeQuaternionSpin();
     stair_qw_spin_ = makeQuaternionSpin(1.0);
-    const QString pose_tooltip = "Measured rigid pose of the stair target in Vicon coordinates. Translation is metres; rotation is a quaternion.";
+    const QString pose_tooltip = "Measured rigid pose of the stair target in Vicon coordinates. Translation is metres; rotation is a quaternion.\nFixed for this setup and shown for reference; it is read from the saved calibration, not from this display.";
     // A caption above a wrapping run of spin boxes. Keeping the caption beside
     // them made the quaternion row about 490 px wide with no way to shrink,
     // which was most of the preview panel's sideways overflow.
@@ -181,6 +182,11 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     };
     addPoseRow("Measured stair T (m):", {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_});
     addPoseRow("Measured stair Q:", {stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_});
+    for (QDoubleSpinBox* spin : {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_,
+                                 stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_}) {
+        spin->setReadOnly(true);
+        spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    }
 
     auto* profile_buttons = new FlowLayout();
     auto* apply_profile_button = makeButton("Apply", "Apply the selected saved calibration to the live preview and session details.");
@@ -394,9 +400,6 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
         refreshCalibrationProfileUi();
     });
 
-    for (QDoubleSpinBox* spin : {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_, stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_}) {
-        connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &PreviewPanel::updateMeasuredStairPose);
-    }
     connect(trail_points_spin_, QOverload<int>::of(&QSpinBox::valueChanged), widget_, &PreviewWidget::setTrailPointLimit);
 
     loadSettings();
@@ -1197,11 +1200,6 @@ const gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile()
 CalibrationProfile PreviewPanel::activeSolverProfile() const {
     CalibrationProfile res = defaultStairCalibrationProfile();
     if (const gui::ManagedCalibrationProfile* p = selectedCalibrationProfile()) res = p->solverProfile();
-    if (stair_tx_spin_) {
-        res.vicon_from_target.translation = {stair_tx_spin_->value(), stair_ty_spin_->value(), stair_tz_spin_->value()};
-        res.vicon_from_target.rotation = normalizeQuaternion({
-            stair_qx_spin_->value(), stair_qy_spin_->value(), stair_qz_spin_->value(), stair_qw_spin_->value()});
-    }
     return res;
 }
 
@@ -1355,18 +1353,6 @@ void PreviewPanel::exportCalibrationProfile() {
         return;
     }
     setStatus("Exported calibration to " + QDir::toNativeSeparators(path));
-}
-
-void PreviewPanel::updateMeasuredStairPose() {
-    if (!stair_model_loaded_) return;
-    try {
-        const PreviewMesh mesh = loadObjMesh(QDir::toNativeSeparators(stair_model_edit_->text()).toStdString());
-        widget_->setStairMesh(mesh, stairTransform());
-        widget_->requestViewRefit();
-    } catch (const std::exception& ex) {
-        stair_model_loaded_ = false;
-        setStatus("Stair model could not be read: " + QString::fromUtf8(ex.what()));
-    }
 }
 
 void PreviewPanel::updateCalibrationPersistentStatus(gui::SessionCalibrationState state, const QString& text, bool metadata_compatible) {
