@@ -4,7 +4,7 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
-## [1.13.0] - 2026-09-02
+## [1.12.1] - 2026-09-02
 
 ### Fixed
 
