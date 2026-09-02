@@ -11,12 +11,12 @@
 
 namespace vicon_lsl::gui {
 
-inline QString coordinateFrameOf(lsl::stream_info info) {
+inline QString coordinateFrameOf(lsl::stream_info& info) {
     const char* frame = info.desc().child("acquisition").child_value("coordinate_frame");
     return frame ? QString::fromUtf8(frame) : QString();
 }
 
-inline StreamIdentity identityFromStreamInfo(lsl::stream_info info) {
+inline StreamIdentity identityFromStreamInfo(lsl::stream_info& info) {
     const double rate = info.nominal_srate();
     StreamIdentity identity;
     identity.name = QString::fromStdString(info.name());

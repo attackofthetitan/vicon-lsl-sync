@@ -121,6 +121,10 @@ public:
     void acknowledgeLastError();
     QString toText(EventSeverity minimum = EventSeverity::Information,
                    const QVector<SessionComponent>& components = {}) const;
+    static QString formatEvent(const SessionEvent& event);
+    static bool matchesFilter(const SessionEvent& event,
+                              EventSeverity minimum,
+                              const QVector<SessionComponent>& components);
     QJsonArray toJson() const;
 
     static QString componentText(SessionComponent component);

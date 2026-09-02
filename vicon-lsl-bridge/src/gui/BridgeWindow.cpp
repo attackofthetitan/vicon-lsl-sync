@@ -58,6 +58,9 @@ constexpr qint64 kRecorderRetryTimeoutMs = 15000;
 constexpr qint64 kRecorderStopDeadlineMs = 15000;
 constexpr int kStatusStaleMs = 3000;
 constexpr int kVerificationFileTimeoutMs = 15000;
+// Must match the SessionEventLog cap so an append that evicts the oldest entry
+// falls back to a full redraw.
+constexpr int kMaximumRetainedEvents = 1000;
 
 struct BindingControl {
     QString role;
@@ -120,7 +123,7 @@ bool recorderCanStart(const LabRecorderClient& recorder) {
            !recorder.shutdownRequested();
 }
 
-QString setupCheckLevelText(SetupCheckLevel level) {
+QString setupCheckLevelDisplayText(SetupCheckLevel level) {
     switch (level) {
         case SetupCheckLevel::Required: return "Required";
         case SetupCheckLevel::Warning: return "Warning";
@@ -233,7 +236,7 @@ BridgeWindow::BridgeWindow(QWidget* parent, bool enable_preview, std::shared_ptr
 }
 
 BridgeWindow::~BridgeWindow() {
-    if (!closing()) saveSettings();
+    if (!closing() && !close_finalizing_) saveSettings();
 }
 
 template <typename Handler>
@@ -637,26 +640,54 @@ void BridgeWindow::onFindNextRun() {
     } else appendEvent(SessionComponent::Path, EventSeverity::Warning, "No unused run was found within the supported range");
 }
 
+void BridgeWindow::eventLogFilter(EventSeverity& minimum,
+                                  QVector<SessionComponent>& components) const {
+    minimum = EventSeverity::Information;
+    if (ui_->event_severity_filter->currentIndex() == 1) minimum = EventSeverity::Warning;
+    else if (ui_->event_severity_filter->currentIndex() >= 2) minimum = EventSeverity::Error;
+
+    components.clear();
+    const int idx = ui_->event_component_filter->currentIndex();
+    if (idx > 0) components.push_back(static_cast<SessionComponent>(idx - 1));
+}
+
 void BridgeWindow::appendEvent(SessionComponent comp, EventSeverity sev, const QString& msg) {
     if (msg.trimmed().isEmpty()) return;
     event_log_.append(comp, sev, msg);
-    updateEventLog();
-    if (sev == EventSeverity::Error) ui_->last_error_label->setText(event_log_.lastError());
+    if (!ui_ || !ui_->event_log) return;
+
+    // Append the one new line rather than re-rendering every retained entry;
+    // recorder output can arrive line by line for the length of a session.
+    EventSeverity min_sev = EventSeverity::Information;
+    QVector<SessionComponent> comps;
+    eventLogFilter(min_sev, comps);
+    const QVector<SessionEvent>& entries = event_log_.entries();
+    const bool dropped_oldest = entries.size() == kMaximumRetainedEvents;
+    if (dropped_oldest) {
+        updateEventLog();
+        return;
+    }
+    if (!entries.isEmpty() &&
+        SessionEventLog::matchesFilter(entries.back(), min_sev, comps)) {
+        QScrollBar* scroll = ui_->event_log->verticalScrollBar();
+        const bool at_end = scroll->value() >= scroll->maximum();
+        ui_->event_log->appendPlainText(SessionEventLog::formatEvent(entries.back()));
+        if (at_end) scroll->setValue(scroll->maximum());
+    }
+    const QString err = event_log_.lastError();
+    ui_->last_error_label->setText(err.isEmpty() ? "-" : err);
 }
 
 void BridgeWindow::updateEventLog() {
     if (!ui_ || !ui_->event_log) return;
     EventSeverity min_sev = EventSeverity::Information;
-    if (ui_->event_severity_filter->currentIndex() == 1) min_sev = EventSeverity::Warning;
-    else if (ui_->event_severity_filter->currentIndex() >= 2) min_sev = EventSeverity::Error;
-
     QVector<SessionComponent> comps;
-    const int idx = ui_->event_component_filter->currentIndex();
-    if (idx > 0) comps.push_back(static_cast<SessionComponent>(idx - 1));
+    eventLogFilter(min_sev, comps);
 
-    const bool at_end = ui_->event_log->verticalScrollBar()->value() >= ui_->event_log->verticalScrollBar()->maximum();
+    QScrollBar* scroll = ui_->event_log->verticalScrollBar();
+    const bool at_end = scroll->value() >= scroll->maximum();
     ui_->event_log->setPlainText(event_log_.toText(min_sev, comps));
-    if (at_end) ui_->event_log->verticalScrollBar()->setValue(ui_->event_log->verticalScrollBar()->maximum());
+    if (at_end) scroll->setValue(scroll->maximum());
     const QString err = event_log_.lastError();
     ui_->last_error_label->setText(err.isEmpty() ? "-" : err);
 }
@@ -1243,7 +1274,7 @@ void BridgeWindow::populateSetupCheck(const SetupCheckResult& result) {
     for (const SetupCheckItem& item : result.items) {
         QString details = item.message;
         if (!item.passed && !item.corrective_action.isEmpty()) details += " — " + item.corrective_action;
-        auto* row = new QTreeWidgetItem({setupCheckLevelText(item.level), SessionEventLog::componentText(item.component), resultText(item), details});
+        auto* row = new QTreeWidgetItem({setupCheckLevelDisplayText(item.level), SessionEventLog::componentText(item.component), resultText(item), details});
         row->setToolTip(3, details);
         ui_->setup_check_tree->addTopLevelItem(row);
     }
@@ -1595,7 +1626,7 @@ void BridgeWindow::beginClose() {
     ui_->discover_streams_button->setEnabled(false);
     ui_->setBridgeInputsEnabled(false);
 
-    close_started_ms_ = monotonic_clock_.msecsSinceReference();
+    close_started_ms_ = monotonic_clock_.elapsed();
     owned_process_end_requested_ = false;
     recorder_connection_loss_reported_ = false;
 
@@ -1616,7 +1647,7 @@ void BridgeWindow::beginClose() {
 
 void BridgeWindow::updateShutdownStatus() {
     if (!closing()) return;
-    const qint64 now_ms = monotonic_clock_.msecsSinceReference();
+    const qint64 now_ms = monotonic_clock_.elapsed();
     const bool bridge_done = (worker_ == nullptr);
     const bool preview_done = (!ui_->preview_panel || ui_->preview_panel->shutdownReady());
     const bool file_done = (discovery_worker_ == nullptr && (!ui_->preview_panel || !ui_->preview_panel->fileLoadActive()));

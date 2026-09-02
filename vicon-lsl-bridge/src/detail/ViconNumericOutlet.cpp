@@ -4,6 +4,7 @@
 #include <exception>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace vicon_lsl::detail {
@@ -45,7 +46,8 @@ void ViconNumericOutlet::initialize(const StreamSchema& schema,
     configured_ = true;
     item_count_ = item_count;
     if (item_count_ == 0) {
-        std::cout << profile_.empty_layout_message << std::endl;
+        std::cout << "No " << profile_.lower_name << "s discovered; "
+                  << profile_.lower_name << " stream not created" << std::endl;
         return;
     }
 
@@ -69,14 +71,15 @@ void ViconNumericOutlet::initialize(const StreamSchema& schema,
     }
     appendTimingMetadata(*info_, stream_rate);
 
-    sample_buffer_.resize(static_cast<std::size_t>(channel_count));
+    channel_count_ = static_cast<std::size_t>(channel_count);
     outlet_ = outlet_factory_(*info_);
     if (!outlet_) {
-        throw std::runtime_error(profile_.null_factory_message);
+        throw std::runtime_error(std::string(profile_.display_name) +
+                                 " outlet factory returned no outlet");
     }
 
     std::cout << profile_.display_name << " stream ready, " << item_count_ << " "
-              << profile_.item_name_plural << ", " << channel_count << " channels"
+              << profile_.lower_name << "s, " << channel_count << " channels"
               << std::endl;
 }
 
@@ -84,7 +87,7 @@ void ViconNumericOutlet::destroy() {
     const bool was_initialized = outlet_ != nullptr || info_ != nullptr;
     outlet_.reset();
     info_.reset();
-    sample_buffer_.clear();
+    channel_count_ = 0;
     item_count_ = 0;
     configured_ = false;
     if (was_initialized) {
@@ -96,20 +99,20 @@ bool ViconNumericOutlet::isInitialized() const {
     return configured_ && (item_count_ == 0 || outlet_ != nullptr);
 }
 
-StreamPushResult ViconNumericOutlet::pushPreparedSample(std::vector<double> sample,
+StreamPushResult ViconNumericOutlet::pushPreparedSample(const std::vector<double>& sample,
                                                         double timestamp) {
-    if (sample.size() != sample_buffer_.size()) {
+    if (sample.size() != channel_count_) {
         std::cerr << profile_.display_name << " sample channel mismatch: expected "
-                  << sample_buffer_.size() << ", got " << sample.size() << std::endl;
+                  << channel_count_ << ", got " << sample.size() << std::endl;
         return StreamPushResult::Failed;
     }
-    sample_buffer_ = std::move(sample);
 
     try {
-        outlet_->pushSample(sample_buffer_, timestamp);
+        outlet_->pushSample(sample, timestamp);
         return StreamPushResult::Pushed;
     } catch (const std::exception& ex) {
-        std::cerr << profile_.push_failure_prefix << ex.what() << std::endl;
+        std::cerr << "Failed to push " << profile_.lower_name << " LSL sample: "
+                  << ex.what() << std::endl;
         destroy();
         return StreamPushResult::Failed;
     }

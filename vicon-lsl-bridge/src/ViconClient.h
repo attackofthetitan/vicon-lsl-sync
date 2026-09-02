@@ -1,40 +1,42 @@
 #pragma once
 
-// Preserve the historical transitive mapper surface for source consumers of
-// this public header. Runtime implementation files use the focused headers.
-#include "ViconFrameMapper.h"
+#include "ViconLSLBridgeInternal.h"
 
 #include <DataStreamClient.h>
 
 #include <string>
 
-class ViconClient {
+// The one real implementation of the bridge's client interface. It implements
+// that interface directly so no forwarding shim has to restate every method.
+class ViconClient final : public vicon_lsl::bridge_internal::ViconClient {
 public:
     explicit ViconClient(const std::string& server_address);
-    ~ViconClient();
+    ~ViconClient() override;
 
-    bool connect();
-    void disconnect();
-    bool isConnected() const;
-    bool getFrame();
-    unsigned int frameNumber() const;
-    double frameTimestamp() const;
-    double frameRate() const;
+    bool connect() override;
+    void disconnect() override;
+    bool isConnected() const override;
+    bool getFrame() override;
+    unsigned int frameNumber() const override;
+    double frameTimestamp() const override;
+    double frameRate() const override;
 
-    vicon_lsl::CountRead readSubjectCount() const;
-    vicon_lsl::NameRead readSubjectName(unsigned int index) const;
+    vicon_lsl::CountRead readSubjectCount() const override;
+    vicon_lsl::NameRead readSubjectName(unsigned int index) const override;
 
-    vicon_lsl::CountRead readMarkerCount(const std::string& subject) const;
-    vicon_lsl::NameRead readMarkerName(const std::string& subject, unsigned int index) const;
+    vicon_lsl::CountRead readMarkerCount(const std::string& subject) const override;
+    vicon_lsl::NameRead readMarkerName(const std::string& subject,
+                                       unsigned int index) const override;
     vicon_lsl::MarkerTranslationRead readMarkerGlobalTranslation(
-        const std::string& subject, const std::string& marker);
+        const std::string& subject, const std::string& marker) override;
 
-    vicon_lsl::CountRead readSegmentCount(const std::string& subject) const;
-    vicon_lsl::NameRead readSegmentName(const std::string& subject, unsigned int index) const;
+    vicon_lsl::CountRead readSegmentCount(const std::string& subject) const override;
+    vicon_lsl::NameRead readSegmentName(const std::string& subject,
+                                        unsigned int index) const override;
     vicon_lsl::SegmentTranslationRead readSegmentGlobalTranslation(
-        const std::string& subject, const std::string& segment);
+        const std::string& subject, const std::string& segment) override;
     vicon_lsl::SegmentRotationRead readSegmentGlobalRotationQuaternion(
-        const std::string& subject, const std::string& segment);
+        const std::string& subject, const std::string& segment) override;
 
 private:
     ViconDataStreamSDK::CPP::Client client_;

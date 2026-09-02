@@ -1,9 +1,6 @@
 #pragma once
 
-// Keep the mapper umbrella transitively available as it was before the
-// implementation split; existing source consumers may include only this
-// facade.
-#include "ViconFrameMapper.h"
+#include "ViconFrameTypes.h"
 #include "detail/ViconNumericOutlet.h"
 
 #include <lsl_cpp.h>
@@ -23,7 +20,7 @@ public:
     void destroy();
 
     // Converts status-bearing reads to fixed-shape LSL samples at the outlet boundary.
-    StreamPushResult pushSample(const std::vector<vicon_lsl::MarkerObjectRead>& markers,
+    StreamPushResult pushSample(const std::vector<vicon_lsl::MarkerTranslationRead>& markers,
                                 double timestamp);
     bool isInitialized() const;
 

@@ -12,12 +12,11 @@
 
 namespace vicon_lsl::detail {
 
+// The two names a stream needs in its log lines: "Marker" and "marker". Every
+// message the outlet emits is built from them.
 struct ViconNumericOutletProfile {
     const char* display_name;
-    const char* item_name_plural;
-    const char* empty_layout_message;
-    const char* null_factory_message;
-    const char* push_failure_prefix;
+    const char* lower_name;
 };
 
 // Owns the lifecycle and metadata that are identical for the fixed-shape
@@ -54,14 +53,14 @@ public:
     }
 
 private:
-    StreamPushResult pushPreparedSample(std::vector<double> sample,
+    StreamPushResult pushPreparedSample(const std::vector<double>& sample,
                                         double timestamp);
 
     StreamOutletFactory outlet_factory_;
     ViconNumericOutletProfile profile_;
     std::unique_ptr<StreamOutlet> outlet_;
     std::unique_ptr<lsl::stream_info> info_;
-    std::vector<double> sample_buffer_;
+    std::size_t channel_count_ = 0;
     std::size_t item_count_ = 0;
     bool configured_ = false;
 };

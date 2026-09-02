@@ -63,7 +63,7 @@ private:
                       const QStringList& arguments,
                       QString* error);
     void setState(RecorderProcessState state, const QString& detail);
-    void appendOutput(const QByteArray& bytes, EventSeverity severity);
+    void appendOutput(const QByteArray& bytes, EventSeverity severity, QByteArray& partial_line);
     static QString queryLiteral(const QString& value, QString* error);
 
     QProcess* process_ = nullptr;
@@ -71,10 +71,10 @@ private:
     RecorderProcessState state_ = RecorderProcessState::External;
     RecorderProcessKind kind_ = RecorderProcessKind::None;
     QByteArray output_buffer_;
-    QByteArray partial_line_;
+    QByteArray partial_stdout_line_;
+    QByteArray partial_stderr_line_;
     bool stop_requested_ = false;
     bool ending_owned_process_ = false;
-    bool detached_ = false;
 };
 
 } // namespace vicon_lsl::gui

@@ -4,6 +4,52 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-09-02
+
+### Fixed
+
+- The live preview now retries streams that were not yet published when the
+  preview started. A frozen clock reading meant the one-second resolve retry
+  could never come due, so a stream that was absent at startup stayed absent.
+- The preview stream status line now keeps updating, and a stream that stops
+  delivering is reported as stale. Both were driven by the same frozen clock
+  reading and previously updated only once.
+- Closing the desktop app no longer waits forever on a recorder that does not
+  settle. The fifteen-second stop deadline compared two readings of a clock
+  that never advanced, so it could not expire.
+- Recorder log lines are no longer spliced together across channels. Standard
+  output and standard error shared one partial-line buffer, so an unterminated
+  output line was completed by the next error text and reported at the wrong
+  severity.
+- A Vicon server that accepts connections but never delivers a frame no longer
+  causes an unthrottled connect, read, and disconnect loop. The first failure
+  still retries immediately; later consecutive failures wait the configured
+  reconnect interval.
+- The bridge now treats a dropped Vicon connection as disconnected. The
+  connection check reported only what the client had last requested and never
+  consulted the SDK.
+
+### Changed
+
+- Marker and segment frames no longer copy the subject, object, and operation
+  names for every item on every frame. That context is carried by the
+  diagnostic raised for a failed read, which is where it was already read from.
+- Marker and segment samples are flattened once into the outlet's channel
+  vector instead of being built as an intermediate array of per-item samples.
+- The Vicon client implements the bridge's client interface directly, replacing
+  a forwarding shim that restated all sixteen methods.
+- The bridge's public header no longer includes the Vicon SDK header, which it
+  did not need and which every desktop translation unit was parsing.
+- The event log appends new entries instead of re-rendering every retained
+  entry for each one.
+
+### Compatibility
+
+- Command-line options, LSL stream names, channel layouts, channel metadata,
+  timestamps, coordinates, saved-session formats, and log text are unchanged.
+- Physical Vicon, HoloLens, Vuforia, and LabRecorder integration remains a
+  manual qualification step. Use `v1.12.0` as the rollback release.
+
 ## [1.12.0] - 2026-09-02
 
 ### Added

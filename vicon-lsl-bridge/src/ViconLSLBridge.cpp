@@ -24,63 +24,10 @@ namespace {
 
 constexpr const char* kSourceIdPrefix = "vicon_";
 
-class ProductionViconClient final : public vicon_lsl::bridge_internal::ViconClient {
-public:
-    explicit ProductionViconClient(const std::string& server_address)
-        : client_(server_address) {}
-
-    bool connect() override { return client_.connect(); }
-    void disconnect() override { client_.disconnect(); }
-    bool isConnected() const override { return client_.isConnected(); }
-    bool getFrame() override { return client_.getFrame(); }
-    unsigned int frameNumber() const override { return client_.frameNumber(); }
-    double frameTimestamp() const override { return client_.frameTimestamp(); }
-    double frameRate() const override { return client_.frameRate(); }
-
-    vicon_lsl::CountRead readSubjectCount() const override {
-        return client_.readSubjectCount();
-    }
-    vicon_lsl::NameRead readSubjectName(unsigned int index) const override {
-        return client_.readSubjectName(index);
-    }
-    vicon_lsl::CountRead readMarkerCount(const std::string& subject) const override {
-        return client_.readMarkerCount(subject);
-    }
-    vicon_lsl::NameRead readMarkerName(const std::string& subject,
-                                       unsigned int index) const override {
-        return client_.readMarkerName(subject, index);
-    }
-    vicon_lsl::MarkerTranslationRead readMarkerGlobalTranslation(
-        const std::string& subject,
-        const std::string& marker) override {
-        return client_.readMarkerGlobalTranslation(subject, marker);
-    }
-    vicon_lsl::CountRead readSegmentCount(const std::string& subject) const override {
-        return client_.readSegmentCount(subject);
-    }
-    vicon_lsl::NameRead readSegmentName(const std::string& subject,
-                                        unsigned int index) const override {
-        return client_.readSegmentName(subject, index);
-    }
-    vicon_lsl::SegmentTranslationRead readSegmentGlobalTranslation(
-        const std::string& subject,
-        const std::string& segment) override {
-        return client_.readSegmentGlobalTranslation(subject, segment);
-    }
-    vicon_lsl::SegmentRotationRead readSegmentGlobalRotationQuaternion(
-        const std::string& subject,
-        const std::string& segment) override {
-        return client_.readSegmentGlobalRotationQuaternion(subject, segment);
-    }
-
-private:
-    ::ViconClient client_;
-};
-
 vicon_lsl::bridge_internal::Collaborators makeProductionCollaborators(
     const Config& config) {
     vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = std::make_shared<ProductionViconClient>(config.vicon_server);
+    collaborators.client = std::make_shared<::ViconClient>(config.vicon_server);
     collaborators.outlet_factory = createLslStreamOutlet;
     collaborators.clock = [] { return lsl::local_clock(); };
     collaborators.wait = [](std::chrono::milliseconds duration) {
@@ -160,8 +107,16 @@ void ViconLSLBridge::run() {
 
         const auto end_reason = runConnectedSession(timestamp_state);
         resetConnectedSession(end_reason);
-        if (running_ &&
-            end_reason != vicon_lsl::bridge_internal::ConnectedSessionEnd::InitialFrameFailed) {
+
+        // Retry a first-frame failure at once, because a server that is still
+        // starting up usually delivers on the next attempt. If it keeps
+        // failing, fall back to the reconnect interval rather than spinning on
+        // connect/getFrame/disconnect as fast as the machine allows.
+        const bool initial_frame_failed =
+            end_reason == vicon_lsl::bridge_internal::ConnectedSessionEnd::InitialFrameFailed;
+        consecutive_initial_frame_failures_ =
+            initial_frame_failed ? consecutive_initial_frame_failures_ + 1 : 0;
+        if (running_ && !(initial_frame_failed && consecutive_initial_frame_failures_ == 1)) {
             waitForRetry();
         }
     }

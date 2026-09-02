@@ -88,37 +88,28 @@ struct ViconDiscoveryResult {
     bool ok() const { return diagnostics.empty(); }
 };
 
-struct MarkerObjectRead {
-    unsigned int frame_number = 0;
-    std::string subject;
-    std::string object_name;
-    std::string operation = "GetMarkerGlobalTranslation";
-    MarkerTranslationRead value;
-};
-
-struct SegmentObjectRead {
-    unsigned int frame_number = 0;
-    std::string subject;
-    std::string object_name;
-    std::string translation_operation = "GetSegmentGlobalTranslation";
-    std::string rotation_operation = "GetSegmentGlobalRotationQuaternion";
+// A segment's pose needs both reads to become one LSL sample.
+struct SegmentPoseRead {
     SegmentTranslationRead translation;
     SegmentRotationRead rotation;
 };
 
+// Frame results carry only the values the outlets convert. The subject, object,
+// and operation that identify a read belong to the diagnostic raised for it, so
+// repeating them per item per frame would only copy strings nobody reads.
 struct MarkerFrameResult {
-    std::vector<MarkerObjectRead> reads;
+    std::vector<MarkerTranslationRead> reads;
     std::vector<ViconDiagnostic> diagnostics;
 };
 
 struct SegmentFrameResult {
-    std::vector<SegmentObjectRead> reads;
+    std::vector<SegmentPoseRead> reads;
     std::vector<ViconDiagnostic> diagnostics;
 };
 
 struct ViconFrameResult {
-    std::vector<MarkerObjectRead> markers;
-    std::vector<SegmentObjectRead> segments;
+    std::vector<MarkerTranslationRead> markers;
+    std::vector<SegmentPoseRead> segments;
     std::vector<ViconDiagnostic> diagnostics;
 };
 

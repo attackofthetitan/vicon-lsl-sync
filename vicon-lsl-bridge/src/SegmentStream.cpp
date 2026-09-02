@@ -3,17 +3,13 @@
 #include "StreamSchema.h"
 #include "ViconFrameMapping.h"
 
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 
-constexpr vicon_lsl::detail::ViconNumericOutletProfile kSegmentOutletProfile{
-    "Segment",
-    "segments",
-    "No segments discovered; segment stream not created",
-    "Segment outlet factory returned no outlet",
-    "Failed to push segment LSL sample: ",
-};
+constexpr vicon_lsl::detail::ViconNumericOutletProfile kSegmentOutletProfile{"Segment", "segment"};
 
 } // namespace
 
@@ -41,15 +37,16 @@ bool SegmentStream::isInitialized() const {
 }
 
 StreamPushResult SegmentStream::pushSample(
-    const std::vector<vicon_lsl::SegmentObjectRead>& segments,
+    const std::vector<vicon_lsl::SegmentPoseRead>& segments,
     double timestamp) {
     return outlet_.pushSample([&segments] {
-        std::vector<vicon_lsl::SegmentSample> samples;
-        samples.reserve(segments.size());
+        std::vector<double> channels;
+        channels.reserve(segments.size() * std::tuple_size_v<vicon_lsl::SegmentSample>);
         for (const auto& segment : segments) {
-            samples.push_back(
-                vicon_lsl::segmentSampleForLsl(segment.translation, segment.rotation));
+            const vicon_lsl::SegmentSample sample =
+                vicon_lsl::segmentSampleForLsl(segment.translation, segment.rotation);
+            channels.insert(channels.end(), sample.begin(), sample.end());
         }
-        return vicon_lsl::flattenSegmentSamples(samples);
+        return channels;
     }, timestamp);
 }

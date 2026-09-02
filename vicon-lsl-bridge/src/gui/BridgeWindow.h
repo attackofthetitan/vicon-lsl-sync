@@ -123,6 +123,8 @@ private:
     void refreshUi();
     void pumpSession();
     void updateEventLog();
+    void eventLogFilter(EventSeverity& minimum,
+                        QVector<SessionComponent>& components) const;
     QJsonObject diagnosticBundle() const;
     void appendEvent(SessionComponent component,
                      EventSeverity severity,

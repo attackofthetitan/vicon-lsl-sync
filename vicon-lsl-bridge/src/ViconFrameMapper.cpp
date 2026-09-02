@@ -164,8 +164,22 @@ std::string formatDiagnostic(const ViconDiagnostic& diagnostic) {
 }
 
 std::string diagnosticKey(const ViconDiagnostic& diagnostic) {
-    return diagnostic.operation + "|" + diagnostic.subject + "|" + diagnostic.object_name + "|" +
-           diagnostic.sdk_result + "|" + diagnostic.message;
+    // Occlusion raises one diagnostic per item per frame, so build the key in a
+    // single sized allocation instead of a chain of temporaries.
+    std::string key;
+    key.reserve(diagnostic.operation.size() + diagnostic.subject.size() +
+                diagnostic.object_name.size() + diagnostic.sdk_result.size() +
+                diagnostic.message.size() + 4);
+    key += diagnostic.operation;
+    key += '|';
+    key += diagnostic.subject;
+    key += '|';
+    key += diagnostic.object_name;
+    key += '|';
+    key += diagnostic.sdk_result;
+    key += '|';
+    key += diagnostic.message;
+    return key;
 }
 
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics) {

@@ -135,14 +135,7 @@ MarkerFrameResult buildMarkerFrame(Client& client,
     result.reads.reserve(markers.size());
 
     for (const auto& marker : markers) {
-        const auto read = client.readMarkerGlobalTranslation(marker.first, marker.second);
-        result.reads.push_back({
-            frame_number,
-            marker.first,
-            marker.second,
-            "GetMarkerGlobalTranslation",
-            read,
-        });
+        auto read = client.readMarkerGlobalTranslation(marker.first, marker.second);
 
         if (!isValid(read)) {
             result.diagnostics.push_back({
@@ -156,6 +149,7 @@ MarkerFrameResult buildMarkerFrame(Client& client,
                 read.message.empty() ? "Marker translation unavailable" : read.message,
             });
         }
+        result.reads.push_back(std::move(read));
     }
 
     return result;
@@ -169,18 +163,9 @@ SegmentFrameResult buildSegmentFrame(Client& client,
     result.reads.reserve(segments.size());
 
     for (const auto& segment : segments) {
-        const auto translation = client.readSegmentGlobalTranslation(segment.first, segment.second);
-        const auto rotation = client.readSegmentGlobalRotationQuaternion(segment.first, segment.second);
+        auto translation = client.readSegmentGlobalTranslation(segment.first, segment.second);
+        auto rotation = client.readSegmentGlobalRotationQuaternion(segment.first, segment.second);
 
-        result.reads.push_back({
-            frame_number,
-            segment.first,
-            segment.second,
-            "GetSegmentGlobalTranslation",
-            "GetSegmentGlobalRotationQuaternion",
-            translation,
-            rotation,
-        });
         if (!isValid(translation)) {
             result.diagnostics.push_back({
                 translation.status == ViconReadStatus::Occluded ? DiagnosticSeverity::Warning
@@ -205,6 +190,7 @@ SegmentFrameResult buildSegmentFrame(Client& client,
                 rotation.message.empty() ? "Segment rotation unavailable" : rotation.message,
             });
         }
+        result.reads.push_back({std::move(translation), std::move(rotation)});
     }
 
     return result;

@@ -1,6 +1,7 @@
 #include "MarkerStream.h"
 #include "SegmentStream.h"
 
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -134,14 +135,14 @@ void expectException(Action&& action,
     }
 }
 
-vicon_lsl::MarkerObjectRead markerRead() {
-    vicon_lsl::MarkerObjectRead marker;
-    marker.value.translation = {1000.0, 2000.0, 3000.0};
+vicon_lsl::MarkerTranslationRead markerRead() {
+    vicon_lsl::MarkerTranslationRead marker;
+    marker.translation = {1000.0, 2000.0, 3000.0};
     return marker;
 }
 
-vicon_lsl::SegmentObjectRead segmentRead() {
-    vicon_lsl::SegmentObjectRead segment;
+vicon_lsl::SegmentPoseRead segmentRead() {
+    vicon_lsl::SegmentPoseRead segment;
     segment.translation.translation = {1000.0, 2000.0, 3000.0};
     segment.rotation.quaternion = {0.1, 0.2, 0.3, 0.9};
     return segment;
@@ -295,6 +296,46 @@ void testInvalidNominalRatesAndMetadata() {
            "marker and segment synchronization metadata remain exact and identical");
 }
 
+// The streams flatten reads into channels themselves, so the order the schema
+// advertises is asserted against what actually reaches the outlet.
+void testFlattenedSampleOrder() {
+    auto marker_state = std::make_shared<OutletState>();
+    MarkerStream markers(fakeFactory(marker_state));
+    markers.initialize({{"Subject", "MarkerA"}, {"Subject", "MarkerB"}},
+                       "markers", "marker_source");
+    vicon_lsl::MarkerTranslationRead occluded;
+    occluded.status = vicon_lsl::ViconReadStatus::Occluded;
+    occluded.occluded = true;
+    expect(markers.pushSample({markerRead(), occluded}, 1.0) == StreamPushResult::Pushed,
+           "marker stream accepts a mixed valid and occluded frame");
+    expect(marker_state->last_sample.size() == 8,
+           "marker frame flattens to four channels per marker");
+    const std::vector<double> expected_markers{1000.0, 2000.0, 3000.0, 1.0};
+    expect(std::vector<double>(marker_state->last_sample.begin(),
+                               marker_state->last_sample.begin() + 4) == expected_markers,
+           "marker channels stay in X, Y, Z, Valid order");
+    expect(std::isnan(marker_state->last_sample[4]) &&
+               marker_state->last_sample[7] == 0.0,
+           "an occluded marker keeps its slot as NaN with Valid cleared");
+
+    auto segment_state = std::make_shared<OutletState>();
+    SegmentStream segments(fakeFactory(segment_state));
+    segments.initialize({{"Subject", "SegmentA"}, {"Subject", "SegmentB"}},
+                        "segments", "segment_source");
+    expect(segments.pushSample({segmentRead(), segmentRead()}, 1.0) == StreamPushResult::Pushed,
+           "segment stream accepts a two-segment frame");
+    expect(segment_state->last_sample.size() == 14,
+           "segment frame flattens to seven channels per segment");
+    const std::vector<double> expected_segment{
+        1000.0, 2000.0, 3000.0, 0.1, 0.2, 0.3, 0.9};
+    expect(std::vector<double>(segment_state->last_sample.begin(),
+                               segment_state->last_sample.begin() + 7) == expected_segment,
+           "segment channels stay in X, Y, Z, QX, QY, QZ, QW order");
+    expect(std::vector<double>(segment_state->last_sample.begin() + 7,
+                               segment_state->last_sample.end()) == expected_segment,
+           "each segment occupies its own contiguous channel block");
+}
+
 void testWrongShapeDoesNotDestroyStreams() {
     auto marker_state = std::make_shared<OutletState>();
     MarkerStream markers(fakeFactory(marker_state));
@@ -350,7 +391,7 @@ void testMarkerRecovery() {
            "marker initialization preserves its exact log");
     expect(stream.isInitialized(), "marker stream initializes through injected outlet");
 
-    const vicon_lsl::MarkerObjectRead marker = markerRead();
+    const vicon_lsl::MarkerTranslationRead marker = markerRead();
     expect(stream.pushSample({marker}, 1.0) == StreamPushResult::Pushed,
            "marker push succeeds");
     expect(state->last_sample == std::vector<double>({1000.0, 2000.0, 3000.0, 1.0}),
@@ -394,7 +435,7 @@ void testSegmentRecovery() {
            "segment initialization preserves its exact log");
     expect(stream.isInitialized(), "segment stream initializes through injected outlet");
 
-    const vicon_lsl::SegmentObjectRead segment = segmentRead();
+    const vicon_lsl::SegmentPoseRead segment = segmentRead();
     expect(stream.pushSample({segment}, 1.0) == StreamPushResult::Pushed,
            "segment push succeeds");
     expect(state->last_sample ==
@@ -512,6 +553,7 @@ void testMarkerAndSegmentTimestampPropagation() {
 int main() {
     testNotConfiguredAndNullFactories();
     testInvalidNominalRatesAndMetadata();
+    testFlattenedSampleOrder();
     testWrongShapeDoesNotDestroyStreams();
     testMarkerRecovery();
     testSegmentRecovery();

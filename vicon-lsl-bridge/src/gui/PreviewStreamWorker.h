@@ -50,7 +50,6 @@ public:
     ~PreviewStreamWorker() override;
     void setGazeTransform(PreviewTransformProfile transform);
     bool takeLatestFrame(PreviewFrame& frame, PreviewDeliveryMetrics& metrics);
-    PreviewDeliveryMetrics deliveryMetrics() const;
     QVector<vicon_lsl::gui::StreamIdentity> streamInventory() const;
 
 signals:

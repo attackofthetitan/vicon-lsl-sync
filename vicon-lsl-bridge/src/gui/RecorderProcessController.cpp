@@ -18,7 +18,7 @@ RecorderProcessController::RecorderProcessController(QObject* parent) : QObject(
 }
 
 bool RecorderProcessController::ownsRunningProcess() const {
-    return !detached_ && process_ && process_->state() != QProcess::NotRunning &&
+    return process_ && process_->state() != QProcess::NotRunning &&
            (state_ == RecorderProcessState::Launching || state_ == RecorderProcessState::OwnedRunning);
 }
 
@@ -65,7 +65,6 @@ void RecorderProcessController::detach() {
         return;
     }
     QProcess* detached_proc = process_;
-    detached_ = true;
     process_ = nullptr;
     terminate_deadline_.stop();
     disconnect(detached_proc, nullptr, this, nullptr);
@@ -163,8 +162,8 @@ QStringList RecorderProcessController::selectedStreamArguments(const QString& ab
 
 void RecorderProcessController::drainOutput() {
     if (!process_) return;
-    appendOutput(process_->readAllStandardOutput(), EventSeverity::Information);
-    appendOutput(process_->readAllStandardError(), EventSeverity::Warning);
+    appendOutput(process_->readAllStandardOutput(), EventSeverity::Information, partial_stdout_line_);
+    appendOutput(process_->readAllStandardError(), EventSeverity::Warning, partial_stderr_line_);
 }
 
 void RecorderProcessController::onStarted() {
@@ -198,7 +197,7 @@ void RecorderProcessController::onFinished(int exit_code, QProcess::ExitStatus s
         process_ = nullptr;
     }
     kind_ = RecorderProcessKind::None;
-    stop_requested_ = ending_owned_process_ = detached_ = false;
+    stop_requested_ = ending_owned_process_ = false;
 }
 
 void RecorderProcessController::onTerminateDeadline() {
@@ -234,9 +233,10 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind, const QSt
     connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &RecorderProcessController::onFinished);
     kind_ = kind;
-    stop_requested_ = ending_owned_process_ = detached_ = false;
+    stop_requested_ = ending_owned_process_ = false;
     output_buffer_.clear();
-    partial_line_.clear();
+    partial_stdout_line_.clear();
+    partial_stderr_line_.clear();
     setState(RecorderProcessState::Launching,
              kind == RecorderProcessKind::SelectedStreamRecorder ? "Starting selected-stream recorder" : "Starting recorder");
     process_->start(QDir::toNativeSeparators(info.absoluteFilePath()), arguments, QIODevice::ReadWrite);
@@ -249,23 +249,27 @@ void RecorderProcessController::setState(RecorderProcessState state, const QStri
     emit stateChanged(state_, detail);
 }
 
-void RecorderProcessController::appendOutput(const QByteArray& bytes, EventSeverity severity) {
+// Each channel carries its own partial line: a stdout line that has not been
+// terminated yet must not be completed by the next chunk of stderr, which would
+// splice two unrelated lines and report them at the wrong severity.
+void RecorderProcessController::appendOutput(const QByteArray& bytes, EventSeverity severity,
+                                             QByteArray& partial_line) {
     if (bytes.isEmpty()) return;
     output_buffer_.append(bytes);
     if (output_buffer_.size() > kMaxOutputBytes) output_buffer_.remove(0, output_buffer_.size() - kMaxOutputBytes);
-    partial_line_.append(bytes);
+    partial_line.append(bytes);
     while (true) {
-        const qsizetype newline = partial_line_.indexOf('\n');
+        const qsizetype newline = partial_line.indexOf('\n');
         if (newline < 0) break;
-        QByteArray line = partial_line_.left(newline);
-        partial_line_.remove(0, newline + 1);
+        QByteArray line = partial_line.left(newline);
+        partial_line.remove(0, newline + 1);
         if (line.endsWith('\r')) line.chop(1);
         if (line.size() > kMaxLogLineBytes) line = line.left(kMaxLogLineBytes) + "...";
         if (!line.trimmed().isEmpty()) emit outputLine(severity, QString::fromLocal8Bit(line));
     }
-    if (partial_line_.size() > kMaxLogLineBytes) {
-        emit outputLine(severity, QString::fromLocal8Bit(partial_line_.left(kMaxLogLineBytes)) + "...");
-        partial_line_.clear();
+    if (partial_line.size() > kMaxLogLineBytes) {
+        emit outputLine(severity, QString::fromLocal8Bit(partial_line.left(kMaxLogLineBytes)) + "...");
+        partial_line.clear();
     }
 }
 

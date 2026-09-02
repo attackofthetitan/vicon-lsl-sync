@@ -231,6 +231,40 @@ void testInitialFrameFailureReconnectsWithoutDelay() {
            "initial-frame failure never creates an outlet");
 }
 
+// A server that accepts connections but never produces a frame must not turn
+// the immediate first retry into an unthrottled connect/getFrame/disconnect
+// loop, so every failure after the first waits the reconnect interval.
+void testRepeatedInitialFrameFailuresBackOff() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 0;
+    auto outlets = std::make_shared<OutletState>();
+    auto stop_on_wait = std::make_shared<StopOnWait>();
+
+    vicon_lsl::bridge_internal::Collaborators collaborators;
+    collaborators.client = client;
+    collaborators.outlet_factory = outletFactory(outlets);
+    collaborators.clock = [] { return 200.0; };
+    collaborators.wait = [stop_on_wait](std::chrono::milliseconds duration) {
+        (*stop_on_wait)(duration);
+    };
+    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
+        testConfig(), std::move(collaborators));
+    stop_on_wait->bridge = bridge.get();
+
+    bridge->run();
+
+    expect(client->get_frame_calls == 2,
+           "the first initial-frame failure retries at once, the second does not");
+    expect(client->connect_calls == 2,
+           "a reachable server is reconnected to for the immediate retry");
+    expect(client->disconnect_calls == 2,
+           "each failed initial-frame session disconnects");
+    expect(stop_on_wait->calls == 1,
+           "the second consecutive initial-frame failure waits instead of spinning");
+    expect(outlets->created == 0,
+           "repeated initial-frame failures never create an outlet");
+}
+
 void testOutletFailureResetsAStreamingSession() {
     auto client = std::make_shared<FakeViconClient>();
     client->available_frames = 2;
@@ -392,6 +426,7 @@ void testStopDuringNonCancellableSdkDelayKeepsCallerResponsive() {
 
 int main() {
     testInitialFrameFailureReconnectsWithoutDelay();
+    testRepeatedInitialFrameFailuresBackOff();
     testOutletFailureResetsAStreamingSession();
     testStopDuringFrameReadStillCleansUp();
     testStopDuringConnectionSkipsRetryAndFrameWork();

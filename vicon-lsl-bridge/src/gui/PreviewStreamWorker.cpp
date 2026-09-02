@@ -23,7 +23,7 @@ constexpr double kGazeLowRateFraction = 0.8;
 constexpr double kMetadataTimeoutSeconds = 0.25;
 constexpr double kResolveTimeoutSeconds = 0.05;
 
-std::vector<std::string> channelLabels(lsl::stream_info info, PreviewStreamRole role, bool* complete) {
+std::vector<std::string> channelLabels(lsl::stream_info& info, PreviewStreamRole role, bool* complete) {
     std::vector<std::string> labels;
     labels.reserve(static_cast<std::size_t>(info.channel_count()));
     bool metadata_complete = true;
@@ -53,6 +53,9 @@ std::vector<std::string> channelLabels(lsl::stream_info info, PreviewStreamRole 
     return labels;
 }
 
+// A fresh timer stamps the current monotonic reading, so this reads as "now".
+// msecsSinceReference() on a long-lived timer would instead keep returning the
+// instant it was started, which never advances.
 qint64 steadyNowMs() {
     QElapsedTimer timer;
     timer.start();
@@ -130,10 +133,6 @@ bool PreviewStreamWorker::takeLatestFrame(PreviewFrame& frame, PreviewDeliveryMe
     return delivery_mailbox_.takeLatest(frame, metrics, steadyNowMs());
 }
 
-PreviewDeliveryMetrics PreviewStreamWorker::deliveryMetrics() const {
-    return delivery_mailbox_.metrics();
-}
-
 QVector<gui::StreamIdentity> PreviewStreamWorker::streamInventory() const {
     std::lock_guard<std::mutex> lock(inventory_mutex_);
     return inventory_;
@@ -148,15 +147,13 @@ void PreviewStreamWorker::setGazeTransform(PreviewTransformProfile transform) {
 
 void PreviewStreamWorker::run() {
     emit lifecycleChanged(ComponentLifecycleState::Starting, "Resolving configured streams");
-    QElapsedTimer timer;
-    timer.start();
     last_status_ms_ = 0;
 
     emit lifecycleChanged(ComponentLifecycleState::Running, "Live preview worker running");
     StreamState* const all_streams[] = {markers_.get(), segments_.get(), gaze_.get(), calibration_target_.get()};
 
     while (!isInterruptionRequested()) {
-        const qint64 now = timer.msecsSinceReference();
+        const qint64 now = steadyNowMs();
         for (StreamState* s : all_streams) {
             if (isInterruptionRequested()) break;
             if (!s->connected() && now >= s->next_resolve_ms) {
@@ -212,7 +209,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         });
         QVector<gui::StreamIdentity> candidates;
         candidates.reserve(static_cast<qsizetype>(streams.size()));
-        for (const lsl::stream_info& c : streams) {
+        for (lsl::stream_info& c : streams) {
             gui::StreamIdentity id = gui::identityFromStreamInfo(c);
             id.role = roleText(state.role);
             candidates.push_back(std::move(id));
