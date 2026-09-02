@@ -4,6 +4,28 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-09-03
+
+### Changed
+
+- The macOS disk image is now arranged for drag installation. Both applications
+  sit beside a link to the Applications folder, with the command line tools in a
+  folder of their own. Run from the mounted image, the app had a different
+  location on every mount, so macOS asked for permissions again each launch.
+- The macOS application declares why it needs local network access, so the
+  request explains that it is for finding Lab Streaming Layer streams.
+
+### Known limitation
+
+- The build is still ad-hoc signed. First launch still needs approval under
+  Privacy and Security, and permissions are asked for again after an update.
+  Both need Developer ID signing and notarization, which are not configured.
+
+### Compatibility
+
+- The `.tar.gz` layout is unchanged. Roll back to `v1.13.2`.
+
+
 ## [1.13.2] - 2026-09-02
 
 ### Fixed

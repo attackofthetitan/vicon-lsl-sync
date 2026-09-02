@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.13.2 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.13.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -199,6 +199,8 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                     MACOSX_BUNDLE_GUI_IDENTIFIER "com.vicon.lslbridge"
                     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
                     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+                    MACOSX_BUNDLE_INFO_PLIST
+                        "${CMAKE_CURRENT_LIST_DIR}/packaging/macos/BridgeInfo.plist.in"
                 )
             else()
                 add_executable(vicon-lsl-bridge-gui src/gui/main_gui.cpp)
