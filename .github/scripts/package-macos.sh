@@ -36,6 +36,16 @@ fi
 EOF
 chmod +x package/vicon-lsl-bridge-gui
 
+# The stair model the preview draws. Windows packaging already ships it; without
+# it the preview has no stair to align gaze against.
+test -f vicon-lsl-bridge/assets/stair_model/stair_model1.obj
+mkdir -p package/stair_model package/vicon-lsl-bridge-gui.app/Contents/Resources/stair_model
+cp -- vicon-lsl-bridge/assets/stair_model/stair_model1.obj \
+      vicon-lsl-bridge/assets/stair_model/stair_model1.mtl package/stair_model/
+cp -- vicon-lsl-bridge/assets/stair_model/stair_model1.obj \
+      vicon-lsl-bridge/assets/stair_model/stair_model1.mtl \
+      package/vicon-lsl-bridge-gui.app/Contents/Resources/stair_model/
+
 # Package LabRecorder as macOS application bundle
 cp -R -- build-labrecorder/LabRecorder.app package/
 "$macdeployqt" package/LabRecorder.app -libpath=build-labrecorder/_deps/liblsl-build 2>/dev/null || \

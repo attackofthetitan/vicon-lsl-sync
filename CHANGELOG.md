@@ -4,6 +4,23 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-09-02
+
+### Fixed
+
+- The stair model is packaged for macOS and Linux again. Only the Windows package
+  shipped it, so on the other platforms the preview had no stair to draw and gaze
+  had nothing to be aligned against.
+- Opening a recording no longer stretches the preview controls. The load summary
+  runs to several hundred characters and was wrapped over several lines, pushing
+  the transport controls and timeline out of view; it is now shown on one line
+  with the full text in its tooltip.
+
+### Compatibility
+
+- No format change. Roll back to `v1.13.1`.
+
+
 ## [1.13.1] - 2026-09-02
 
 ### Fixed
