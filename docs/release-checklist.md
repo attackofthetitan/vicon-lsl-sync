@@ -6,7 +6,7 @@
 - Previous release: `v1.12.2`
 - Target date: 2026-09-02
 - Pull requests: `#27` (removal), `#28` (layout)
-- Status: validated and approved for publication
+- Status: published
 - Scope: the manual HoloLens transform is removed from the desktop preview, and
   the desktop controls that only work in some states are limited to those states
 
@@ -35,9 +35,9 @@ draws when no calibration exists, so it carries a minor bump rather than a patch
 ## Merge
 
 - [x] `#27` merged into `main` as `d23ead3`.
-- [ ] `#28` is mergeable into `main` with no unresolved review thread.
-- [ ] Required checks are green on the exact commit being merged.
-- [ ] `main` contains the reviewed commit with no release-only change left on a
+- [x] `#28` merged into `main` as `f83d5c8` with a green matrix on the exact
+  commit merged.
+- [x] `main` contains both reviewed commits with no release-only change left on a
   side branch.
 
 ## Qualification and limitations
@@ -64,6 +64,7 @@ content; re-run the Windows job if it trips again.
 
 ## Publication
 
-- [ ] Tag `v1.13.0` on the merged commit and let the tagged build publish the
+- [x] Tagged `v1.13.0` on `f83d5c8`. The tagged build was green and published the
   release assets.
-- [ ] Confirm the published assets match the tagged commit.
+- [x] Assets confirmed: the macOS archive matches its `SHA256SUMS.txt` entry and
+  its bundle reports version `1.13.0`.
