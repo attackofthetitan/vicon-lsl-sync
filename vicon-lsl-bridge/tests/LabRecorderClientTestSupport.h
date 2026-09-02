@@ -64,5 +64,20 @@ void testRecorderDuplicateAndShutdownProtocol();
 void testRecordingVerifierOutcomes();
 void testRecorderProcessControllerLifecycle();
 void testBundledExecutableResolution();
+void testGuidedStartOrder();
+void testGuidedStartFailuresAndRecorderOnly();
+void testGuidedStopOrder();
+void testShutdownWaitsForEachComponent();
+void testShutdownEndsOwnedRecorderOnceOrOnDeadline();
+void testShutdownReportsLostExternalRecorder();
+void testStreamInventoryMerge();
+void testReconcileKeepsChoicesAndFlagsMissingStreams();
+void testReconcileHonoursConfiguredAndEveryVisibleStreams();
+void testReconcileRetainsSelectedStreamThatVanished();
+void testSelectedStreamsForRecording();
+void testSetupCheckRequiresEachComponent();
+void testSetupCheckReportsPathAndStreamProblems();
+void testSetupCheckRequiredStreamReadiness();
+void testSetupCheckCalibration();
 
 } // namespace labrecorder_client_tests

@@ -28,6 +28,21 @@ int main(int argc, char** argv) {
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);
     run("bundled executable resolution", testBundledExecutableResolution);
+    run("guided start order", testGuidedStartOrder);
+    run("guided start failures", testGuidedStartFailuresAndRecorderOnly);
+    run("guided stop order", testGuidedStopOrder);
+    run("shutdown waiting", testShutdownWaitsForEachComponent);
+    run("shutdown owned recorder", testShutdownEndsOwnedRecorderOnceOrOnDeadline);
+    run("shutdown lost recorder", testShutdownReportsLostExternalRecorder);
+    run("stream inventory merge", testStreamInventoryMerge);
+    run("reconcile keeps choices", testReconcileKeepsChoicesAndFlagsMissingStreams);
+    run("reconcile configured streams", testReconcileHonoursConfiguredAndEveryVisibleStreams);
+    run("reconcile vanished stream", testReconcileRetainsSelectedStreamThatVanished);
+    run("selected streams", testSelectedStreamsForRecording);
+    run("setup check components", testSetupCheckRequiresEachComponent);
+    run("setup check path and streams", testSetupCheckReportsPathAndStreamProblems);
+    run("setup check required streams", testSetupCheckRequiredStreamReadiness);
+    run("setup check calibration", testSetupCheckCalibration);
 
     if (g_failures > 0) {
         std::cerr << g_failures << " test failure(s)" << std::endl;

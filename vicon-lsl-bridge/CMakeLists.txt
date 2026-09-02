@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.12.1 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.12.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -171,8 +171,11 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/RecorderProcessController.cpp
                 src/gui/RecordingVerifier.cpp
                 src/gui/SessionConfiguration.cpp
+                src/gui/SessionSequencer.cpp
                 src/gui/SessionState.cpp
+                src/gui/SetupCheckPolicy.cpp
                 src/gui/StreamDiscoveryWorker.cpp
+                src/gui/StreamInventory.cpp
                 src/gui/PreviewPanel.cpp
                 src/gui/PreviewFileLoader.cpp
                 src/gui/PreviewStreamWorker.cpp

@@ -4,6 +4,22 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-09-02
+
+### Changed
+
+- The order a guided session starts and stops in, the checks that decide whether
+  a recording may begin, and the rules for which streams survive a rediscovery
+  now live beside the desktop window rather than inside it, so each can be
+  exercised on its own.
+
+### Compatibility
+
+- No user-visible change. The desktop application behaves as it did in
+  `v1.12.1`; the decisions it makes were moved, not altered. Command-line
+  options, LSL stream layouts, timestamps, coordinates, and saved-session
+  formats are unchanged. Use `v1.12.1` as the rollback release.
+
 ## [1.12.1] - 2026-09-02
 
 ### Fixed
