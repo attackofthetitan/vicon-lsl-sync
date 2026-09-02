@@ -4,6 +4,21 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-09-02
+
+### Fixed
+
+- The measured stair pose is no longer rounded to millimetres. The alignment read
+  it back from a display that held three decimals, losing 0.6 mm of a fixed,
+  known value. The saved calibration is now used directly, and the pose is shown
+  read-only at full precision so a stray edit cannot move it.
+
+### Compatibility
+
+- No format change. Saved calibrations, stream layouts, timestamps and
+  coordinates are unchanged. Roll back to `v1.13.0`.
+
+
 ## [1.13.0] - 2026-09-02
 
 ### Removed
