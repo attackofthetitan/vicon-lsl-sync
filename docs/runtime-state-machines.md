@@ -108,6 +108,8 @@ The run flag starts as true when the object is created. `run()` does not set it 
 - [ ] Repeated connection failures wait for the chosen interval.
 - [ ] A setup failure disconnects before retry.
 - [ ] A first-frame failure reconnects without publishing part of a layout.
+- [ ] The first consecutive first-frame failure reconnects without waiting, and
+      every later consecutive one waits the chosen interval.
 - [ ] A discovery failure discards partial names and waits before retry.
 - [ ] Empty marker, segment, or both layouts reach `Streaming` without unwanted streams.
 - [ ] Hidden or failed reads send invalid fixed-size values and keep streaming.
