@@ -1,5 +1,6 @@
 #include "gui/BridgeWindowUi.h"
 
+#include "gui/FlowLayout.h"
 #include "gui/WidgetHelpers.h"
 
 #include <QCheckBox>
@@ -117,7 +118,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     // Session Tab
     auto [session_page, session_layout] = makePage();
 
-    auto [preset_group, preset_layout] = makeGroup<QGridLayout>("Session Settings");
+    auto [preset_group, preset_layout] = makeGroup<QVBoxLayout>("Session Settings");
     ui->preset_combo = new QComboBox();
     ui->preset_combo->setEditable(true);
     ui->preset_combo->setToolTip("Saved session settings that can be used again.");
@@ -126,13 +127,19 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->load_preset_button = makeButton("Load Preset", "Load the selected session preset.");
     ui->import_configuration_button = makeButton("Import", "Load session settings from a file.");
     ui->export_configuration_button = makeButton("Export", "Save the current session settings to a file.");
-    preset_layout->addWidget(makeTooltipLabel("Preset:", ui->preset_combo, ui->preset_combo->toolTip()), 0, 0);
-    preset_layout->addWidget(ui->preset_combo, 0, 1, 1, 4);
-    preset_layout->addWidget(ui->reset_configuration_button, 1, 0);
-    preset_layout->addWidget(ui->save_preset_button, 1, 1);
-    preset_layout->addWidget(ui->load_preset_button, 1, 2);
-    preset_layout->addWidget(ui->import_configuration_button, 1, 3);
-    preset_layout->addWidget(ui->export_configuration_button, 1, 4);
+    auto* preset_row = new QHBoxLayout();
+    preset_row->addWidget(makeTooltipLabel("Preset:", ui->preset_combo, ui->preset_combo->toolTip()));
+    preset_row->addWidget(ui->preset_combo, 1);
+    preset_layout->addLayout(preset_row);
+    // Five buttons in fixed grid cells could not shrink below their combined
+    // width, which was the Session tab's sideways overflow.
+    auto* preset_buttons = new FlowLayout();
+    for (QWidget* control : {ui->reset_configuration_button, ui->save_preset_button,
+                             ui->load_preset_button, ui->import_configuration_button,
+                             ui->export_configuration_button}) {
+        preset_buttons->addWidget(control);
+    }
+    preset_layout->addLayout(preset_buttons);
     session_layout->addWidget(preset_group);
 
     ui->recorder_only_check = makeCheck("Record without the Vicon bridge", "Allow recording when the Vicon bridge is not running.");
@@ -251,11 +258,16 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->storage_warning_spin->setValue(10.0);
     recording_form->addRow(makeTooltipLabel("Storage warning:", ui->storage_warning_spin, "Warn when available storage falls below this threshold."), ui->storage_warning_spin);
 
-    auto* path_policy = new QHBoxLayout();
+    // Three long checkbox labels in one unbreakable row were most of the
+    // Recording tab's sideways overflow.
+    auto* path_policy = new FlowLayout();
     ui->allow_overwrite_check = makeCheck("Allow overwrite", "Advanced opt-in to overwrite an existing destination.");
     ui->allow_outside_root_check = makeCheck("Allow outside study root", "Allow a recording to be saved outside the study folder.");
     ui->automatic_run_increment_check = makeCheck("Increment run after a successful file check", "Increment only after the output exists and the selected file check succeeds.");
-    addWidgets(path_policy, {ui->allow_overwrite_check, ui->allow_outside_root_check, ui->automatic_run_increment_check});
+    for (QWidget* control : {ui->allow_overwrite_check, ui->allow_outside_root_check,
+                             ui->automatic_run_increment_check}) {
+        path_policy->addWidget(control);
+    }
     recording_form->addRow("Saving options:", path_policy);
     ui->find_next_run_button = makeButton("Find Next Run", "Choose the first run number with an unused file path.");
     recording_form->addRow(QString(), ui->find_next_run_button);

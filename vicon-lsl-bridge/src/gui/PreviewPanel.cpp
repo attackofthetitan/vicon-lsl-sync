@@ -157,7 +157,6 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     profile_form->addRow("Target frame:", target_frame_edit_);
     profiles_layout->addLayout(profile_form);
 
-    auto* pose_grid = new QGridLayout();
     stair_tx_spin_ = makeDistanceSpin();
     stair_ty_spin_ = makeDistanceSpin();
     stair_tz_spin_ = makeDistanceSpin();
@@ -166,11 +165,22 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     stair_qz_spin_ = makeQuaternionSpin();
     stair_qw_spin_ = makeQuaternionSpin(1.0);
     const QString pose_tooltip = "Measured rigid pose of the stair target in Vicon coordinates. Translation is metres; rotation is a quaternion.";
-    addSpinRow(pose_grid, 0, "Measured stair T (m):", pose_tooltip,
-               {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_});
-    addSpinRow(pose_grid, 1, "Measured stair Q:", pose_tooltip,
-               {stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_});
-    profiles_layout->addLayout(pose_grid);
+    // A caption above a wrapping run of spin boxes. Keeping the caption beside
+    // them made the quaternion row about 490 px wide with no way to shrink,
+    // which was most of the preview panel's sideways overflow.
+    const auto addPoseRow = [&](const QString& text, std::initializer_list<QDoubleSpinBox*> spins) {
+        auto* caption = new QLabel(text);
+        caption->setToolTip(pose_tooltip);
+        profiles_layout->addWidget(caption);
+        auto* row = new FlowLayout();
+        for (QDoubleSpinBox* spin : spins) {
+            spin->setToolTip(pose_tooltip);
+            row->addWidget(spin);
+        }
+        profiles_layout->addLayout(row);
+    };
+    addPoseRow("Measured stair T (m):", {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_});
+    addPoseRow("Measured stair Q:", {stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_});
 
     auto* profile_buttons = new FlowLayout();
     auto* apply_profile_button = makeButton("Apply", "Apply the selected saved calibration to the live preview and session details.");
@@ -203,9 +213,14 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     stair_row->addWidget(stair_model_edit_, 1);
     stair_row->addWidget(browse_stair_button);
     sources_layout->addLayout(stair_row);
+    sources_layout->addStretch(1);
 
-    settings_tabs->addTab(sources_page, "Sources");
-    settings_tabs->addTab(alignment_page, "Alignment");
+    // Each page scrolls on its own and the tab strip is bounded, so a tall
+    // settings page can no longer push the action buttons, transport and
+    // timeline out of view. Those are the controls used during a session.
+    settings_tabs->addTab(scrollable(sources_page), "Sources");
+    settings_tabs->addTab(scrollable(alignment_page), "Alignment");
+    settings_tabs->setMaximumHeight(fontMetrics().height() * 13);
     controls_layout->addWidget(settings_tabs);
 
     auto* button_row = new FlowLayout();
@@ -219,6 +234,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     status_label_ = new QLabel("Preview stopped");
     status_label_->setWordWrap(true);
     delivery_metrics_label_ = new QLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
+    // Without wrapping this one line claimed 355 px of minimum width.
+    delivery_metrics_label_->setWordWrap(true);
     delivery_metrics_label_->setToolTip("Older preview updates are skipped so the display stays current.");
     auto* fit_view_button = makeButton("Fit View", "Fit the camera to all currently visible data.");
     auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
@@ -470,7 +487,7 @@ void PreviewPanel::resizeEvent(QResizeEvent* event) {
     // reasonably sized window shows them without scrolling and a small one still
     // leaves the drawing area the larger share.
     const int line = (std::max)(1, fontMetrics().height());
-    controls_scroll_->setMaximumHeight((std::max)(line * 10, height() / 2));
+    controls_scroll_->setMaximumHeight((std::max)(line * 10, height() * 55 / 100));
 }
 
 void PreviewPanel::fitView() { widget_->fitView(); }

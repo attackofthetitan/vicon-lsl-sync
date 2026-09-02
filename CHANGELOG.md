@@ -8,64 +8,32 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ### Removed
 
-- The manual HoloLens transform is gone from the desktop preview. The
-  **HoloLens T** and **HoloLens R** fields, the **Use Manual Transform** button,
-  and the saved `manualGazeTranslation` and `manualGazeRotationDegrees` values no
-  longer exist. The pose of the HoloLens world in Vicon coordinates cannot be
-  known before it is measured, so entering one by hand could only produce a
-  plausible-looking but wrong alignment.
+- The manual HoloLens transform in the desktop preview. The pose of the HoloLens
+  world in Vicon coordinates cannot be known before it is measured, so a
+  hand-entered translation and rotation could only produce a wrong alignment.
 
 ### Changed
 
-- Gaze alignment now comes only from a solved stair-target calibration or an
-  applied saved calibration. A session without one draws gaze in its published
-  `hololens_stationary_shared_with_gaze` frame, unaligned to Vicon, and reports
-  the calibration state as **Not calibrated** instead of **Manual**.
-- **Clear Calibration** replaces **Use Manual Transform**. It discards the
-  calibration in use and returns the preview to that uncalibrated frame, so
-  applying a saved calibration stays reversible.
-- A calibration solve that fails its position or angle limits now drops the
-  preview back to the uncalibrated transform. It previously left the earlier
-  transform drawing while reporting that no calibration was in use.
-- Controls that only work in some states are now available only in those states.
-  **Apply**, **Copy**, **Hide** and **Export** need a selected saved calibration,
-  **Calibrate from Stair Target** needs a running preview, **Clear Calibration**
-  and **Save Session Calibration** need a calibration in use, the playback
-  transport buttons need a loaded recording, **Open Recent** needs a non-empty
-  list, and **Record Anyway** needs a required check that failed and has not
-  already been accepted. Each of these was previously clickable at all times and
-  either did nothing or only printed a status line.
+- Gaze alignment now comes only from a solved or applied stair-target
+  calibration. Without one the preview draws gaze in its published HoloLens
+  frame and reports **Not calibrated**.
+- **Clear Calibration** replaces **Use Manual Transform**.
+- Controls that only work in some states are enabled only in those states.
 
 ### Fixed
 
-- Selecting a different entry in the saved-calibration list no longer rewrites
-  the quality reading. Browsing the list replaced the displayed sample count and
-  error values with the selected entry's, even though selecting an entry does not
-  apply it, so the panel reported the quality of a calibration that was not in
-  use. A merely selected entry is now labelled as not applied.
-- **Apply**, **Copy**, **Hide** and **Export** now say that a saved calibration
-  must be selected first, instead of returning with no visible effect.
-- A long recording destination no longer forces the window wider. The path has no
-  spaces to wrap on, so its full width became the window's minimum width; it is
-  now elided to the space available, with the full path in its tooltip.
-- The preview control rows no longer force sideways scrolling. The action,
-  file-load, transport and saved-calibration buttons sat in rows that could not
-  shrink below their combined width, so a narrow preview panel clipped the last
-  buttons in each row and pushed **Export Image** and the status text out of
-  reach entirely. Those rows now wrap onto as many lines as the width needs.
-- The timeline now has a full-width line of its own instead of competing with the
-  transport buttons, and the preview status text has one instead of competing
-  with the action buttons.
-- The preview control area now takes up to half the panel's height rather than a
-  fixed 390 pixels, so a reasonably sized window shows the controls without
-  scrolling while a small one still leaves the drawing area the larger share.
+- A rejected calibration solve no longer leaves the previous alignment drawing.
+- Selecting a saved calibration no longer overwrites the quality reading for the
+  calibration actually in use.
+- The window no longer needs sideways scrolling. Rows of controls wrap, and the
+  preview's buttons, transport and timeline stay visible instead of being pushed
+  out of view by the settings tabs.
 
 ### Compatibility
 
-- Session configuration files stay at version 1 and are still read. The two
-  manual gaze values are ignored when present and are dropped the next time the
-  file is written. Saved calibrations, LSL stream layouts, timestamps, and
-  published coordinates are unchanged. Use `v1.12.2` as the rollback release.
+- Session settings stay at version 1 and still load; the two saved manual gaze
+  values are ignored and dropped. Saved calibrations, stream layouts, timestamps
+  and coordinates are unchanged. Roll back to `v1.12.2`.
 
 ## [1.12.2] - 2026-09-02
 
