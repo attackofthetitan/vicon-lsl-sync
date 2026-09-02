@@ -84,7 +84,7 @@ private slots:
     void seekPlaybackFromSlider(int value);
     void openRecentRecording();
     void beginCalibration();
-    void useManualTransform();
+    void clearCalibration();
     void handleTargetPose(vicon_lsl::CalibrationTargetPose pose);
     void applySelectedCalibrationProfile();
     void saveSessionCalibrationProfile();
@@ -95,7 +95,6 @@ private slots:
     void updateMeasuredStairPose();
 
 private:
-    PreviewTransformProfile manualGazeTransform() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
     void resetCalibrationSession();
@@ -124,6 +123,9 @@ private:
     void updateCalibrationPersistentStatus(gui::SessionCalibrationState state,
                                            const QString& text,
                                            bool metadata_compatible);
+    // Keeps every control that only works in some states enabled exactly when it
+    // does work, so no button is live while its action would do nothing.
+    void refreshControlStates();
 
     PreviewWidget* widget_ = nullptr;
     QLineEdit* marker_stream_edit_ = nullptr;
@@ -134,12 +136,6 @@ private:
     QDoubleSpinBox* tolerance_spin_ = nullptr;
     QSpinBox* cache_megabytes_spin_ = nullptr;
     QDoubleSpinBox* playback_speed_spin_ = nullptr;
-    QDoubleSpinBox* gaze_tx_spin_ = nullptr;
-    QDoubleSpinBox* gaze_ty_spin_ = nullptr;
-    QDoubleSpinBox* gaze_tz_spin_ = nullptr;
-    QDoubleSpinBox* gaze_rx_spin_ = nullptr;
-    QDoubleSpinBox* gaze_ry_spin_ = nullptr;
-    QDoubleSpinBox* gaze_rz_spin_ = nullptr;
     QSpinBox* trail_points_spin_ = nullptr;
     QPushButton* start_button_ = nullptr;
     QPushButton* stop_button_ = nullptr;
@@ -147,7 +143,13 @@ private:
     QPushButton* open_xdf_button_ = nullptr;
     QPushButton* play_csv_button_ = nullptr;
     QPushButton* calibrate_button_ = nullptr;
-    QPushButton* use_manual_transform_button_ = nullptr;
+    QPushButton* clear_calibration_button_ = nullptr;
+    QPushButton* save_calibration_button_ = nullptr;
+    QPushButton* open_recent_button_ = nullptr;
+    // Controls that need a selected saved calibration, and controls that need a
+    // loaded recording.
+    QVector<QWidget*> profile_selection_controls_;
+    QVector<QWidget*> playback_controls_;
     QComboBox* calibration_profile_combo_ = nullptr;
     QLineEdit* calibration_profile_name_edit_ = nullptr;
     QLineEdit* calibration_setup_id_edit_ = nullptr;
@@ -187,7 +189,7 @@ private:
     bool stair_model_loaded_ = false;
     ComponentLifecycleState lifecycle_state_ = ComponentLifecycleState::Idle;
     gui::SessionCalibrationState calibration_state_ =
-        gui::SessionCalibrationState::Manual;
+        gui::SessionCalibrationState::Uncalibrated;
     PreviewTransformProfile automatic_gaze_transform_;
     std::vector<CalibrationTargetPose> calibration_samples_;
     gui::StreamBinding marker_binding_;

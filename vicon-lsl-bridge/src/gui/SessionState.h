@@ -45,7 +45,7 @@ enum class ComponentLifecycleState {
 namespace vicon_lsl::gui {
 
 enum class SessionCalibrationState {
-    Manual,
+    Uncalibrated,
     Collecting,
     AutomaticSession,
     SavedProfile,

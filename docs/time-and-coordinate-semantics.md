@@ -280,7 +280,7 @@ The CSV reader does not fit clock differences or match separate streams. It assu
 | Eye-tracker ray | A ray from Extended Eye Tracking, described in code as right-handed |
 | Published HoloLens shared world | The Unity world reflected into a right-handed system, in metres, named `hololens_stationary_shared_with_gaze` |
 | Old tracker space | `eye_tracker_space`; it lacks the changing pose needed for stair alignment |
-| Preview display | One metre-scale scene after manual or automatic transforms |
+| Preview display | One metre-scale scene after the fixed Vicon scale and, when one exists, the solved HoloLens transform |
 
 ## Show Vicon data in the preview
 
@@ -326,13 +326,19 @@ When the target is not tracked, send `NaN` for all seven pose values and zero fo
 
 ## Preview transforms and stair alignment
 
-### Saved manual gaze transform
+### Gaze transform without a calibration
 
-- Use scale `1.0` because gaze is already in metres.
-- Default axis signs are `(1, 1, 1)`.
-- Apply user rotations in X, then Y, then Z order.
-- Add user translation last.
-- For direction, apply axis signs and rotation only, then normalize. Do not apply scale or translation.
+There is no hand-entered gaze transform. The pose of the HoloLens world in Vicon
+coordinates cannot be known before it is measured, so a session with no solved or
+applied calibration uses an identity gaze transform:
+
+- Scale is `1.0`, because gaze is already in metres.
+- Axis signs are `(1, 1, 1)`.
+- There is no rotation and no translation.
+
+Gaze is therefore drawn in the published `hololens_stationary_shared_with_gaze`
+frame. It is displayed, but it is not aligned to Vicon, and the calibration state
+reads **Not calibrated**.
 
 `gazeTransformForCoordinateFrame` currently returns the supplied transform without changing it. Code may simplify this private work, but the public wrapper must stay when source compatibility needs it. Changing the result needs coordinate checks.
 
@@ -381,7 +387,9 @@ The current calculation:
 
 The fixed pose, extra Z rotation, reflection, and input Z sign work as one set. Removing only one can mirror or reverse gaze relative to the stairs.
 
-Automatic alignment lasts only for the current preview session. It is not saved. The manual translation and Euler rotation stay as the saved fallback.
+Automatic alignment lasts only for the current preview session. It is not saved.
+There is no fallback transform: clearing a calibration, or a solve that fails its
+quality limits, returns the preview to the identity gaze transform above.
 
 ## Match live and recorded geometry
 
@@ -411,7 +419,7 @@ Before merging a time or coordinate change:
 - [ ] Repair count and repaired times match saved results.
 - [ ] Matching checks cover exactly at, just inside, and just outside the time limit.
 - [ ] Simple axis vectors and rotations prove both HoloLens reflections.
-- [ ] Manual transform order is checked with rotations that do not commute and with translation.
+- [ ] An uncalibrated session leaves gaze in its published frame instead of applying a guessed transform.
 - [ ] Fixed stair alignment works for known fake data and the physical model.
 - [ ] Old, empty, matching, and different frame names follow current rules.
 - [ ] Live and XDF preview geometry matches for the same values.

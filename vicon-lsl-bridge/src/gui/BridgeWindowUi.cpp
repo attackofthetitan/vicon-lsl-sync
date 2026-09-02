@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QShortcut>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTableWidget>
@@ -55,6 +56,10 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->recording_elapsed_label = makeStateValue("00:00:00", "Recording elapsed time");
     ui->run_identifier_label = makeStateValue("run 1", "Recording run number");
     ui->recording_path_label = makeStateValue("No checked destination", "Recording destination");
+    // A destination path has no spaces to wrap on, so its size hint would set the
+    // window's minimum width. The text is elided to the width it is given.
+    ui->recording_path_label->setWordWrap(false);
+    ui->recording_path_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     ui->recording_path_label->setToolTip("The exact file path used by the recorder.");
 
     db_layout->addWidget(ui->recording_indicator_label, 0, 0);
@@ -65,7 +70,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->bridge_state_label = makeStateValue("Idle", "Bridge status");
     ui->recorder_state_label = makeStateValue("Disconnected", "Recorder state");
     ui->preview_state_label = makeStateValue("Idle", "Preview status");
-    ui->calibration_state_label = makeStateValue("Manual", "Calibration state");
+    ui->calibration_state_label = makeStateValue("Not calibrated", "Calibration state");
     ui->file_state_dashboard_label = makeStateValue("No file", "Preview file state");
     ui->verification_state_label = makeStateValue("Not checked", "Recording file check");
     addField(db_layout, 2, 0, "Bridge:", ui->bridge_state_label);

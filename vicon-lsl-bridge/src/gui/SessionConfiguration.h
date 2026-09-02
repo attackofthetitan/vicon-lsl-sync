@@ -93,8 +93,6 @@ struct SessionConfiguration {
     int preview_trail_points = 24;
     double preview_playback_speed = 1.0;
     bool preview_loop_playback = false;
-    PreviewVec3 preview_gaze_translation;
-    PreviewVec3 preview_gaze_rotation_degrees;
 
     QString recorder_host = "localhost";
     int recorder_port = 22345;

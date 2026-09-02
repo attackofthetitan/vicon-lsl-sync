@@ -83,7 +83,12 @@ In the desktop preview:
 4. Select **Calibrate from Stair Target**.
 5. Hold the target still while the app collects 20 good samples.
 
-The result lasts only for the current desktop session. Select **Use Manual Transform** to return to the saved translation and rotation controls.
+The result lasts only for the current desktop session. There are no hand-entered
+HoloLens translation and rotation fields, because the transform between the
+HoloLens world and Vicon cannot be known before it is measured. Until an
+alignment is solved or a saved calibration is applied, the preview draws gaze in
+its published HoloLens frame. Select **Clear Calibration** to return to that
+state.
 
 An automatic solution stays session-only until you select **Save Session
 Calibration**. A saved calibration records a setup name, stair model and

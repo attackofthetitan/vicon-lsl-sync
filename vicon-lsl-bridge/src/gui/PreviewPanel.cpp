@@ -60,7 +60,6 @@ constexpr int kMaximumLivePreviewDelayMs = 100;
 constexpr int kMaximumRenderHz = 60;
 
 QDoubleSpinBox* makeDistanceSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 3, 0.01, val); }
-QDoubleSpinBox* makeAngleSpin(double val = 0.0) { return makeDoubleSpin(-360.0, 360.0, 2, 1.0, val); }
 QDoubleSpinBox* makeQuaternionSpin(double val = 0.0) { return makeDoubleSpin(-1.0, 1.0, 6, 0.01, val); }
 
 } // namespace
@@ -123,27 +122,17 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     stream_grid->setColumnStretch(3, 1);
     sources_layout->addLayout(stream_grid);
 
-    auto* transforms = new QGridLayout();
-    transforms->setHorizontalSpacing(6);
-    transforms->setVerticalSpacing(4);
-    gaze_tx_spin_ = makeDistanceSpin();
-    gaze_ty_spin_ = makeDistanceSpin();
-    gaze_tz_spin_ = makeDistanceSpin();
-    gaze_rx_spin_ = makeAngleSpin();
-    gaze_ry_spin_ = makeAngleSpin();
-    gaze_rz_spin_ = makeAngleSpin();
-    addSpinRow(transforms, 0, "HoloLens T:",
-               "Manual HoloLens translation in metres (X, Y, Z).\nUsed when manual transform mode is selected.",
-               {gaze_tx_spin_, gaze_ty_spin_, gaze_tz_spin_});
-    addSpinRow(transforms, 1, "HoloLens R:",
-               "Manual HoloLens rotation in degrees about X, Y, and Z.\nUsed when manual transform mode is selected.",
-               {gaze_rx_spin_, gaze_ry_spin_, gaze_rz_spin_});
-    alignment_layout->addLayout(transforms);
+    auto* alignment_note = new QLabel(
+        "The HoloLens-to-Vicon transform is only known once it is measured. Solve it "
+        "from the stair target, or apply a saved calibration. Until then gaze is drawn "
+        "in its published HoloLens frame and is not aligned to Vicon.");
+    alignment_note->setWordWrap(true);
+    alignment_layout->addWidget(alignment_note);
 
     auto* calibration_row = new QHBoxLayout();
     calibrate_button_ = makeButton("Calibrate from Stair Target", "Collect stable poses from the stair-target stream and apply a HoloLens transform for this session only.");
-    use_manual_transform_button_ = makeButton("Use Manual Transform", "Stop automatic calibration and use the manual HoloLens translation and rotation fields.");
-    addWidgets(calibration_row, {calibrate_button_, use_manual_transform_button_});
+    clear_calibration_button_ = makeButton("Clear Calibration", "Discard the calibration in use and draw gaze in its published HoloLens frame again.");
+    addWidgets(calibration_row, {calibrate_button_, clear_calibration_button_});
     calibration_row->addStretch(1);
     alignment_layout->addLayout(calibration_row);
 
@@ -183,12 +172,13 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
 
     auto* profile_buttons = new QHBoxLayout();
     auto* apply_profile_button = makeButton("Apply", "Apply the selected saved calibration to the live preview and session details.");
-    auto* save_profile_button = makeButton("Save Session Calibration", "Save the current calibration with its physical setup and quality details.");
+    save_calibration_button_ = makeButton("Save Session Calibration", "Save the current calibration with its physical setup and quality details.");
     auto* duplicate_profile_button = makeButton("Copy", "Copy the selected calibration with a separate ID.");
     auto* retire_profile_button = makeButton("Hide", "Hide the selected calibration without deleting it from past session records.");
     auto* import_profile_button = makeButton("Import", "Import a saved calibration file.");
     auto* export_profile_button = makeButton("Export", "Export the selected calibration to a file.");
-    addWidgets(profile_buttons, {apply_profile_button, save_profile_button, duplicate_profile_button, retire_profile_button, import_profile_button, export_profile_button});
+    profile_selection_controls_ = {apply_profile_button, duplicate_profile_button, retire_profile_button, export_profile_button};
+    addWidgets(profile_buttons, {apply_profile_button, save_calibration_button_, duplicate_profile_button, retire_profile_button, import_profile_button, export_profile_button});
     profiles_layout->addLayout(profile_buttons);
 
     calibration_quality_label_ = new QLabel("Quality: not calibrated");
@@ -245,9 +235,9 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     recent_files_combo_ = new QComboBox();
     recent_files_combo_->setMinimumContentsLength(16);
     recent_files_combo_->setToolTip("Recently opened CSV and XDF recordings.");
-    auto* open_recent_button = makeButton("Open Recent", "Open the selected recent recording.");
+    open_recent_button_ = makeButton("Open Recent", "Open the selected recent recording.");
     load_row->addWidget(file_state_label_, 1);
-    addWidgets(load_row, {memory_label_, load_progress_, cancel_load_button_, recent_files_combo_, open_recent_button});
+    addWidgets(load_row, {memory_label_, load_progress_, cancel_load_button_, recent_files_combo_, open_recent_button_});
     controls_layout->addLayout(load_row);
 
     auto* playback_row = new QHBoxLayout();
@@ -278,6 +268,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     playback_row->addWidget(timeline_slider_, 1);
     playback_row->addWidget(loop_playback_check_);
     playback_row->addWidget(playback_position_label_);
+    playback_controls_ = {jump_start_button, step_back_button, jump_back_button,
+                          jump_forward_button, step_forward_button, jump_end_button};
     controls_layout->addLayout(playback_row);
 
     auto* controls_scroll = new QScrollArea();
@@ -286,7 +278,9 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     controls_scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
     controls_scroll->setAccessibleName("Scrollable preview controls");
     controls_scroll->setWidget(controls_group);
-    controls_scroll->setMaximumHeight(390);
+    // Derived from the interface font instead of a fixed 390 px, which clipped
+    // the lower control rows whenever the font or scale factor grew.
+    controls_scroll->setMaximumHeight(fontMetrics().height() * 26);
     layout->addWidget(controls_scroll);
 
     csv_timer_ = new QTimer(this);
@@ -329,7 +323,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     connect(reset_camera_button, &QPushButton::clicked, this, &PreviewPanel::resetCamera);
     connect(export_image_button, &QPushButton::clicked, this, &PreviewPanel::exportPreviewImage);
     connect(cancel_load_button_, &QPushButton::clicked, this, &PreviewPanel::cancelFileLoad);
-    connect(open_recent_button, &QPushButton::clicked, this, &PreviewPanel::openRecentRecording);
+    connect(open_recent_button_, &QPushButton::clicked, this, &PreviewPanel::openRecentRecording);
     connect(timeline_slider_, &QSlider::valueChanged, this, &PreviewPanel::seekPlaybackFromSlider);
     connect(loop_playback_check_, &QCheckBox::toggled, this, [this](bool loop) {
         playback_clock_.setLooping(loop, playback_elapsed_.elapsed() / 1000.0);
@@ -356,9 +350,9 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     connect(browse_stair_button, &QPushButton::clicked, this, &PreviewPanel::browseStairModel);
     connect(stair_model_edit_, &QLineEdit::editingFinished, this, &PreviewPanel::reloadStairModel);
     connect(calibrate_button_, &QPushButton::clicked, this, &PreviewPanel::beginCalibration);
-    connect(use_manual_transform_button_, &QPushButton::clicked, this, &PreviewPanel::useManualTransform);
+    connect(clear_calibration_button_, &QPushButton::clicked, this, &PreviewPanel::clearCalibration);
     connect(apply_profile_button, &QPushButton::clicked, this, &PreviewPanel::applySelectedCalibrationProfile);
-    connect(save_profile_button, &QPushButton::clicked, this, &PreviewPanel::saveSessionCalibrationProfile);
+    connect(save_calibration_button_, &QPushButton::clicked, this, &PreviewPanel::saveSessionCalibrationProfile);
     connect(duplicate_profile_button, &QPushButton::clicked, this, &PreviewPanel::duplicateCalibrationProfile);
     connect(retire_profile_button, &QPushButton::clicked, this, &PreviewPanel::retireCalibrationProfile);
     connect(import_profile_button, &QPushButton::clicked, this, &PreviewPanel::importCalibrationProfile);
@@ -375,6 +369,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     loadSettings();
     loadCalibrationProfiles();
     reloadStairModel();
+    refreshControlStates();
     calibration_progress_throttle_.start();
 }
 
@@ -410,12 +405,6 @@ void PreviewPanel::applySessionConfiguration(const gui::SessionConfiguration& c)
     trail_points_spin_->setValue(c.preview_trail_points);
     playback_speed_spin_->setValue(c.preview_playback_speed);
     loop_playback_check_->setChecked(c.preview_loop_playback);
-    gaze_tx_spin_->setValue(c.preview_gaze_translation.x);
-    gaze_ty_spin_->setValue(c.preview_gaze_translation.y);
-    gaze_tz_spin_->setValue(c.preview_gaze_translation.z);
-    gaze_rx_spin_->setValue(c.preview_gaze_rotation_degrees.x);
-    gaze_ry_spin_->setValue(c.preview_gaze_rotation_degrees.y);
-    gaze_rz_spin_->setValue(c.preview_gaze_rotation_degrees.z);
     const int hz = std::clamp(c.preview_render_hz, 1, kMaximumRenderHz);
     live_render_timer_->setInterval((std::max)(1, 1000 / hz));
     if (!c.stair_model_path.trimmed().isEmpty()) stair_model_edit_->setText(c.stair_model_path);
@@ -437,8 +426,6 @@ void PreviewPanel::updateSessionConfiguration(gui::SessionConfiguration& c) cons
     c.preview_trail_points = trail_points_spin_->value();
     c.preview_playback_speed = playback_speed_spin_->value();
     c.preview_loop_playback = loop_playback_check_->isChecked();
-    c.preview_gaze_translation = {gaze_tx_spin_->value(), gaze_ty_spin_->value(), gaze_tz_spin_->value()};
-    c.preview_gaze_rotation_degrees = {gaze_rx_spin_->value(), gaze_ry_spin_->value(), gaze_rz_spin_->value()};
     c.stair_model_path = stair_model_edit_->text().trimmed();
     if (calibration_profile_combo_) c.calibration_profile_id = calibration_profile_combo_->currentData().toString();
 }
@@ -550,11 +537,13 @@ void PreviewPanel::startPreview() {
         stop_button_->setEnabled(false);
         open_csv_button_->setEnabled(true);
         open_xdf_button_->setEnabled(true);
+        refreshControlStates();
         if (pending_recording_type_) processPendingRecordingOpen();
         else setStatus("Preview stopped");
     });
     start_button_->setEnabled(false);
     stop_button_->setEnabled(true);
+    refreshControlStates();
     setStatus("Finding the selected LSL streams; stair calibration is ready when requested...");
     lifecycle_state_ = ComponentLifecycleState::Starting;
     emit lifecycleChanged(lifecycle_state_, "Finding selected streams");
@@ -578,6 +567,7 @@ void PreviewPanel::stopPreview() {
     stop_button_->setEnabled(false);
     open_csv_button_->setEnabled(false);
     open_xdf_button_->setEnabled(false);
+    refreshControlStates();
     setStatus("Preview stopping in the background...");
 }
 
@@ -618,20 +608,22 @@ void PreviewPanel::beginCalibration() {
     calibration_state_ = gui::SessionCalibrationState::Collecting;
     calibration_rejection_reason_.clear();
     const CalibrationProfile profile = activeSolverProfile();
+    refreshControlStates();
     setStatus("Waiting for " + QString::number(profile.required_samples) + " stable tracked stair-target poses...");
     updateCalibrationPersistentStatus(gui::SessionCalibrationState::Collecting,
         "Quality: collecting 0/" + QString::number(profile.required_samples), calibration_metadata_compatible_);
 }
 
-void PreviewPanel::useManualTransform() {
-    calibration_state_ = gui::SessionCalibrationState::Manual;
-    calibration_samples_.clear();
+void PreviewPanel::clearCalibration() {
+    resetCalibrationSession();
+    calibration_quality_ = {};
+    calibration_rejection_reason_.clear();
     if (worker_) worker_->setGazeTransform(gazeTransform());
     widget_->requestViewRefit();
-    saveSettings();
-    setStatus("Using manual HoloLens transform");
-    calibration_quality_ = {};
-    updateCalibrationPersistentStatus(gui::SessionCalibrationState::Manual, "Quality: manual transform (not solved)", calibration_metadata_compatible_);
+    refreshControlStates();
+    setStatus("Calibration cleared; gaze is drawn in its published HoloLens frame");
+    updateCalibrationPersistentStatus(gui::SessionCalibrationState::Uncalibrated,
+        "Quality: not calibrated", calibration_metadata_compatible_);
 }
 
 void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
@@ -672,10 +664,16 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     }
 
     const auto solution = solveTrackedTargetCalibration(calibration_samples_, profile);
-    calibration_state_ = gui::SessionCalibrationState::Manual;
+    calibration_state_ = gui::SessionCalibrationState::Uncalibrated;
     calibration_samples_.clear();
     if (!solution) {
         calibration_rejection_reason_ = "Position or angle error exceeded the selected limits";
+        // Nothing survives a rejected solve, so drop the preview back to the
+        // uncalibrated transform instead of leaving an earlier one in place.
+        calibration_quality_ = {};
+        if (worker_) worker_->setGazeTransform(gazeTransform());
+        widget_->requestViewRefit();
+        refreshControlStates();
         setStatus("Calibration failed: " + calibration_rejection_reason_);
         updateCalibrationPersistentStatus(gui::SessionCalibrationState::Failed,
             "Quality: rejected — " + calibration_rejection_reason_, calibration_metadata_compatible_);
@@ -687,6 +685,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     calibration_quality_ = solution->quality;
     if (worker_) worker_->setGazeTransform(gazeTransform());
     widget_->requestViewRefit();
+    refreshControlStates();
     setStatus("Stair-target calibration applied for this session (position error " +
               QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) + " mm, angle error " +
               QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg)");
@@ -781,6 +780,7 @@ void PreviewPanel::applyLoadedRecording(PreviewFileLoader* loader, const QString
     widget_->setFrame(csv_frames_.front());
     play_csv_button_->setEnabled(true);
     timeline_slider_->setEnabled(true);
+    refreshControlStates();
     memory_label_->setText("memory " + QString::number(static_cast<double>(loaded->estimated_memory_bytes) / (1024.0 * 1024.0), 'f', 1) + " MiB");
     file_state_label_->setText("Loaded " + QFileInfo(loader->path()).fileName());
     emit fileStateChanged(gui::SessionFileState::Loaded, QDir::toNativeSeparators(QFileInfo(loader->path()).absoluteFilePath()));
@@ -955,6 +955,7 @@ void PreviewPanel::rememberRecentFile(const QString& path) {
     while (files.size() > 10) files.removeLast();
     recent_files_combo_->clear();
     for (const QString& f : files) recent_files_combo_->addItem(QFileInfo(f).fileName(), f);
+    refreshControlStates();
 }
 
 void PreviewPanel::openRecentRecording() {
@@ -1020,26 +1021,39 @@ void PreviewPanel::reloadStairModel() {
     }
 }
 
-PreviewTransformProfile PreviewPanel::manualGazeTransform() const {
-    PreviewTransformProfile t;
-    t.name = "HoloLens";
-    t.scale = 1.0;
-    t.translation = {gaze_tx_spin_->value(), gaze_ty_spin_->value(), gaze_tz_spin_->value()};
-    t.rotation_degrees = {gaze_rx_spin_->value(), gaze_ry_spin_->value(), gaze_rz_spin_->value()};
-    return t;
-}
-
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
     if (calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
         calibration_state_ == gui::SessionCalibrationState::SavedProfile) {
         return automatic_gaze_transform_;
     }
-    return manualGazeTransform();
+    // The HoloLens pose in Vicon coordinates cannot be known before it is
+    // measured, so an uncalibrated session draws gaze in its published frame
+    // rather than in a guessed one.
+    PreviewTransformProfile identity;
+    identity.name = "HoloLens";
+    return identity;
+}
+
+void PreviewPanel::refreshControlStates() {
+    const bool calibrated = calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
+                            calibration_state_ == gui::SessionCalibrationState::SavedProfile;
+    const bool collecting = calibration_state_ == gui::SessionCalibrationState::Collecting;
+    const bool live_preview = worker_ != nullptr && !worker_stopping_;
+    if (calibrate_button_) calibrate_button_->setEnabled(live_preview && !collecting);
+    if (clear_calibration_button_) clear_calibration_button_->setEnabled(calibrated);
+    if (save_calibration_button_) save_calibration_button_->setEnabled(calibrated);
+    const bool has_profile = selectedCalibrationProfile() != nullptr;
+    for (QWidget* control : profile_selection_controls_) control->setEnabled(has_profile);
+    const bool recording_loaded = !csv_frames_.empty();
+    for (QWidget* control : playback_controls_) control->setEnabled(recording_loaded);
+    if (open_recent_button_ && recent_files_combo_) {
+        open_recent_button_->setEnabled(recent_files_combo_->count() > 0);
+    }
 }
 
 void PreviewPanel::resetCalibrationSession() {
     calibration_samples_.clear();
-    calibration_state_ = gui::SessionCalibrationState::Manual;
+    calibration_state_ = gui::SessionCalibrationState::Uncalibrated;
     automatic_gaze_transform_ = {};
 }
 
@@ -1082,7 +1096,10 @@ void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
         calibration_profile_combo_->setCurrentIndex(idx);
     }
     const gui::ManagedCalibrationProfile* p = selectedCalibrationProfile();
-    if (!p) return;
+    if (!p) {
+        refreshControlStates();
+        return;
+    }
     const QSignalBlocker b1(calibration_profile_name_edit_), b2(calibration_setup_id_edit_), b3(calibration_notes_edit_),
                          b4(gaze_frame_edit_), b5(target_frame_edit_), b6(stair_tx_spin_), b7(stair_ty_spin_),
                          b8(stair_tz_spin_), b9(stair_qx_spin_), b10(stair_qy_spin_), b11(stair_qz_spin_), b12(stair_qw_spin_);
@@ -1098,12 +1115,21 @@ void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
     stair_qy_spin_->setValue(p->vicon_from_target.rotation.y);
     stair_qz_spin_->setValue(p->vicon_from_target.rotation.z);
     stair_qw_spin_->setValue(p->vicon_from_target.rotation.w);
-    if (p->quality.sample_count > 0) {
+    // Selecting an entry only browses it; it does not apply it. Overwriting the
+    // quality text here made the panel report a calibration that was not in use.
+    const bool calibration_in_use = calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
+                                    calibration_state_ == gui::SessionCalibrationState::SavedProfile;
+    if (!calibration_in_use) {
         calibration_quality_label_->setText(
-            "Saved quality: " + QString::number(p->quality.sample_count) + " samples, position error " +
-            QString::number(p->quality.translation_rms_m * 1000.0, 'f', 1) + " mm, angle error " +
-            QString::number(p->quality.rotation_rms_degrees, 'f', 2) + " deg");
+            p->quality.sample_count > 0
+                ? "Selected calibration: " + QString::number(p->quality.sample_count) +
+                      " samples, position error " +
+                      QString::number(p->quality.translation_rms_m * 1000.0, 'f', 1) +
+                      " mm, angle error " +
+                      QString::number(p->quality.rotation_rms_degrees, 'f', 2) + " deg (not applied)"
+                : "Selected calibration has no measured error values (not applied)");
     }
+    refreshControlStates();
 }
 
 gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() {
@@ -1137,7 +1163,10 @@ CalibrationProfile PreviewPanel::activeSolverProfile() const {
 
 void PreviewPanel::applySelectedCalibrationProfile() {
     gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
-    if (!profile) return;
+    if (!profile) {
+        setStatus("Select a saved calibration before applying one");
+        return;
+    }
     QString reason;
     if (!profile->complete(&reason)) {
         setStatus("Saved calibration is incomplete: " + reason);
@@ -1173,6 +1202,7 @@ void PreviewPanel::applySelectedCalibrationProfile() {
               " mm, angle error " + QString::number(profile->quality.rotation_rms_degrees, 'f', 2) + " deg"
             : "Quality: saved calibration has no measured error values",
         calibration_metadata_compatible_ && metadata_matches);
+    refreshControlStates();
     setStatus("Applied saved calibration " + profile->display_name);
 }
 
@@ -1219,7 +1249,10 @@ void PreviewPanel::saveSessionCalibrationProfile() {
 
 void PreviewPanel::duplicateCalibrationProfile() {
     const gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
-    if (!selected) return;
+    if (!selected) {
+        setStatus("Select a saved calibration before copying one");
+        return;
+    }
     gui::ManagedCalibrationProfile duplicate = gui::CalibrationProfileStore::duplicate(*selected, calibration_profiles_);
     calibration_profiles_.push_back(duplicate);
     saveCalibrationProfiles();
@@ -1229,7 +1262,10 @@ void PreviewPanel::duplicateCalibrationProfile() {
 
 void PreviewPanel::retireCalibrationProfile() {
     const gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
-    if (!selected) return;
+    if (!selected) {
+        setStatus("Select a saved calibration before hiding one");
+        return;
+    }
     const QString id = selected->id;
     const auto ans = QMessageBox::question(
         this, "Hide saved calibration",
@@ -1263,7 +1299,10 @@ void PreviewPanel::importCalibrationProfile() {
 
 void PreviewPanel::exportCalibrationProfile() {
     const gui::ManagedCalibrationProfile* profile = selectedCalibrationProfile();
-    if (!profile) return;
+    if (!profile) {
+        setStatus("Select a saved calibration before exporting one");
+        return;
+    }
     const QString path = QFileDialog::getSaveFileName(this, "Export saved calibration", profile->id + ".json", "Calibration files (*.json)");
     if (path.isEmpty()) return;
     QString err;

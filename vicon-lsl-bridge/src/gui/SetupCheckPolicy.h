@@ -19,7 +19,7 @@ struct SetupCheckInputs {
     bool recorder_idle = false;
     bool calibration_required = false;
     bool stair_model_loaded = false;
-    SessionCalibrationState calibration = SessionCalibrationState::Manual;
+    SessionCalibrationState calibration = SessionCalibrationState::Uncalibrated;
 };
 
 // A required stream is ready only when it is visible, recently updated, and
