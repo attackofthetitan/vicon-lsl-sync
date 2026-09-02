@@ -13,6 +13,8 @@ using vicon_lsl::gui::reconcileDiscoveredStreams;
 using vicon_lsl::gui::selectedStreams;
 using vicon_lsl::gui::visibleStreamCount;
 
+// StreamIdentity::selected defaults to true, so the fixture clears it and each
+// test says for itself which streams the operator chose.
 StreamIdentity stream(const QString& name, const QString& source_id) {
     StreamIdentity identity;
     identity.name = name;
@@ -20,7 +22,16 @@ StreamIdentity stream(const QString& name, const QString& source_id) {
     identity.role = "markers";
     identity.channel_count = 4;
     identity.present = true;
+    identity.selected = false;
     return identity;
+}
+
+// A default SessionConfiguration already asks for the four standard streams, so
+// tests that are about one binding start from a configuration with none.
+SessionConfiguration configurationWithoutBindings() {
+    SessionConfiguration configuration;
+    configuration.recording_streams.clear();
+    return configuration;
 }
 
 const StreamIdentity* findStream(const QVector<StreamIdentity>& inventory, const QString& name) {
@@ -54,7 +65,7 @@ void testStreamInventoryMerge() {
 }
 
 void testReconcileKeepsChoicesAndFlagsMissingStreams() {
-    SessionConfiguration configuration;
+    SessionConfiguration configuration = configurationWithoutBindings();
     configuration.record_every_visible_stream = false;
 
     QVector<StreamIdentity> known;
@@ -89,7 +100,7 @@ void testReconcileKeepsChoicesAndFlagsMissingStreams() {
 }
 
 void testReconcileHonoursConfiguredAndEveryVisibleStreams() {
-    SessionConfiguration configuration;
+    SessionConfiguration configuration = configurationWithoutBindings();
     configuration.record_every_visible_stream = false;
     StreamBinding binding;
     binding.name = "Gaze";
@@ -117,7 +128,7 @@ void testReconcileHonoursConfiguredAndEveryVisibleStreams() {
 }
 
 void testReconcileRetainsSelectedStreamThatVanished() {
-    SessionConfiguration configuration;
+    SessionConfiguration configuration = configurationWithoutBindings();
     QVector<StreamIdentity> known;
     known.push_back(stream("Markers", "a"));
     known[0].selected = true;

@@ -26,6 +26,14 @@ SetupCheckInputs readyInputs() {
     return inputs;
 }
 
+// A default SessionConfiguration already requires the four standard streams,
+// so tests about one check start from a configuration that asks for none.
+vicon_lsl::gui::SessionConfiguration configurationWithoutBindings() {
+    vicon_lsl::gui::SessionConfiguration configuration;
+    configuration.recording_streams.clear();
+    return configuration;
+}
+
 RecordingPathResult validPath() {
     RecordingPathResult path;
     path.absolute_path = "/tmp/session.xdf";
@@ -51,7 +59,7 @@ bool mentions(const SetupCheckResult& result, const QString& text) {
 } // namespace
 
 void testSetupCheckRequiresEachComponent() {
-    vicon_lsl::gui::SessionConfiguration configuration;
+    const vicon_lsl::gui::SessionConfiguration configuration = configurationWithoutBindings();
     QVector<StreamIdentity> inventory;
 
     SetupCheckResult result =
@@ -90,7 +98,7 @@ void testSetupCheckRequiresEachComponent() {
 }
 
 void testSetupCheckReportsPathAndStreamProblems() {
-    vicon_lsl::gui::SessionConfiguration configuration;
+    const vicon_lsl::gui::SessionConfiguration configuration = configurationWithoutBindings();
     QVector<StreamIdentity> inventory;
 
     RecordingPathResult blocked;
@@ -169,7 +177,7 @@ void testSetupCheckRequiredStreamReadiness() {
 }
 
 void testSetupCheckCalibration() {
-    vicon_lsl::gui::SessionConfiguration configuration;
+    const vicon_lsl::gui::SessionConfiguration configuration = configurationWithoutBindings();
     SetupCheckInputs inputs = readyInputs();
     inputs.calibration_required = true;
     inputs.stair_model_loaded = false;
