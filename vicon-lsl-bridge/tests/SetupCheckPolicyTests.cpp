@@ -181,7 +181,7 @@ void testSetupCheckCalibration() {
     SetupCheckInputs inputs = readyInputs();
     inputs.calibration_required = true;
     inputs.stair_model_loaded = false;
-    inputs.calibration = SessionCalibrationState::Manual;
+    inputs.calibration = SessionCalibrationState::Uncalibrated;
 
     SetupCheckResult result = vicon_lsl::gui::runSetupCheck(inputs, configuration, validPath(), {});
     expect(failed(result, SessionComponent::Calibration),

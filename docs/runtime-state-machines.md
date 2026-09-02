@@ -460,19 +460,22 @@ decoded result, and drawing fewer frames does not change file-check numbers.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Manual
-    Manual --> Collecting: user selects Calibrate
+    [*] --> Uncalibrated
+    Uncalibrated --> Collecting: user selects Calibrate
     Collecting --> Collecting: add a stable tracked pose
     Collecting --> Collecting: target is lost or moves / restart collection
-    Collecting --> Manual: math or quality check fails
+    Collecting --> Uncalibrated: math or quality check fails
     Collecting --> AutomaticSession: 20 good samples solve alignment
     AutomaticSession --> SavedProfile: Save Session Calibration
-    AutomaticSession --> Manual: Use Manual Transform
-    SavedProfile --> Manual: Use Manual Transform
-    Manual --> SavedProfile: Apply saved calibration
+    AutomaticSession --> Uncalibrated: Clear Calibration
+    SavedProfile --> Uncalibrated: Clear Calibration
+    Uncalibrated --> SavedProfile: Apply saved calibration
 ```
 
-`SavedProfile` is the internal state name; the interface shows **Saved calibration**.
+`SavedProfile` is the internal state name; the interface shows **Saved
+calibration**. `Uncalibrated` is shown as **Not calibrated**; there is no
+hand-entered transform to fall back on, so gaze is drawn in its published
+HoloLens frame until an alignment is solved or applied.
 
 - Losing the target clears the collected poses.
 - A pose outside the allowed movement from the first pose restarts collection from that new pose.

@@ -320,7 +320,7 @@ Save example values for good and bad cases.
 5. Read the reported position and angle error values.
 6. Look along known stair edges and compare the gaze ray with the physical and Vicon-aligned model.
 7. Select **Save Session Calibration**, export the saved calibration, apply it,
-   select **Use Manual Transform**, then apply it again.
+   select **Clear Calibration**, then apply it again.
 8. Select **Copy**, then **Hide** for the copy. Import the exported calibration
    into fresh settings and confirm its setup identity and quality.
 
@@ -337,7 +337,8 @@ Save example values for good and bad cases.
 - Applying the saved calibration is visible, reversible, and leaves its quality
   visible while stream-status events continue. Copy, Hide, export, and import
   preserve the scientific values.
-- **Use Manual Transform** restores the saved manual controls at once.
+- **Clear Calibration** returns the preview to its uncalibrated HoloLens frame
+  at once, and gaze visibly stops matching the Vicon-aligned stair model.
 - Stair direction and gaze match the known-good build. There is no X/Z mirror, 180-degree reversal, or metre/millimetre mistake.
 - Running alignment again after a HoloLens world restart restores the match.
 
@@ -355,7 +356,7 @@ Save example values for good and bad cases.
 - [ ] Sample count and both error values.
 - [ ] Exported calibration JSON and a picture of its always-visible quality and
   stream-details compatibility indicators.
-- [ ] Evidence that switching between manual and saved calibration is reversible
+- [ ] Evidence that applying and clearing a saved calibration is reversible
   and that **Hide** removes the copy from normal selection without deleting the
   original.
 - [ ] XDF file and its preview summary.

@@ -30,6 +30,29 @@ TEST_CASE("Preview calibration composes and inverts rigid transforms") {
     REQUIRE(near(transformed_direction.y, 1.0));
 }
 
+TEST_CASE("Preview leaves uncalibrated gaze in its published frame") {
+    // The preview uses a default profile until a calibration is solved or
+    // applied, because the HoloLens pose in Vicon coordinates is not knowable
+    // beforehand. It must move nothing rather than guess an alignment.
+    vicon_lsl::PreviewTransformProfile uncalibrated;
+    uncalibrated.name = "HoloLens";
+    REQUIRE(near(uncalibrated.scale, 1.0));
+    REQUIRE(near(uncalibrated.input_axis_sign.x, 1.0));
+    REQUIRE(near(uncalibrated.input_axis_sign.y, 1.0));
+    REQUIRE(near(uncalibrated.input_axis_sign.z, 1.0));
+
+    const vicon_lsl::PreviewVec3 published_origin{0.25, -0.5, 1.5};
+    const auto origin = vicon_lsl::applyTransformPoint(uncalibrated, published_origin);
+    REQUIRE(near(origin.x, published_origin.x));
+    REQUIRE(near(origin.y, published_origin.y));
+    REQUIRE(near(origin.z, published_origin.z));
+
+    const auto direction = vicon_lsl::applyTransformDirection(uncalibrated, {0.0, 0.0, 2.0});
+    REQUIRE(near(direction.x, 0.0));
+    REQUIRE(near(direction.y, 0.0));
+    REQUIRE(near(direction.z, 1.0));
+}
+
 TEST_CASE("Preview refaces calibrated gaze without changing the stair model") {
     const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
     const double half_sqrt_two = std::sqrt(0.5);

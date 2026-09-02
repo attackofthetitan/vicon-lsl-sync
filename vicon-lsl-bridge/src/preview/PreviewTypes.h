@@ -28,8 +28,9 @@ struct PreviewTransformProfile {
     // HoloLens target-pose convention, so its Z sign is -1.
     PreviewVec3 input_axis_sign{1.0, 1.0, 1.0};
     PreviewVec3 rotation_degrees{};
-    // Automatic calibration uses a quaternion so a solved rigid transform is not
-    // degraded by an Euler-angle round trip. Manual controls keep using Euler.
+    // Solved calibration uses a quaternion so a rigid transform is not degraded
+    // by an Euler-angle round trip. Fixed profiles without a rotation, such as
+    // the Vicon millimetre-to-metre scale, keep the Euler default.
     bool use_quaternion_rotation = false;
     PreviewQuaternion rotation{};
     PreviewVec3 translation{};

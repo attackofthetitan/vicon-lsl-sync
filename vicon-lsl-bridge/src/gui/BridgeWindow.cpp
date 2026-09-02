@@ -720,7 +720,7 @@ void BridgeWindow::updateDashboard() {
     const RecorderRecordingState rec = effectiveRecordingState();
     const RecorderOperationState op = effectiveOperationState();
     const ComponentLifecycleState prev = ui_->preview_panel ? ui_->preview_panel->lifecycleState() : ComponentLifecycleState::Idle;
-    const SessionCalibrationState cal = ui_->preview_panel ? ui_->preview_panel->sessionCalibrationState() : SessionCalibrationState::Manual;
+    const SessionCalibrationState cal = ui_->preview_panel ? ui_->preview_panel->sessionCalibrationState() : SessionCalibrationState::Uncalibrated;
 
     if (rec == RecorderRecordingState::Recording) ui_->recording_indicator_label->setText("RECORDING");
     else if (op == RecorderOperationState::Starting) ui_->recording_indicator_label->setText("STARTING");
@@ -731,8 +731,11 @@ void BridgeWindow::updateDashboard() {
         recording_elapsed_.isValid() && (rec == RecorderRecordingState::Recording || stop_requested_ ||
                                          verification_report_.state == RecordingVerificationState::Running)
             ? formatDuration(recording_elapsed_.elapsed()) : "00:00:00");
-    ui_->recording_path_label->setText(path_result_.absolute_path.isEmpty() ? "No validated destination" : path_result_.absolute_path);
-    ui_->recording_path_label->setToolTip(path_result_.summary());
+    const QString destination = path_result_.absolute_path.isEmpty()
+        ? QStringLiteral("No validated destination") : path_result_.absolute_path;
+    ui_->recording_path_label->setText(ui_->recording_path_label->fontMetrics().elidedText(
+        destination, Qt::ElideMiddle, (std::max)(120, ui_->recording_path_label->width())));
+    ui_->recording_path_label->setToolTip(destination + "\n" + path_result_.summary());
     ui_->run_identifier_label->setText(QString("run %1").arg(ui_->run_spin->value()));
     ui_->bridge_state_label->setText(componentLifecycleStateText(bridge_lifecycle_));
     ui_->recorder_state_label->setText(stateDetail(labrecorder_client_->connectionState(), rec, op));
@@ -920,8 +923,13 @@ void BridgeWindow::updateRecordingButtons() {
 }
 
 void BridgeWindow::refreshUi() {
+    if (!ui_) return;
     updateRecordingButtons();
     updateReadiness();
+    // Record Anyway only means something once a required check has failed and
+    // has not already been overridden.
+    ui_->setup_check_override_button->setEnabled(
+        !closing() && setup_check_.hasRequiredFailures() && !setup_check_.override_used);
     updateDashboard();
 }
 
@@ -1199,8 +1207,7 @@ void BridgeWindow::populateSetupCheck(const SetupCheckResult& result) {
         row->setToolTip(3, details);
         ui_->setup_check_tree->addTopLevelItem(row);
     }
-    ui_->setup_check_override_button->setEnabled(result.hasRequiredFailures() && !result.override_used);
-    updateDashboard();
+    refreshUi();
 }
 
 void BridgeWindow::onRunSetupCheck() {
@@ -1475,7 +1482,7 @@ void BridgeWindow::finishVerification(const vicon_lsl::gui::RecordingVerificatio
 
 QJsonObject BridgeWindow::diagnosticBundle() const {
     const ComponentLifecycleState prev = ui_->preview_panel ? ui_->preview_panel->lifecycleState() : ComponentLifecycleState::Idle;
-    const SessionCalibrationState cal = ui_->preview_panel ? ui_->preview_panel->sessionCalibrationState() : SessionCalibrationState::Manual;
+    const SessionCalibrationState cal = ui_->preview_panel ? ui_->preview_panel->sessionCalibrationState() : SessionCalibrationState::Uncalibrated;
     return {
         {"formatVersion", 1},
         {"createdAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},

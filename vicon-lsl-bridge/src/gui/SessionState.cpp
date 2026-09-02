@@ -189,9 +189,9 @@ QString verificationStateText(RecordingVerificationState state) {
 
 QString vicon_lsl::gui::calibrationStateText(SessionCalibrationState state) {
     return enumText(state,
-                    std::array{"Manual", "Collecting", "Current session", "Saved",
-                               "Needs attention"},
-                    "Manual");
+                    std::array{"Not calibrated", "Collecting", "Current session",
+                               "Saved", "Needs attention"},
+                    "Not calibrated");
 }
 
 QString vicon_lsl::gui::fileStateText(SessionFileState state) {

@@ -328,7 +328,8 @@ The default pattern is:
   Recorder-only mode
   deliberately removes the bridge requirement. A required failure blocks Start
   unless **Record Anyway** receives a nonempty reason; the result and reason are
-  retained in the session details.
+  retained in the session details. **Record Anyway** is available only while the
+  most recent check holds an unaccepted required failure.
 
 Closing follows one fixed process without blocking the window. It refuses new
 work, cancels stream search and file checks, requests preview and bridge Stop,
@@ -374,7 +375,8 @@ window cleanup waits forever.
   these deliberate skips are not source data loss.
 - Automatic stair alignment starts only when requested, uses 20 stable target
   samples, and lasts only for the current desktop session until explicitly saved
-  as a saved calibration. Manual controls stay saved.
+  as a saved calibration. There is no hand-entered alignment: a session with no
+  solved or applied calibration draws gaze in its published HoloLens frame.
 
 ### Merged CSV files
 
@@ -413,8 +415,9 @@ window cleanup waits forever.
 
 CSV and XDF playback share a timeline, current/duration and frame position,
 play/pause, speed-preserving seek, one-frame steps, start/end jumps, configurable
-time jumps, and an explicit loop toggle. Recent files and drag-and-drop open are
-supported. **Export Image** writes only the current preview image and never
+time jumps, and an explicit loop toggle. The transport controls, timeline, and
+**Open Recent** are available only while they have something to act on. Recent
+files and drag-and-drop open are supported. **Export Image** writes only the current preview image and never
 changes the source data. The preview drawing code supplies Fit View, Reset Camera,
 expanding bounds, axes/units, a legend, valid/total counts, layout-change trail
 cleanup, palette-aware drawing, and a headless rendering path without an OpenGL
@@ -442,9 +445,13 @@ count, position and angle error, confirmation for missing stream details, and a
 hidden flag. The stored error fields remain `translationRmsM` and
 `rotationRmsDegrees`, and the hidden flag remains `retired` for file
 compatibility. Saved calibrations can be selected, applied, copied, hidden,
-imported, and exported. Applying one is visible and reversible by choosing the
-manual transform. A new automatic result remains session-only until **Save
-Session Calibration** is chosen. Collection progress, quality, rejection, and
+imported, and exported. Selecting an entry only browses it; the displayed
+quality keeps describing the calibration actually in use, and an entry that is
+merely selected is marked as not applied. Controls that need a selected entry, a
+running preview, or a calibration in use are available only then. Applying one is
+visible and reversible by choosing **Clear Calibration**, which returns the
+preview to its uncalibrated HoloLens frame. A new automatic result remains session-only until **Save Session
+Calibration** is chosen. Collection progress, quality, rejection, and
 coordinate compatibility remain visible; missing coordinate details require an
 explicit confirmation before a saved calibration is complete.
 

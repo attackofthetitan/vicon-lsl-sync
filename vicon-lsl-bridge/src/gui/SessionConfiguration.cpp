@@ -40,14 +40,6 @@ QString rString(const QJsonObject& o, const char* k, const QString& def = {}) {
     return v.isString() ? v.toString() : def;
 }
 
-QJsonObject vec3ToJson(const PreviewVec3& v) {
-    return {{"x", v.x}, {"y", v.y}, {"z", v.z}};
-}
-
-PreviewVec3 rVec3(const QJsonObject& o, const PreviewVec3& def = {}) {
-    return {rDouble(o, "x", def.x), rDouble(o, "y", def.y), rDouble(o, "z", def.z)};
-}
-
 bool parseConfiguration(const QByteArray& bytes, const QString& bad_json,
                         SessionConfiguration& config, QString* error) {
     QJsonParseError parse_error;
@@ -272,8 +264,6 @@ QJsonObject SessionConfiguration::toJson() const {
             {"trailPoints", preview_trail_points},
             {"playbackSpeed", preview_playback_speed},
             {"loopPlayback", preview_loop_playback},
-            {"manualGazeTranslation", vec3ToJson(preview_gaze_translation)},
-            {"manualGazeRotationDegrees", vec3ToJson(preview_gaze_rotation_degrees)},
         }},
         {"recorder", QJsonObject{
             {"host", recorder_host}, {"port", recorder_port},
@@ -321,8 +311,6 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QStrin
     res.preview_trail_points = std::clamp(rInt(prev, "trailPoints", res.preview_trail_points), 2, 500);
     res.preview_playback_speed = std::clamp(rDouble(prev, "playbackSpeed", res.preview_playback_speed), 0.1, 4.0);
     res.preview_loop_playback = rBool(prev, "loopPlayback", res.preview_loop_playback);
-    if (prev.value("manualGazeTranslation").isObject()) res.preview_gaze_translation = rVec3(prev.value("manualGazeTranslation").toObject());
-    if (prev.value("manualGazeRotationDegrees").isObject()) res.preview_gaze_rotation_degrees = rVec3(prev.value("manualGazeRotationDegrees").toObject());
 
     const auto rec = o.value("recorder").toObject();
     res.recorder_host = rString(rec, "host", res.recorder_host);
