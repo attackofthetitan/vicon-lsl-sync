@@ -48,9 +48,17 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - A long recording destination no longer forces the window wider. The path has no
   spaces to wrap on, so its full width became the window's minimum width; it is
   now elided to the space available, with the full path in its tooltip.
-- The preview control area's height now follows the interface font instead of a
-  fixed 390 pixels, which pushed the lower rows out of view at larger font sizes
-  and scale factors.
+- The preview control rows no longer force sideways scrolling. The action,
+  file-load, transport and saved-calibration buttons sat in rows that could not
+  shrink below their combined width, so a narrow preview panel clipped the last
+  buttons in each row and pushed **Export Image** and the status text out of
+  reach entirely. Those rows now wrap onto as many lines as the width needs.
+- The timeline now has a full-width line of its own instead of competing with the
+  transport buttons, and the preview status text has one instead of competing
+  with the action buttons.
+- The preview control area now takes up to half the panel's height rather than a
+  fixed 390 pixels, so a reasonably sized window shows the controls without
+  scrolling while a small one still leaves the drawing area the larger share.
 
 ### Compatibility
 

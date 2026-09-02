@@ -1,4 +1,5 @@
 #include "gui/PreviewPanel.h"
+#include "gui/FlowLayout.h"
 #include "gui/PreviewFileLoader.h"
 #include "gui/WidgetHelpers.h"
 
@@ -40,6 +41,7 @@
 #include <QTimer>
 #include <QSlider>
 #include <QMimeData>
+#include <QResizeEvent>
 #include <QSignalBlocker>
 #include <QSet>
 #include <QUrl>
@@ -129,11 +131,11 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     alignment_note->setWordWrap(true);
     alignment_layout->addWidget(alignment_note);
 
-    auto* calibration_row = new QHBoxLayout();
+    auto* calibration_row = new FlowLayout();
     calibrate_button_ = makeButton("Calibrate from Stair Target", "Collect stable poses from the stair-target stream and apply a HoloLens transform for this session only.");
     clear_calibration_button_ = makeButton("Clear Calibration", "Discard the calibration in use and draw gaze in its published HoloLens frame again.");
-    addWidgets(calibration_row, {calibrate_button_, clear_calibration_button_});
-    calibration_row->addStretch(1);
+    calibration_row->addWidget(calibrate_button_);
+    calibration_row->addWidget(clear_calibration_button_);
     alignment_layout->addLayout(calibration_row);
 
     auto [profiles_group, profiles_layout] = makeGroup<QVBoxLayout>("Saved Calibration");
@@ -170,7 +172,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
                {stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_});
     profiles_layout->addLayout(pose_grid);
 
-    auto* profile_buttons = new QHBoxLayout();
+    auto* profile_buttons = new FlowLayout();
     auto* apply_profile_button = makeButton("Apply", "Apply the selected saved calibration to the live preview and session details.");
     save_calibration_button_ = makeButton("Save Session Calibration", "Save the current calibration with its physical setup and quality details.");
     auto* duplicate_profile_button = makeButton("Copy", "Copy the selected calibration with a separate ID.");
@@ -178,7 +180,10 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* import_profile_button = makeButton("Import", "Import a saved calibration file.");
     auto* export_profile_button = makeButton("Export", "Export the selected calibration to a file.");
     profile_selection_controls_ = {apply_profile_button, duplicate_profile_button, retire_profile_button, export_profile_button};
-    addWidgets(profile_buttons, {apply_profile_button, save_calibration_button_, duplicate_profile_button, retire_profile_button, import_profile_button, export_profile_button});
+    for (QWidget* control : {apply_profile_button, save_calibration_button_, duplicate_profile_button,
+                             retire_profile_button, import_profile_button, export_profile_button}) {
+        profile_buttons->addWidget(control);
+    }
     profiles_layout->addLayout(profile_buttons);
 
     calibration_quality_label_ = new QLabel("Quality: not calibrated");
@@ -203,7 +208,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     settings_tabs->addTab(alignment_page, "Alignment");
     controls_layout->addWidget(settings_tabs);
 
-    auto* button_row = new QHBoxLayout();
+    auto* button_row = new FlowLayout();
     start_button_ = new QPushButton("Start Preview");
     stop_button_ = new QPushButton("Stop Preview");
     stop_button_->setEnabled(false);
@@ -218,12 +223,20 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* fit_view_button = makeButton("Fit View", "Fit the camera to all currently visible data.");
     auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
     auto* export_image_button = makeButton("Export Image", "Export the current preview view as a PNG image without changing source data.");
-    addWidgets(button_row, {start_button_, stop_button_, open_csv_button_, open_xdf_button_, play_csv_button_,
-                            fit_view_button, reset_camera_button, export_image_button, delivery_metrics_label_});
-    button_row->addWidget(status_label_, 1);
+    for (QWidget* control : {start_button_, stop_button_, open_csv_button_, open_xdf_button_,
+                             play_csv_button_, fit_view_button, reset_camera_button, export_image_button}) {
+        button_row->addWidget(control);
+    }
     controls_layout->addLayout(button_row);
 
-    auto* load_row = new QHBoxLayout();
+    // The status and delivery text take a full-width line of their own. Sharing
+    // the button row meant their width pushed the last buttons off the edge.
+    auto* status_row = new QHBoxLayout();
+    status_row->addWidget(delivery_metrics_label_);
+    status_row->addWidget(status_label_, 1);
+    controls_layout->addLayout(status_row);
+
+    auto* load_row = new FlowLayout();
     file_state_label_ = new QLabel("No recording loaded");
     memory_label_ = new QLabel("memory 0 MiB");
     load_progress_ = new QProgressBar();
@@ -236,11 +249,15 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     recent_files_combo_->setMinimumContentsLength(16);
     recent_files_combo_->setToolTip("Recently opened CSV and XDF recordings.");
     open_recent_button_ = makeButton("Open Recent", "Open the selected recent recording.");
-    load_row->addWidget(file_state_label_, 1);
-    addWidgets(load_row, {memory_label_, load_progress_, cancel_load_button_, recent_files_combo_, open_recent_button_});
+    load_row->addWidget(file_state_label_);
+    load_row->addWidget(memory_label_);
+    load_row->addWidget(load_progress_);
+    load_row->addWidget(cancel_load_button_);
+    load_row->addWidget(recent_files_combo_);
+    load_row->addWidget(open_recent_button_);
     controls_layout->addLayout(load_row);
 
-    auto* playback_row = new QHBoxLayout();
+    auto* playback_row = new FlowLayout();
     auto* jump_start_button = makeButton("|<", "Go to the first loaded frame.", "Jump to recording start");
     auto* step_back_button = makeButton("<", "Go back one loaded frame.", "Step one frame backward");
     auto* jump_back_button = makeButton("- Jump", "Seek backward by the selected time interval.", "Jump backward by selected time");
@@ -265,23 +282,22 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     playback_row->addWidget(jump_forward_button);
     playback_row->addWidget(step_forward_button);
     playback_row->addWidget(jump_end_button);
-    playback_row->addWidget(timeline_slider_, 1);
     playback_row->addWidget(loop_playback_check_);
     playback_row->addWidget(playback_position_label_);
     playback_controls_ = {jump_start_button, step_back_button, jump_back_button,
                           jump_forward_button, step_forward_button, jump_end_button};
     controls_layout->addLayout(playback_row);
+    // The timeline needs the full width to be usable, so it sits below the
+    // transport controls rather than competing with them for space.
+    controls_layout->addWidget(timeline_slider_);
 
-    auto* controls_scroll = new QScrollArea();
-    controls_scroll->setWidgetResizable(true);
-    controls_scroll->setFrameShape(QFrame::NoFrame);
-    controls_scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
-    controls_scroll->setAccessibleName("Scrollable preview controls");
-    controls_scroll->setWidget(controls_group);
-    // Derived from the interface font instead of a fixed 390 px, which clipped
-    // the lower control rows whenever the font or scale factor grew.
-    controls_scroll->setMaximumHeight(fontMetrics().height() * 26);
-    layout->addWidget(controls_scroll);
+    controls_scroll_ = new QScrollArea();
+    controls_scroll_->setWidgetResizable(true);
+    controls_scroll_->setFrameShape(QFrame::NoFrame);
+    controls_scroll_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+    controls_scroll_->setAccessibleName("Scrollable preview controls");
+    controls_scroll_->setWidget(controls_group);
+    layout->addWidget(controls_scroll_);
 
     csv_timer_ = new QTimer(this);
     csv_timer_->setInterval(16);
@@ -444,6 +460,17 @@ void PreviewPanel::openRecording(const QString& path) {
     if (path.endsWith(".xdf", Qt::CaseInsensitive)) startFileLoad(PreviewFileType::Xdf, path);
     else if (path.endsWith(".csv", Qt::CaseInsensitive)) startFileLoad(PreviewFileType::Csv, path);
     else setStatus("Unsupported preview recording type: " + QFileInfo(path).suffix());
+}
+
+void PreviewPanel::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    if (!controls_scroll_) return;
+    // A fixed cap either clipped the controls on a short panel or starved the
+    // drawing area on a tall one. Give the controls up to half the panel, so a
+    // reasonably sized window shows them without scrolling and a small one still
+    // leaves the drawing area the larger share.
+    const int line = (std::max)(1, fontMetrics().height());
+    controls_scroll_->setMaximumHeight((std::max)(line * 10, height() / 2));
 }
 
 void PreviewPanel::fitView() { widget_->fitView(); }
