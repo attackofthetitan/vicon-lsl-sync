@@ -4,6 +4,13 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+### Changed
+
+- The order a guided session starts and stops in, the checks that decide whether
+  a recording may begin, and the rules for which streams survive a rediscovery
+  now live beside the desktop window rather than inside it, so each can be
+  exercised on its own.
+
 ## [1.12.1] - 2026-09-02
 
 ### Fixed
@@ -42,10 +49,6 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
   did not need and which every desktop translation unit was parsing.
 - The event log appends new entries instead of re-rendering every retained
   entry for each one.
-- The order a guided session starts and stops in, the checks that decide whether
-  a recording may begin, and the rules for which streams survive a rediscovery
-  now live beside the desktop window rather than inside it, so each can be
-  exercised on its own.
 
 ### Compatibility
 
