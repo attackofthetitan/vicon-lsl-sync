@@ -70,6 +70,10 @@ verify_payload() {
   test -d "$recorder_app/Contents/Frameworks/QtCore.framework"
   test -e "$root/Frameworks/lsl.framework/lsl"
   find "$root" -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
+  test -f "$root/stair_model/stair_model1.obj"
+  test -f "$bridge_app/Contents/Resources/stair_model/stair_model1.obj"
+  plutil -extract NSLocalNetworkUsageDescription raw "$bridge_app/Contents/Info.plist" >/dev/null \
+    || fail "Bundle is missing NSLocalNetworkUsageDescription"
 
   [[ "$(plutil -extract CFBundleShortVersionString raw "$bridge_app/Contents/Info.plist")" == "$expected_version" ]]
   codesign --verify --deep --strict "$bridge_app"
@@ -89,6 +93,40 @@ verify_payload() {
   fi
 }
 
+verify_disk_image() {
+  local root="$1"
+  local bridge_app="$root/vicon-lsl-bridge-gui.app"
+  local recorder_app="$root/LabRecorder.app"
+  local tools="$root/Command Line Tools"
+
+  # Drag-install layout: both bundles beside a link to /Applications, so they
+  # land in one stable place and stay siblings.
+  test -d "$bridge_app"
+  test -d "$recorder_app"
+  test -L "$root/Applications"
+  [[ "$(readlink "$root/Applications")" == "/Applications" ]] \
+    || fail "Applications link does not point at /Applications"
+
+  test -x "$bridge_app/Contents/MacOS/vicon-lsl-bridge-gui"
+  test -x "$recorder_app/Contents/MacOS/LabRecorder"
+  test -d "$bridge_app/Contents/Frameworks/QtCore.framework"
+  test -f "$bridge_app/Contents/Resources/stair_model/stair_model1.obj"
+  [[ "$(plutil -extract CFBundleShortVersionString raw "$bridge_app/Contents/Info.plist")" == "$expected_version" ]]
+  plutil -extract NSLocalNetworkUsageDescription raw "$bridge_app/Contents/Info.plist" >/dev/null \
+    || fail "Bundle is missing NSLocalNetworkUsageDescription"
+  codesign --verify --deep --strict "$bridge_app"
+  codesign --verify --deep --strict "$recorder_app"
+
+  # The command line payload stays on the image, out of the drag target's way.
+  test -x "$tools/vicon-lsl-bridge"
+  test -x "$tools/LabRecorderCLI"
+  test -f "$tools/LabRecorder.cfg"
+  if ! (cd "$tools" && ./vicon-lsl-bridge --help >/dev/null); then
+    otool -L "$tools/vicon-lsl-bridge" >&2
+    fail "vicon-lsl-bridge execution failed in $tools"
+  fi
+}
+
 echo "Verifying macOS package artifacts for ${artifact_name}..."
 test -n "$expected_version"
 test -f "$archive"
@@ -101,7 +139,7 @@ verify_payload "$archive_root"
 
 hdiutil attach -readonly -nobrowse -mountpoint "$mount_root" "$disk_image" >/dev/null
 mounted=true
-verify_payload "$mount_root"
+verify_disk_image "$mount_root"
 
 echo "All macOS archive and disk-image verification checks passed successfully."
 echo "The release package is ad-hoc signed; Developer ID signing and notarization are not configured."

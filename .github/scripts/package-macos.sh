@@ -131,6 +131,34 @@ find package/Frameworks -maxdepth 1 -type f -name 'liblsl*.dylib' -exec codesign
 codesign --force --sign - package/vicon-lsl-bridge
 codesign --force --sign - package/LabRecorderCLI
 
-# Create tar.gz archive and Apple Disk Image (.dmg)
+# Create tar.gz archive from the flat layout
 tar -czf "${artifact_name}.tar.gz" -C package .
-hdiutil create -volname "Vicon LSL Bridge" -srcfolder package -ov -format UDZO "${artifact_name}.dmg"
+
+# The disk image is arranged for drag installation instead of being a copy of
+# the flat layout. Running the app from the mounted image gives it a different
+# path on every mount, so macOS cannot recognise it between launches and any
+# permission the user grants is asked for again. Dragging both bundles to
+# /Applications gives them one stable location, and keeps them siblings, which
+# is how the bridge locates the recorder.
+dmg_root=dmg-root
+rm -rf "$dmg_root"
+mkdir -p "$dmg_root"
+cp -R -- package/vicon-lsl-bridge-gui.app "$dmg_root/"
+cp -R -- package/LabRecorder.app "$dmg_root/"
+ln -s /Applications "$dmg_root/Applications"
+
+# Everything that is not an application bundle stays available, but out of the
+# way of the drag target. The launcher wrappers are omitted: they expect the
+# flat layout of the tar.gz and would not resolve here.
+mkdir -p "$dmg_root/Command Line Tools"
+for entry in package/*; do
+  name="$(basename "$entry")"
+  case "$name" in
+    vicon-lsl-bridge-gui.app|LabRecorder.app|vicon-lsl-bridge-gui|LabRecorder) continue ;;
+  esac
+  cp -R -- "$entry" "$dmg_root/Command Line Tools/"
+done
+
+test -d "$dmg_root/vicon-lsl-bridge-gui.app"
+test -L "$dmg_root/Applications"
+hdiutil create -volname "Vicon LSL Bridge" -srcfolder "$dmg_root" -ov -format UDZO "${artifact_name}.dmg"
