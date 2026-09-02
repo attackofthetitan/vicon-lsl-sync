@@ -28,10 +28,10 @@ added to the command line, the streams, or the saved-session formats.
   outlet, now that the streams flatten samples themselves.
 - [x] The dependency-light logic suite, the stream recovery suite, and the
   bridge lifecycle suite pass locally.
-- [x] The hosted Linux, Windows, macOS, and HoloLens matrix is green. Run
-  `33595629244` passed all eight jobs on commit `617a37b`, the head of
-  `bridge-cleanup` before the version change. The version bump re-runs it, and
-  the tagged build must be green on the exact commit that is released.
+- [x] The hosted Linux, Windows, macOS, and HoloLens matrix is green on the
+  exact commit to be released: run `33599838969` passed all eight jobs on
+  `eb27378`, the head of `bridge-cleanup`. The tagged build must be green again
+  on the merge commit that carries the tag.
 - [x] Generated C++ and C# stream files are current: `generate_stream_contracts.py --check`
   reports no drift, and `git diff --check` is clean.
 
