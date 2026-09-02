@@ -4,6 +4,7 @@
 
 namespace labrecorder_client_tests {
 
+using vicon_lsl::gui::SessionCalibrationState;
 using vicon_lsl::gui::StreamBinding;
 using vicon_lsl::gui::StreamIdentity;
 using vicon_lsl::gui::requiredStreamReady;
