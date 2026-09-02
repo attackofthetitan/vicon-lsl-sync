@@ -238,7 +238,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     play_csv_button_ = new QPushButton("Play Recording");
     play_csv_button_->setEnabled(false);
     status_label_ = new QLabel("Preview stopped");
-    status_label_->setWordWrap(true);
+    status_label_->setWordWrap(false);
+    status_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     delivery_metrics_label_ = new QLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
     // Without wrapping this one line claimed 355 px of minimum width.
     delivery_metrics_label_->setWordWrap(true);
@@ -261,6 +262,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
 
     auto* load_row = new FlowLayout();
     file_state_label_ = new QLabel("No recording loaded");
+    file_state_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     memory_label_ = new QLabel("memory 0 MiB");
     load_progress_ = new QProgressBar();
     load_progress_->setRange(0, 100);
@@ -491,6 +493,8 @@ void PreviewPanel::resizeEvent(QResizeEvent* event) {
     // leaves the drawing area the larger share.
     const int line = (std::max)(1, fontMetrics().height());
     controls_scroll_->setMaximumHeight((std::max)(line * 10, height() * 55 / 100));
+    refreshStatusText();
+    setFileState(file_state_text_);
 }
 
 void PreviewPanel::fitView() { widget_->fitView(); }
@@ -773,7 +777,7 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
 
     auto* loader = new PreviewFileLoader(type, path, vicon_xform, gazeTransform(), tolerance_spin_->value(), opt, this);
     file_loader_ = loader;
-    file_state_label_->setText("Loading " + QFileInfo(path).fileName());
+    setFileState("Loading " + QFileInfo(path).fileName());
     emit fileStateChanged(gui::SessionFileState::Loading, "Loading " + QFileInfo(path).fileName());
     load_progress_->setValue(0);
     load_progress_->setVisible(true);
@@ -783,7 +787,7 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
     connect(loader, &PreviewFileLoader::progressChanged, this, [this, loader](const QString& stage, int pct, const QString& detail) {
         if (file_loader_ != loader) return;
         load_progress_->setValue(pct);
-        file_state_label_->setText(stage + (detail.isEmpty() ? QString() : ": " + detail));
+        setFileState(stage + (detail.isEmpty() ? QString() : ": " + detail));
     });
     connect(loader, &PreviewFileLoader::mappingRequired, this, [this, loader](const XdfMappingAnalysis& a) {
         requestRecordedStreamMapping(loader, a);
@@ -793,7 +797,7 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
     });
     connect(loader, &PreviewFileLoader::loadFailed, this, [this, loader](const QString& err, bool canceled) {
         if (file_loader_ != loader) return;
-        file_state_label_->setText(canceled ? "Load canceled" : "Load failed");
+        setFileState(canceled ? "Load canceled" : "Load failed");
         emit fileStateChanged(canceled ? gui::SessionFileState::Canceled : gui::SessionFileState::Failed, err);
         setStatus((canceled ? "Canceled file load; previous source retained: " : "Failed to load recording; previous source retained: ") + err);
     });
@@ -814,7 +818,7 @@ void PreviewPanel::applyLoadedRecording(PreviewFileLoader* loader, const QString
     std::optional<PreviewRecording> loaded = loader->takeRecording();
     if (!loaded || loaded->frames.empty()) {
         setStatus("Recording contained no usable preview frames; previous source retained");
-        file_state_label_->setText("No usable frames");
+        setFileState("No usable frames");
         return;
     }
     csv_timer_->stop();
@@ -829,7 +833,7 @@ void PreviewPanel::applyLoadedRecording(PreviewFileLoader* loader, const QString
     timeline_slider_->setEnabled(true);
     refreshControlStates();
     memory_label_->setText("memory " + QString::number(static_cast<double>(loaded->estimated_memory_bytes) / (1024.0 * 1024.0), 'f', 1) + " MiB");
-    file_state_label_->setText("Loaded " + QFileInfo(loader->path()).fileName());
+    setFileState("Loaded " + QFileInfo(loader->path()).fileName());
     emit fileStateChanged(gui::SessionFileState::Loaded, QDir::toNativeSeparators(QFileInfo(loader->path()).absoluteFilePath()));
     rememberRecentFile(loader->path());
     updatePlaybackDisplay();
@@ -941,7 +945,7 @@ void PreviewPanel::cancelFileLoad() {
     if (file_loader_) {
         file_loader_->cancel();
         cancel_load_button_->setEnabled(false);
-        file_state_label_->setText("Canceling load...");
+        setFileState("Canceling load...");
     }
 }
 
@@ -1389,6 +1393,7 @@ QString PreviewPanel::defaultStairModelPath() const {
     const QString app_dir = QCoreApplication::applicationDirPath();
     for (const QString& cand : {
         QDir(app_dir).filePath("stair_model/stair_model1.obj"),
+        QDir(app_dir).filePath("../Resources/stair_model/stair_model1.obj"),
         QDir::current().filePath("stair_model/stair_model1.obj"),
         QDir::current().filePath("assets/stair_model/stair_model1.obj"),
         QDir::current().filePath("vicon-lsl-bridge/assets/stair_model/stair_model1.obj"),
@@ -1398,6 +1403,28 @@ QString PreviewPanel::defaultStairModelPath() const {
     return {};
 }
 
-void PreviewPanel::setStatus(const QString& status) { status_label_->setText(status); }
+void PreviewPanel::setStatus(const QString& status) {
+    status_text_ = status;
+    refreshStatusText();
+}
+
+void PreviewPanel::setFileState(const QString& text) {
+    file_state_text_ = text;
+    if (!file_state_label_) return;
+    // The loader's completion detail lists every stream, which wrapped into
+    // several lines and grew the control area each time a file was opened.
+    file_state_label_->setToolTip(text);
+    file_state_label_->setText(file_state_label_->fontMetrics().elidedText(
+        text, Qt::ElideRight, (std::max)(120, file_state_label_->width())));
+}
+
+void PreviewPanel::refreshStatusText() {
+    if (!status_label_) return;
+    // A recording summary runs to several hundred characters. Wrapping it made
+    // the control area grow by several lines every time a file was opened.
+    status_label_->setToolTip(status_text_);
+    status_label_->setText(status_label_->fontMetrics().elidedText(
+        status_text_, Qt::ElideRight, (std::max)(120, status_label_->width())));
+}
 
 } // namespace vicon_lsl

@@ -116,6 +116,8 @@ private:
     void saveSettings() const;
     QString defaultStairModelPath() const;
     void setStatus(const QString& status);
+    void refreshStatusText();
+    void setFileState(const QString& text);
     void loadCalibrationProfiles();
     void saveCalibrationProfiles();
     void refreshCalibrationProfileUi(const QString& select_id = {});
@@ -131,6 +133,8 @@ private:
 
     PreviewWidget* widget_ = nullptr;
     QScrollArea* controls_scroll_ = nullptr;
+    QString status_text_;
+    QString file_state_text_;
     QLineEdit* marker_stream_edit_ = nullptr;
     QLineEdit* segment_stream_edit_ = nullptr;
     QLineEdit* gaze_stream_edit_ = nullptr;
