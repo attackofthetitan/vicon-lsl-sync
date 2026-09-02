@@ -29,6 +29,8 @@ class QCheckBox;
 class QComboBox;
 class QDragEnterEvent;
 class QDropEvent;
+class QResizeEvent;
+class QScrollArea;
 
 namespace vicon_lsl {
 
@@ -71,6 +73,7 @@ signals:
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void displayLatestLiveFrame();
@@ -128,6 +131,7 @@ private:
     void refreshControlStates();
 
     PreviewWidget* widget_ = nullptr;
+    QScrollArea* controls_scroll_ = nullptr;
     QLineEdit* marker_stream_edit_ = nullptr;
     QLineEdit* segment_stream_edit_ = nullptr;
     QLineEdit* gaze_stream_edit_ = nullptr;

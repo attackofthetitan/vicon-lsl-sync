@@ -8,6 +8,8 @@
 #include <QEventLoop>
 #include <QLineEdit>
 #include <QPixmap>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSlider>
 #include <QTemporaryDir>
@@ -53,6 +55,22 @@ bool controlsAreDescribed(const QWidget& window) {
     return true;
 }
 
+// Controls packed into a row that cannot shrink push their last members off the
+// edge and force sideways scrolling. Nothing in this window should need it.
+bool noHorizontalScrolling(const QWidget& window) {
+    bool ok = true;
+    for (const QScrollArea* area : window.findChildren<QScrollArea*>()) {
+        const QScrollBar* bar = area->horizontalScrollBar();
+        if (bar && bar->maximum() > 0) {
+            std::cerr << "Horizontal scrolling required in \""
+                      << area->accessibleName().toStdString() << "\": content is "
+                      << bar->maximum() << " px wider than the viewport" << std::endl;
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -96,8 +114,10 @@ int main(int argc, char* argv[]) {
             !rendered.isNull() &&
             window.size() == target_size &&
             rendered.deviceIndependentSize() == QSizeF(target_size);
+        const bool no_sideways_scrolling = noHorizontalScrolling(window);
 
-        if (!fits || !controls_are_described || !rendered_at_requested_size) {
+        if (!fits || !controls_are_described || !rendered_at_requested_size ||
+            !no_sideways_scrolling) {
             std::cerr << "GUI check failed: minimum="
                       << minimum.width() << 'x' << minimum.height()
                       << ", window=" << window.width() << 'x' << window.height()
@@ -109,7 +129,8 @@ int main(int argc, char* argv[]) {
                       << std::endl;
         }
 
-        app.exit(fits && controls_are_described && rendered_at_requested_size ? 0 : 1);
+        app.exit(fits && controls_are_described && rendered_at_requested_size &&
+                 no_sideways_scrolling ? 0 : 1);
     });
 
     return app.exec();
