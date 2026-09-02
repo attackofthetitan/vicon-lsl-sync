@@ -76,13 +76,19 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
         tests/SessionGuiModelTests.cpp
         tests/RecordingVerifierTests.cpp
         tests/RecorderProcessControllerTests.cpp
+        tests/SessionSequencerTests.cpp
+        tests/SetupCheckPolicyTests.cpp
+        tests/StreamInventoryTests.cpp
         src/gui/LabRecorderClient.cpp
         src/gui/LabRecorderFilenamePolicy.cpp
         src/gui/CalibrationProfileStore.cpp
         src/gui/RecorderProcessController.cpp
         src/gui/RecordingVerifier.cpp
         src/gui/SessionConfiguration.cpp
+        src/gui/SessionSequencer.cpp
         src/gui/SessionState.cpp
+        src/gui/SetupCheckPolicy.cpp
+        src/gui/StreamInventory.cpp
     )
     target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
     target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE

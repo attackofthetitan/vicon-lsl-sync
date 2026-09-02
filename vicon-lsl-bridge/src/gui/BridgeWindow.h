@@ -4,6 +4,7 @@
 #include "gui/LabRecorderFilenamePolicy.h"
 #include "gui/RecordingVerifier.h"
 #include "gui/SessionConfiguration.h"
+#include "gui/SessionSequencer.h"
 #include "gui/SessionState.h"
 
 #include <QElapsedTimer>
@@ -133,10 +134,7 @@ private:
     SetupCheckResult runSetupCheck() const;
     void beginRecordingAfterSetupCheck();
     void completePendingRecordingStart();
-    QVector<vicon_lsl::gui::StreamIdentity> selectedStreams() const;
     void populateStreamTable();
-    void mergeStreamInventory(
-        const QVector<vicon_lsl::gui::StreamIdentity>& streams);
     void populateBindingCombos();
     void updateBindingsFromUi();
     static void selectBindingCombo(QComboBox* combo,
@@ -152,6 +150,7 @@ private:
     void finishVerification(const vicon_lsl::gui::RecordingVerificationReport& report);
     void advanceGuidedStart();
     void advanceGuidedStop();
+    vicon_lsl::gui::ShutdownInputs shutdownInputs() const;
     RecorderRecordingState effectiveRecordingState() const;
     RecorderOperationState effectiveOperationState() const;
     bool recordingActiveOrPending() const;
