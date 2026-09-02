@@ -122,7 +122,9 @@ void ViconClient::disconnect() {
 }
 
 bool ViconClient::isConnected() const {
-    return connected_;
+    // connected_ tracks what this object asked for; the SDK knows whether the
+    // socket is still up. Both have to agree for a session to keep streaming.
+    return connected_ && client_.IsConnected().Connected;
 }
 
 bool ViconClient::getFrame() {

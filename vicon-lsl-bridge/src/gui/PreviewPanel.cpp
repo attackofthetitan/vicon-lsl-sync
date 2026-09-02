@@ -586,7 +586,6 @@ void PreviewPanel::displayLatestLiveFrame() {
     PreviewFrame frame;
     PreviewDeliveryMetrics metrics;
     if (worker_->takeLatestFrame(frame, metrics)) widget_->setFrame(std::move(frame));
-    metrics = worker_->deliveryMetrics();
     last_delivery_metrics_ = metrics;
     const bool late = metrics.display_latency_ms > kMaximumLivePreviewDelayMs;
     delivery_metrics_label_->setText(

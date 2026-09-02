@@ -3,7 +3,6 @@
 #include "Config.h"
 #include "MarkerStream.h"
 #include "SegmentStream.h"
-#include "ViconClient.h"
 #include "ViconDiagnostics.h"
 
 #include <atomic>
@@ -81,6 +80,7 @@ private:
     vicon_lsl::ViconLayout known_layout_;
     unsigned int frame_count_ = 0;
     unsigned int frames_since_layout_check_ = 0;
+    unsigned int consecutive_initial_frame_failures_ = 0;
     vicon_lsl::DiagnosticAggregator diagnostic_aggregator_;
     std::string last_diagnostic_message_;
 };

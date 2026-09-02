@@ -30,7 +30,4 @@ StreamSchema buildMarkerStreamSchema(const std::vector<NamedViconItem>& marker_n
 StreamSchema buildSegmentStreamSchema(const std::vector<NamedViconItem>& segment_names,
                                       const std::string& stream_name);
 
-std::vector<double> flattenMarkerSamples(const std::vector<MarkerSample>& markers);
-std::vector<double> flattenSegmentSamples(const std::vector<SegmentSample>& segments);
-
 } // namespace vicon_lsl

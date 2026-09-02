@@ -7,16 +7,6 @@ void appendChannel(StreamSchema& schema, std::string label, std::string unit) {
     schema.channels.push_back(StreamChannel{std::move(label), std::move(unit)});
 }
 
-template <typename Sample>
-std::vector<double> flattenSamples(const std::vector<Sample>& samples) {
-    std::vector<double> flattened;
-    flattened.reserve(samples.size() * Sample{}.size());
-    for (const auto& sample : samples) {
-        flattened.insert(flattened.end(), sample.begin(), sample.end());
-    }
-    return flattened;
-}
-
 } // namespace
 
 StreamSchema buildMarkerStreamSchema(const std::vector<NamedViconItem>& marker_names,
@@ -52,14 +42,6 @@ StreamSchema buildSegmentStreamSchema(const std::vector<NamedViconItem>& segment
     }
 
     return schema;
-}
-
-std::vector<double> flattenMarkerSamples(const std::vector<MarkerSample>& markers) {
-    return flattenSamples(markers);
-}
-
-std::vector<double> flattenSegmentSamples(const std::vector<SegmentSample>& segments) {
-    return flattenSamples(segments);
 }
 
 } // namespace vicon_lsl

@@ -95,6 +95,10 @@ void StreamDiscoveryWorker::run() {
         }
         QHash<QString, int> streams_per_name;
         for (const gui::StreamIdentity& identity : result) ++streams_per_name[identity.name];
+        // Each affected stream carries its own warning, but the summary names a
+        // duplicated stream once rather than once per copy of it. Walking the
+        // sorted results keeps that summary in a stable order.
+        QStringList reported_duplicates;
         for (gui::StreamIdentity& identity : result) {
             const int duplicates = streams_per_name.value(identity.name);
             if (duplicates <= 1) continue;
@@ -102,8 +106,11 @@ void StreamDiscoveryWorker::run() {
                 "Several streams share this name; choose one by source ID or select Follow by name";
             identity.warning = identity.warning.isEmpty() ? message
                                                           : identity.warning + "; " + message;
-            warnings.push_back(identity.name + " has " + QString::number(duplicates) +
-                               " visible sources");
+            if (!reported_duplicates.contains(identity.name)) {
+                reported_duplicates.push_back(identity.name);
+                warnings.push_back(identity.name + " has " + QString::number(duplicates) +
+                                   " visible sources");
+            }
         }
         emit discoveryFinished(result, warnings.join("; "));
         emit lifecycleChanged(ComponentLifecycleState::Stopped,

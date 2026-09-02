@@ -47,6 +47,14 @@ for publishing HoloLens data unchanged.
 - Split the wait into pieces no longer than 100 ms so Stop responds quickly.
 - Read one Vicon frame before creating any LSL stream.
 - If setup, the first frame, or layout discovery fails, disconnect and try again. Do not publish part of a layout.
+- Retry the first consecutive first-frame failure without waiting, because a
+  server that is still starting usually delivers on the next attempt. Wait the
+  chosen reconnect interval before every later consecutive first-frame failure,
+  so a server that accepts connections but never sends a frame cannot drive an
+  unthrottled retry loop. A session that gets past the first frame clears the
+  count.
+- Treat the connection as lost when either the recorded connection state or the
+  Vicon SDK reports it is no longer connected.
 - `stop()` only changes the run flag.
 - Calling `run()` on a stopped `ViconLSLBridge` does not reset that flag. A stopped object is not reusable as a new session.
 

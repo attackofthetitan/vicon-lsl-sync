@@ -3,17 +3,13 @@
 #include "StreamSchema.h"
 #include "ViconFrameMapping.h"
 
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 
-constexpr vicon_lsl::detail::ViconNumericOutletProfile kMarkerOutletProfile{
-    "Marker",
-    "markers",
-    "No markers discovered; marker stream not created",
-    "Marker outlet factory returned no outlet",
-    "Failed to push marker LSL sample: ",
-};
+constexpr vicon_lsl::detail::ViconNumericOutletProfile kMarkerOutletProfile{"Marker", "marker"};
 
 } // namespace
 
@@ -41,14 +37,15 @@ bool MarkerStream::isInitialized() const {
 }
 
 StreamPushResult MarkerStream::pushSample(
-    const std::vector<vicon_lsl::MarkerObjectRead>& markers,
+    const std::vector<vicon_lsl::MarkerTranslationRead>& markers,
     double timestamp) {
     return outlet_.pushSample([&markers] {
-        std::vector<vicon_lsl::MarkerSample> samples;
-        samples.reserve(markers.size());
+        std::vector<double> channels;
+        channels.reserve(markers.size() * std::tuple_size_v<vicon_lsl::MarkerSample>);
         for (const auto& marker : markers) {
-            samples.push_back(vicon_lsl::markerSampleForLsl(marker.value));
+            const vicon_lsl::MarkerSample sample = vicon_lsl::markerSampleForLsl(marker);
+            channels.insert(channels.end(), sample.begin(), sample.end());
         }
-        return vicon_lsl::flattenMarkerSamples(samples);
+        return channels;
     }, timestamp);
 }

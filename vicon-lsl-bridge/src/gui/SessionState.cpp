@@ -44,17 +44,26 @@ void SessionEventLog::acknowledgeLastError() {
     last_error_.clear();
 }
 
+bool SessionEventLog::matchesFilter(const SessionEvent& event,
+                                    EventSeverity minimum,
+                                    const QVector<SessionComponent>& components) {
+    return static_cast<int>(event.severity) >= static_cast<int>(minimum) &&
+           (components.isEmpty() || components.contains(event.component));
+}
+
+QString SessionEventLog::formatEvent(const SessionEvent& event) {
+    return event.timestamp.toString(Qt::ISODateWithMs) + " [" +
+           severityText(event.severity) + "] [" +
+           componentText(event.component) + "] " + event.message;
+}
+
 QString SessionEventLog::toText(EventSeverity minimum,
                                 const QVector<SessionComponent>& components) const {
     QStringList lines;
     for (const SessionEvent& event : entries_) {
-        if (static_cast<int>(event.severity) < static_cast<int>(minimum) ||
-            (!components.isEmpty() && !components.contains(event.component))) {
-            continue;
+        if (matchesFilter(event, minimum, components)) {
+            lines.push_back(formatEvent(event));
         }
-        lines.push_back(event.timestamp.toString(Qt::ISODateWithMs) + " [" +
-                        severityText(event.severity) + "] [" +
-                        componentText(event.component) + "] " + event.message);
     }
     return lines.join('\n');
 }
