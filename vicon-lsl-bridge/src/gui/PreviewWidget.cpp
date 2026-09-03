@@ -48,7 +48,10 @@ double radians(double degrees) {
 } // namespace
 
 PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(420, 320);
+    // A floor this widget cannot go below is a floor the panel's controls get
+    // laid over when the window is short, so keep it to a usable scrap of
+    // drawing area and let the splitter hand out the real size.
+    setMinimumSize(240, 160);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAccessibleName("Motion and gaze preview");

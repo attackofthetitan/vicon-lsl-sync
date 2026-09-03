@@ -4,6 +4,53 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.4] - 2026-09-03
+
+### Fixed
+
+- The live preview controls are no longer drawn on top of the drawing area. On a
+  short window the preview claimed a fixed 320 pixels of height, more than the
+  panel had left, and the controls beneath were painted over it. The drawing
+  area now yields height instead, so the two never share pixels.
+- The Session Status block lines up. "Elapsed:" sat in the column that holds
+  values while its clock sat in the column that holds captions, and the preview
+  update counter wrapped to three lines and dragged its row out of line with the
+  rest. Every field is now a caption and a value in fixed columns, one line each.
+- Status values shorten themselves rather than reshaping the window. A long
+  recorder state or destination path used to either wrap and change the row
+  height or refuse to let the window narrow; each now elides to one line and
+  offers the full text as a tooltip.
+- The preview status text and the delivery counter no longer overlap. They
+  shared a row, so the counter wrapped to two lines and ran through the text
+  beside it. They are separate lines now.
+- The Events tab no longer scrolls sideways. Its four buttons sat in a row that
+  could not wrap and needed 627 pixels in a 520 pixel tab.
+- Text fields show the start of their value. Narrowing the window left each field
+  scrolled to wherever it had been, so a study root read as "ders/9z/t6lypx..."
+  and a stream name as "iconMarkers".
+- The preview status and file state no longer blank themselves. The first resize
+  overwrote both labels with the empty string they were tracking internally.
+- A row of controls that wraps now reports the height it really needs. It claimed
+  the height of a single row, so containers above it came up short by the rows
+  that had wrapped, and a scroll bar appeared with space still to spare.
+
+### Changed
+
+- The playback transport, timeline, and loop control appear once a recording is
+  loaded. Shown disabled at all times, they cost about ninety pixels and pushed
+  the live controls into a scroll area on an ordinary window.
+- The preview source fields reflow from two per row to one as the panel narrows,
+  rather than holding a fixed grid and scrolling sideways.
+- The window minimum is 800x560, replacing 680x540. The old floor could be
+  reached but never laid out; the content actually demanded 800x601.
+- Storage and preview update counts read as plain values under their captions,
+  instead of repeating the caption inside the value.
+
+### Compatibility
+
+- No configuration, file format, or command line change. Roll back to `v1.13.3`.
+
+
 ## [1.13.3] - 2026-09-03
 
 ### Changed

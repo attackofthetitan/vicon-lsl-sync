@@ -169,8 +169,8 @@ QString formatDuration(qint64 ms) {
 }
 
 QString gibText(qint64 bytes) {
-    if (bytes < 0) return "Storage: unknown";
-    return "Storage: " + QString::number(static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0), 'f', 1) + " GiB";
+    if (bytes < 0) return "unknown";
+    return QString::number(static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0), 'f', 1) + " GiB";
 }
 
 QJsonArray streamInventoryJson(const QVector<StreamIdentity>& streams) {
@@ -733,10 +733,10 @@ void BridgeWindow::updateDashboard() {
             ? formatDuration(recording_elapsed_.elapsed()) : "00:00:00");
     const QString destination = path_result_.absolute_path.isEmpty()
         ? QStringLiteral("No validated destination") : path_result_.absolute_path;
-    ui_->recording_path_label->setText(ui_->recording_path_label->fontMetrics().elidedText(
-        destination, Qt::ElideMiddle, (std::max)(120, ui_->recording_path_label->width())));
+    ui_->recording_path_label->setText(destination);
     ui_->recording_path_label->setToolTip(destination + "\n" + path_result_.summary());
-    ui_->run_identifier_label->setText(QString("run %1").arg(ui_->run_spin->value()));
+    // The dashboard supplies the caption, so the value is just the number.
+    ui_->run_identifier_label->setText(QString::number(ui_->run_spin->value()));
     ui_->bridge_state_label->setText(componentLifecycleStateText(bridge_lifecycle_));
     ui_->recorder_state_label->setText(stateDetail(labrecorder_client_->connectionState(), rec, op));
     ui_->preview_state_label->setText(componentLifecycleStateText(prev));
@@ -746,7 +746,7 @@ void BridgeWindow::updateDashboard() {
     ui_->recorder_owner_label->setText(recorderProcessStateText(recorder_process_->state()));
     ui_->recorder_endpoint_label->setText(configuration_.recorder_host + ":" + QString::number(configuration_.recorder_port));
     ui_->storage_label->setText(gibText(path_result_.available_storage_bytes));
-    ui_->drop_label->setText("Preview: " + QString::number(preview_replaced_frames_) + " frame(s) skipped, " +
+    ui_->drop_label->setText(QString::number(preview_replaced_frames_) + " frame(s) skipped, " +
                              QString::number(preview_coalesced_samples_) + " update(s) combined, " +
                              QString::number(preview_latency_ms_) + " ms behind");
 

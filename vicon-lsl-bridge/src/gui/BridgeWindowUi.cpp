@@ -37,7 +37,10 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     QWidget* window, bool enable_preview, const std::shared_ptr<QSettings>& settings) {
     auto ui = std::make_unique<BridgeWindowUi>();
     window->setWindowTitle("Vicon LSL Bridge");
-    window->setMinimumSize(680, 540);
+    // An honest floor: below this the two panes cannot both hold their controls
+    // and the tabs start scrolling sideways. The old 680x540 was reachable but
+    // never actually laid out, and the content really demanded 800x601.
+    window->setMinimumSize(800, 560);
 
     auto* main_layout = new QVBoxLayout(window);
     main_layout->setContentsMargins(8, 8, 8, 8);
@@ -45,10 +48,14 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
 
     // Dashboard
     auto [dashboard, db_layout] = makeGroup<QGridLayout>("Session Status");
-    db_layout->setContentsMargins(8, 8, 8, 8);
-    db_layout->setHorizontalSpacing(10);
-    db_layout->setVerticalSpacing(4);
+    db_layout->setContentsMargins(10, 8, 10, 8);
+    db_layout->setHorizontalSpacing(12);
+    db_layout->setVerticalSpacing(5);
 
+    // The headline strip owns its own row rather than borrowing cells from the
+    // field grid below. Sharing them put "Elapsed:" in the column that holds
+    // values and its clock in the column that holds labels, so nothing beneath
+    // it lined up.
     ui->recording_indicator_label = makeStateValue("NOT RECORDING", "Recording indicator");
     QFont ind_font = ui->recording_indicator_label->font();
     ind_font.setBold(true);
@@ -56,16 +63,26 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->recording_indicator_label->setFont(ind_font);
     ui->recording_elapsed_label = makeStateValue("00:00:00", "Recording elapsed time");
     ui->run_identifier_label = makeStateValue("run 1", "Recording run number");
-    ui->recording_path_label = makeStateValue("No checked destination", "Recording destination");
-    // A destination path has no spaces to wrap on, so its size hint would set the
-    // window's minimum width. The text is elided to the width it is given.
-    ui->recording_path_label->setWordWrap(false);
-    ui->recording_path_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    ui->recording_path_label->setToolTip("The exact file path used by the recorder.");
 
-    db_layout->addWidget(ui->recording_indicator_label, 0, 0);
-    addField(db_layout, 0, 1, "Elapsed:", ui->recording_elapsed_label);
-    db_layout->addWidget(ui->run_identifier_label, 0, 3);
+    auto* headline = new QHBoxLayout();
+    headline->setSpacing(16);
+    headline->addWidget(ui->recording_indicator_label, 0);
+    headline->addWidget(makeSeparator());
+    headline->addWidget(new QLabel("Elapsed:"));
+    headline->addWidget(ui->recording_elapsed_label, 0);
+    headline->addWidget(makeSeparator());
+    headline->addWidget(new QLabel("Run:"));
+    headline->addWidget(ui->run_identifier_label, 0);
+    headline->addStretch(1);
+    db_layout->addLayout(headline, 0, 0, 1, 6);
+
+    auto* destination_value = makeStateValue("No checked destination", "Recording destination",
+                                             Qt::ElideMiddle);
+    // BridgeWindow pairs the path with its validation summary, so the label must
+    // not replace that with a plain copy of the path.
+    destination_value->setAutomaticToolTip(false);
+    destination_value->setToolTip("The exact file path used by the recorder.");
+    ui->recording_path_label = destination_value;
     addField(db_layout, 1, 0, "Destination:", ui->recording_path_label, {}, 5);
 
     ui->bridge_state_label = makeStateValue("Idle", "Bridge status");
@@ -74,21 +91,24 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->calibration_state_label = makeStateValue("Not calibrated", "Calibration state");
     ui->file_state_dashboard_label = makeStateValue("No file", "Preview file state");
     ui->verification_state_label = makeStateValue("Not checked", "Recording file check");
+    ui->recorder_owner_label = makeStateValue("Started elsewhere or unavailable", "Who started the recorder");
+    ui->recorder_endpoint_label = makeStateValue("localhost:22345", "Recorder address");
+    ui->storage_label = makeStateValue("unknown", "Available recording storage");
+    ui->drop_label = makeStateValue("0 frame(s) skipped, 0 update(s) combined, 0 ms behind",
+                                    "Preview update status");
+
+    // Every field is a label in an even column and its value in the odd column
+    // beside it, so the three pairs on a row stay aligned down the whole block.
     addField(db_layout, 2, 0, "Bridge:", ui->bridge_state_label);
     addField(db_layout, 2, 2, "Recorder:", ui->recorder_state_label);
     addField(db_layout, 2, 4, "Preview:", ui->preview_state_label);
     addField(db_layout, 3, 0, "Calibration:", ui->calibration_state_label);
     addField(db_layout, 3, 2, "File:", ui->file_state_dashboard_label);
     addField(db_layout, 3, 4, "File check:", ui->verification_state_label);
-
-    ui->recorder_owner_label = makeStateValue("Started elsewhere or unavailable", "Who started the recorder");
-    ui->recorder_endpoint_label = makeStateValue("localhost:22345", "Recorder address");
-    ui->storage_label = makeStateValue("Storage: unknown", "Available recording storage");
-    ui->drop_label = makeStateValue("Skipped preview frames 0; combined updates 0; delay 0 ms", "Preview update status");
     addField(db_layout, 4, 0, "Started by:", ui->recorder_owner_label);
     addField(db_layout, 4, 2, "Address:", ui->recorder_endpoint_label);
-    db_layout->addWidget(ui->storage_label, 4, 4);
-    db_layout->addWidget(ui->drop_label, 4, 5);
+    addField(db_layout, 4, 4, "Storage:", ui->storage_label);
+    addField(db_layout, 5, 0, "Preview updates:", ui->drop_label, {}, 5);
 
     auto* db_buttons = new QHBoxLayout();
     ui->start_session_button = makeButton("Start Session", "Start the bridge and preview, check the setup, then start recording.",
@@ -101,7 +121,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     db_buttons->addStretch(1);
     ui->shutdown_label = makeStateValue(QString(), "Shutdown progress");
     db_buttons->addWidget(ui->shutdown_label, 1);
-    db_layout->addLayout(db_buttons, 5, 0, 1, 6);
+    db_layout->addLayout(db_buttons, 6, 0, 1, 6);
+    // Only the value columns absorb spare width; the label columns stay at the
+    // width of their text so the three pairs read as columns.
     db_layout->setColumnStretch(1, 1);
     db_layout->setColumnStretch(3, 1);
     db_layout->setColumnStretch(5, 1);
@@ -114,6 +136,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->controls_tabs->setMinimumWidth(360);
     ui->controls_tabs->setDocumentMode(true);
     ui->controls_tabs->setAccessibleName("Session controls");
+    ui->controls_tabs->setObjectName("sessionControlsTabs");
 
     // Session Tab
     auto [session_page, session_layout] = makePage();
@@ -172,6 +195,8 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     auto [settings_group, form] = makeGroup<QFormLayout>("Connection Settings");
     form->setContentsMargins(8, 8, 8, 8);
     form->setVerticalSpacing(4);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     ui->server_edit = new QLineEdit("localhost:801");
     ui->marker_stream_edit = new QLineEdit(vicon_lsl::stream_defaults::ViconMarkers);
     ui->segment_stream_edit = new QLineEdit(vicon_lsl::stream_defaults::ViconSegments);
@@ -197,7 +222,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->segments_label = makeStateValue("0", "Discovered Vicon segments");
     ui->frames_label = makeStateValue("0", "Vicon frame number");
     ui->frame_rate_label = makeStateValue("0.0 Hz", "Measured Vicon frame rate");
-    ui->last_error_label = makeStateValue("-", "Last application error");
+    ui->last_error_label = makeMessageValue("-", "Last application error");
     ui->acknowledge_error_button = makeButton("Clear Error", "Clear the Last error display without deleting the event history.");
     addField(bridge_status, 0, 0, "Bridge state:", ui->status_label, {}, 3);
     addField(bridge_status, 1, 0, "Vicon frames:", ui->frames_label);
@@ -217,6 +242,8 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
 
     auto [destination_group, recording_form] = makeGroup<QFormLayout>("Recording Destination");
     recording_form->setVerticalSpacing(4);
+    recording_form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    recording_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
 
     auto* root_layout = new QHBoxLayout();
     ui->study_root_edit = new QLineEdit();
@@ -248,7 +275,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     metadata_grid->setColumnStretch(3, 1);
     recording_form->addRow("Recording details:", metadata_grid);
     recording_form->addRow("Exact destination:", ui->filename_preview_label);
-    ui->path_validation_label = makeStateValue("Not checked", "Recording path check");
+    ui->path_validation_label = makeMessageValue("Not checked", "Recording path check");
     recording_form->addRow("Path check:", ui->path_validation_label);
 
     ui->storage_warning_spin = new QDoubleSpinBox();
@@ -313,14 +340,14 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     recorder_buttons->addWidget(ui->stop_recording_button, 1, 2);
     recorder_layout->addLayout(recorder_buttons);
 
-    ui->labrecorder_status_label = makeStateValue("Disconnected", "Detailed recorder status");
+    ui->labrecorder_status_label = makeMessageValue("Disconnected", "Detailed recorder status");
     ui->labrecorder_operation_label = makeStateValue("Idle", "Recorder progress");
     ui->labrecorder_operation_progress = new QProgressBar();
     ui->labrecorder_operation_progress->setRange(0, 1);
     ui->labrecorder_operation_progress->setValue(0);
     ui->labrecorder_operation_progress->setTextVisible(true);
     ui->labrecorder_operation_progress->setAccessibleName("Recorder command progress");
-    ui->readiness_label = makeStateValue("Setup not checked", "Recording readiness");
+    ui->readiness_label = makeMessageValue("Setup not checked", "Recording readiness");
     recorder_layout->addWidget(ui->labrecorder_status_label);
     recorder_layout->addWidget(ui->labrecorder_operation_label);
     recorder_layout->addWidget(ui->labrecorder_operation_progress);
@@ -381,18 +408,17 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     // Events Tab
     auto [events_page, events_layout] = makePage();
 
-    auto* filter_row = new QHBoxLayout();
+    auto* filter_row = new FlowLayout();
     ui->event_severity_filter = new QComboBox();
     ui->event_severity_filter->addItems({"Information and above", "Warnings and errors", "Errors only"});
     ui->event_severity_filter->setToolTip("Choose which messages to show.");
     ui->event_component_filter = new QComboBox();
     ui->event_component_filter->addItems({"All parts", "Application", "Bridge", "Recorder", "Preview", "Calibration", "File", "Path", "Streams", "File check"});
     ui->event_component_filter->setToolTip("Show events from one part of the app.");
-    addWidgets(filter_row, {
-        makeTooltipLabel("Show:", ui->event_severity_filter, ui->event_severity_filter->toolTip()), ui->event_severity_filter,
-        makeTooltipLabel("Part:", ui->event_component_filter, ui->event_component_filter->toolTip()), ui->event_component_filter
-    });
-    filter_row->addStretch(1);
+    filter_row->addWidget(makeFieldChip("Show:", ui->event_severity_filter,
+        ui->event_severity_filter->toolTip(), 200));
+    filter_row->addWidget(makeFieldChip("Part:", ui->event_component_filter,
+        ui->event_component_filter->toolTip(), 160));
     events_layout->addLayout(filter_row);
 
     ui->event_log = new QPlainTextEdit();
@@ -401,13 +427,16 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->event_log->setAccessibleName("Recent session events with times");
     events_layout->addWidget(ui->event_log, 1);
 
-    auto* diag_buttons = new QHBoxLayout();
+    auto* diag_buttons = new FlowLayout();
     ui->copy_diagnostics_button = makeButton("Copy Session Details", "Copy settings, status, stream details, rates, and recent events.");
     ui->export_diagnostics_button = makeButton("Export Session Details", "Save session details without including recorded samples.");
     ui->verification_details_button = makeButton("File Check Details", "Show the result for each recorded stream.");
     ui->open_verified_recording_button = makeButton("Open Recording in Preview", "Open the checked recording without freezing the window.");
-    addWidgets(diag_buttons, {ui->copy_diagnostics_button, ui->export_diagnostics_button, ui->verification_details_button, ui->open_verified_recording_button});
-    diag_buttons->addStretch(1);
+    for (QWidget* control : {ui->copy_diagnostics_button, ui->export_diagnostics_button,
+                             ui->verification_details_button,
+                             ui->open_verified_recording_button}) {
+        diag_buttons->addWidget(control);
+    }
     events_layout->addLayout(diag_buttons);
     ui->controls_tabs->addTab(scrollable(events_page), "Events");
 
@@ -424,6 +453,10 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->main_splitter->setStretchFactor(1, 1);
     ui->main_splitter->setSizes({520, 980});
     main_layout->addWidget(ui->main_splitter, 1);
+
+    // Parented to the window, so it lives exactly as long as the fields it
+    // watches. Installed last, once every field in both panes exists.
+    new LineEditStartKeeper(window);
     return ui;
 }
 

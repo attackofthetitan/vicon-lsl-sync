@@ -7,6 +7,8 @@
 #include <QRect>
 #include <QSize>
 
+#include <algorithm>
+
 namespace vicon_lsl::gui_detail {
 
 // Places items left to right and wraps to a new line when the width runs out.
@@ -51,7 +53,16 @@ public:
         layoutItems(rect, false);
     }
 
-    QSize sizeHint() const override { return minimumSize(); }
+    // The natural size has to account for wrapping, or every widget above this
+    // layout believes one row is enough and comes up short by the height of the
+    // rows that actually wrapped. Once laid out, the width already given is the
+    // width to measure against.
+    QSize sizeHint() const override {
+        QSize size = minimumSize();
+        const int laid_out_width = geometry().width();
+        if (laid_out_width > 0) size.setHeight(heightForWidth(laid_out_width));
+        return size;
+    }
 
     QSize minimumSize() const override {
         QSize size;
@@ -74,7 +85,11 @@ private:
             // A hidden widget, such as the load progress bar before a load
             // starts, must not reserve a slot on the line.
             if (item->isEmpty()) continue;
-            const QSize hint = item->sizeHint();
+            QSize hint = item->sizeHint();
+            // An item wider than a whole line, such as a long status value, was
+            // handed its full hint and drew past the right edge. Fit it instead.
+            hint.setWidth((std::max)(item->minimumSize().width(),
+                                     qMin(hint.width(), area.width())));
             int next_x = x + hint.width();
             if (next_x - area.x() > area.width() && line_height > 0) {
                 x = area.x();

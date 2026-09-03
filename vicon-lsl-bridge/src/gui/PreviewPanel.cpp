@@ -25,7 +25,6 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
-#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -77,6 +76,11 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
     widget_ = new PreviewWidget();
+    // The drawing area takes whatever is left rather than competing for height:
+    // it is useful at any size, while a control row cut in half is not. Without
+    // this the controls were the ones squeezed, and the last row lost a few
+    // pixels to a scroll bar on an ordinary window.
+    widget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     layout->addWidget(widget_, 1);
 
     auto [controls_group, controls_layout] = makeGroup<QVBoxLayout>("Live Preview");
@@ -93,9 +97,6 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     alignment_layout->setContentsMargins(6, 6, 6, 6);
     alignment_layout->setSpacing(6);
 
-    auto* stream_grid = new QGridLayout();
-    stream_grid->setHorizontalSpacing(8);
-    stream_grid->setVerticalSpacing(4);
     marker_stream_edit_ = new QLineEdit(stream_defaults::ViconMarkers);
     segment_stream_edit_ = new QLineEdit(stream_defaults::ViconSegments);
     marker_stream_edit_->setObjectName("previewMarkerInput");
@@ -113,17 +114,18 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     trail_points_spin_ = makeSpin(2, 500, 24);
     playback_speed_spin_ = makeDoubleSpin(0.1, 4.0, 1, 0.1, 1.0);
 
-    addField(stream_grid, 0, 0, "Markers:", marker_stream_edit_, "LSL stream containing Vicon marker samples for the preview.");
-    addField(stream_grid, 0, 2, "Segments:", segment_stream_edit_, "LSL stream containing Vicon segment samples for the preview.");
-    addField(stream_grid, 1, 0, "Gaze:", gaze_stream_edit_, "LSL stream containing HoloLens gaze samples.");
-    addField(stream_grid, 1, 2, "Max time gap (s):", tolerance_spin_, "Largest time difference allowed when matching preview samples.");
-    addField(stream_grid, 2, 0, "Trail points:", trail_points_spin_, "Number of recent preview frames retained in the trail.");
-    addField(stream_grid, 2, 2, "Playback speed:", playback_speed_spin_, "Playback speed multiplier for CSV and XDF recordings.");
-    addField(stream_grid, 3, 0, "Stair target:", calibration_stream_edit_, "LSL stream containing tracked stair-target poses for calibration.");
-    addField(stream_grid, 3, 2, "Playback memory:", cache_megabytes_spin_, "Maximum memory used while reading and displaying a recording.");
-    stream_grid->setColumnStretch(1, 1);
-    stream_grid->setColumnStretch(3, 1);
-    sources_layout->addLayout(stream_grid);
+    // Eight label/field pairs reflow from two per row to one as the panel
+    // narrows. As grid cells they could not, and the tab scrolled sideways.
+    auto* stream_fields = new FlowLayout(10, 4);
+    stream_fields->addWidget(makeFieldChip("Markers:", marker_stream_edit_, "LSL stream containing Vicon marker samples for the preview."));
+    stream_fields->addWidget(makeFieldChip("Segments:", segment_stream_edit_, "LSL stream containing Vicon segment samples for the preview."));
+    stream_fields->addWidget(makeFieldChip("Gaze:", gaze_stream_edit_, "LSL stream containing HoloLens gaze samples."));
+    stream_fields->addWidget(makeFieldChip("Stair target:", calibration_stream_edit_, "LSL stream containing tracked stair-target poses for calibration."));
+    stream_fields->addWidget(makeFieldChip("Max time gap (s):", tolerance_spin_, "Largest time difference allowed when matching preview samples.", 90));
+    stream_fields->addWidget(makeFieldChip("Trail points:", trail_points_spin_, "Number of recent preview frames retained in the trail.", 90));
+    stream_fields->addWidget(makeFieldChip("Playback speed:", playback_speed_spin_, "Playback speed multiplier for CSV and XDF recordings.", 90));
+    stream_fields->addWidget(makeFieldChip("Playback memory:", cache_megabytes_spin_, "Maximum memory used while reading and displaying a recording.", 110));
+    sources_layout->addLayout(stream_fields);
 
     auto* alignment_note = new QLabel(
         "The HoloLens-to-Vicon transform is only known once it is measured. Solve it "
@@ -237,13 +239,13 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     open_xdf_button_ = new QPushButton("Open XDF");
     play_csv_button_ = new QPushButton("Play Recording");
     play_csv_button_->setEnabled(false);
-    status_label_ = new QLabel("Preview stopped");
-    status_label_->setWordWrap(false);
-    status_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    delivery_metrics_label_ = new QLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
-    // Without wrapping this one line claimed 355 px of minimum width.
-    delivery_metrics_label_->setWordWrap(true);
-    delivery_metrics_label_->setToolTip("Older preview updates are skipped so the display stays current.");
+    status_text_ = "Preview stopped";
+    status_label_ = new ElidingLabel(status_text_);
+    auto* delivery_metrics = new ElidingLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
+    // The explanation is worth more here than a copy of the numbers already shown.
+    delivery_metrics->setAutomaticToolTip(false);
+    delivery_metrics->setToolTip("Older preview updates are skipped so the display stays current.");
+    delivery_metrics_label_ = delivery_metrics;
     auto* fit_view_button = makeButton("Fit View", "Fit the camera to all currently visible data.");
     auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
     auto* export_image_button = makeButton("Export Image", "Export the current preview view as a PNG image without changing source data.");
@@ -253,16 +255,14 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     }
     controls_layout->addLayout(button_row);
 
-    // The status and delivery text take a full-width line of their own. Sharing
-    // the button row meant their width pushed the last buttons off the edge.
-    auto* status_row = new QHBoxLayout();
-    status_row->addWidget(delivery_metrics_label_);
-    status_row->addWidget(status_label_, 1);
-    controls_layout->addLayout(status_row);
+    // One line each, stacked. Sharing a row meant the delivery text wrapped to
+    // two lines and ran straight through the status text beside it.
+    controls_layout->addWidget(status_label_);
+    controls_layout->addWidget(delivery_metrics_label_);
 
     auto* load_row = new FlowLayout();
-    file_state_label_ = new QLabel("No recording loaded");
-    file_state_label_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    file_state_text_ = "No recording loaded";
+    file_state_label_ = new ElidingLabel(file_state_text_);
     memory_label_ = new QLabel("memory 0 MiB");
     load_progress_ = new QProgressBar();
     load_progress_->setRange(0, 100);
@@ -309,17 +309,35 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     playback_row->addWidget(jump_end_button);
     playback_row->addWidget(loop_playback_check_);
     playback_row->addWidget(playback_position_label_);
+    // Left at the default command-button width, six one-glyph buttons wrapped
+    // across four rows of a narrow panel.
+    for (QPushButton* glyph : {jump_start_button, step_back_button,
+                               step_forward_button, jump_end_button}) {
+        glyph->setFixedWidth(34);
+    }
     playback_controls_ = {jump_start_button, step_back_button, jump_back_button,
                           jump_forward_button, step_forward_button, jump_end_button};
-    controls_layout->addLayout(playback_row);
+    // Transport and timeline are only usable once a recording is loaded, and
+    // they cost about ninety pixels. Kept on screen while disabled, they pushed
+    // the live controls into a scroll area on a perfectly ordinary window.
+    playback_area_ = new QWidget();
+    auto* playback_area_layout = new QVBoxLayout(playback_area_);
+    playback_area_layout->setContentsMargins(0, 0, 0, 0);
+    playback_area_layout->setSpacing(4);
+    playback_area_layout->addLayout(playback_row);
     // The timeline needs the full width to be usable, so it sits below the
     // transport controls rather than competing with them for space.
-    controls_layout->addWidget(timeline_slider_);
+    playback_area_layout->addWidget(timeline_slider_);
+    playback_area_->setVisible(false);
+    controls_layout->addWidget(playback_area_);
 
-    controls_scroll_ = new QScrollArea();
+    controls_scroll_ = new ContentSizedScrollArea();
     controls_scroll_->setWidgetResizable(true);
     controls_scroll_->setFrameShape(QFrame::NoFrame);
-    controls_scroll_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+    // Its preferred height follows the controls it holds, so a panel with room
+    // to spare gives them their full height and shows no scroll bar at all.
+    // The cap set in resizeEvent is what makes them scroll on a short panel.
+    controls_scroll_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     controls_scroll_->setAccessibleName("Scrollable preview controls");
     controls_scroll_->setWidget(controls_group);
     layout->addWidget(controls_scroll_);
@@ -487,14 +505,13 @@ void PreviewPanel::openRecording(const QString& path) {
 void PreviewPanel::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (!controls_scroll_) return;
-    // A fixed cap either clipped the controls on a short panel or starved the
-    // drawing area on a tall one. Give the controls up to half the panel, so a
-    // reasonably sized window shows them without scrolling and a small one still
-    // leaves the drawing area the larger share.
-    const int line = (std::max)(1, fontMetrics().height());
-    controls_scroll_->setMaximumHeight((std::max)(line * 10, height() * 55 / 100));
-    refreshStatusText();
-    setFileState(file_state_text_);
+    // Only a ceiling, never a floor: a floor here would become the window's own
+    // minimum height and stop it being made short at all. The ceiling is what is
+    // left once the drawing area keeps its minimum, so the controls take every
+    // row they need while the panel can afford them, and scroll once it cannot.
+    const int cap = (std::max)(0, height() - widget_->minimumHeight() - layout()->spacing());
+    // Only when it changes: setting it re-enters this handler.
+    if (controls_scroll_->maximumHeight() != cap) controls_scroll_->setMaximumHeight(cap);
 }
 
 void PreviewPanel::fitView() { widget_->fitView(); }
@@ -1096,6 +1113,7 @@ void PreviewPanel::refreshControlStates() {
     const bool has_profile = selectedCalibrationProfile() != nullptr;
     for (QWidget* control : profile_selection_controls_) control->setEnabled(has_profile);
     const bool recording_loaded = !csv_frames_.empty();
+    if (playback_area_) playback_area_->setVisible(recording_loaded);
     for (QWidget* control : playback_controls_) control->setEnabled(recording_loaded);
     if (open_recent_button_ && recent_files_combo_) {
         open_recent_button_->setEnabled(recent_files_combo_->count() > 0);
@@ -1411,20 +1429,17 @@ void PreviewPanel::setStatus(const QString& status) {
 void PreviewPanel::setFileState(const QString& text) {
     file_state_text_ = text;
     if (!file_state_label_) return;
-    // The loader's completion detail lists every stream, which wrapped into
-    // several lines and grew the control area each time a file was opened.
-    file_state_label_->setToolTip(text);
-    file_state_label_->setText(file_state_label_->fontMetrics().elidedText(
-        text, Qt::ElideRight, (std::max)(120, file_state_label_->width())));
+    // The loader's completion detail lists every stream. The label keeps it to
+    // one line and offers the rest as a tooltip, so opening a file no longer
+    // grows the control area by several lines.
+    file_state_label_->setText(text);
 }
 
 void PreviewPanel::refreshStatusText() {
     if (!status_label_) return;
-    // A recording summary runs to several hundred characters. Wrapping it made
-    // the control area grow by several lines every time a file was opened.
-    status_label_->setToolTip(status_text_);
-    status_label_->setText(status_label_->fontMetrics().elidedText(
-        status_text_, Qt::ElideRight, (std::max)(120, status_label_->width())));
+    // A recording summary runs to several hundred characters; the label elides
+    // it to the width it has rather than wrapping and growing the control area.
+    status_label_->setText(status_text_);
 }
 
 } // namespace vicon_lsl
