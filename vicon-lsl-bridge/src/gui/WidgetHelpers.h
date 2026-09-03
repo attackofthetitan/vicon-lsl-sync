@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QBoxLayout>
+#include <QHBoxLayout>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QFrame>
@@ -13,7 +14,10 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QEvent>
 #include <QString>
+
+#include "gui/ElidingLabel.h"
 
 #include <initializer_list>
 #include <utility>
@@ -36,11 +40,34 @@ inline QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QSt
     return label;
 }
 
-inline QLabel* makeStateValue(const QString& text, const QString& accessible_name) {
+// Status values share one convention: a single line that elides when the window
+// is narrow. Uniform row heights are what make a dashboard grid readable, and a
+// value that wrapped to three lines used to drag its whole row out of line.
+inline ElidingLabel* makeStateValue(const QString& text, const QString& accessible_name,
+                                    Qt::TextElideMode mode = Qt::ElideRight) {
+    auto* label = new ElidingLabel(text, nullptr, mode);
+    label->setAccessibleName(accessible_name);
+    return label;
+}
+
+// A hairline divider that groups related items on one row without the visual
+// weight of a box around them.
+inline QFrame* makeSeparator() {
+    auto* line = new QFrame();
+    line->setFrameShape(QFrame::VLine);
+    line->setFrameShadow(QFrame::Plain);
+    line->setFixedWidth(1);
+    return line;
+}
+
+// A sentence of explanation, not a compact status value: these wrap onto as many
+// lines as they need rather than eliding, because the detail is the point.
+inline QLabel* makeMessageValue(const QString& text, const QString& accessible_name) {
     auto* label = new QLabel(text);
     label->setWordWrap(true);
     label->setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     label->setAccessibleName(accessible_name);
+    label->setMinimumWidth(120);
     return label;
 }
 
@@ -90,6 +117,22 @@ inline void addField(QGridLayout* layout, int row, int col, const QString& label
     layout->addWidget(control, row, col + 1, 1, span);
 }
 
+// A caption and its control bound together as one unit, so a FlowLayout can
+// keep them side by side and wrap the pair as a whole. A plain grid cannot: its
+// columns are fixed, so a narrow panel scrolls sideways instead of reflowing.
+inline QWidget* makeFieldChip(const QString& label, QWidget* control,
+                              const QString& tooltip, int control_width = 160) {
+    auto* chip = new QWidget();
+    auto* row = new QHBoxLayout(chip);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(6);
+    row->addWidget(makeTooltipLabel(label, control, tooltip));
+    control->setMinimumWidth(70);
+    control->setMaximumWidth(control_width);
+    row->addWidget(control, 1);
+    return chip;
+}
+
 inline void addSpinRow(QGridLayout* layout, int row, const QString& label,
                        const QString& tooltip,
                        std::initializer_list<QDoubleSpinBox*> spins) {
@@ -107,6 +150,32 @@ inline void addWidgets(QBoxLayout* layout, std::initializer_list<QWidget*> widge
     for (QWidget* widget : widgets) layout->addWidget(widget);
 }
 
+// Keeps every text field showing the start of its value.
+//
+// A QLineEdit made narrower keeps the horizontal scroll offset it had when it
+// was wide, so a study root read as "ders/9z/t6lypx..." and a stream name as
+// "iconMarkers" - both look like the front of the value was lost. Watching the
+// fields themselves resize is the exact moment to scroll them back.
+class LineEditStartKeeper : public QObject {
+public:
+    explicit LineEditStartKeeper(QWidget* root) : QObject(root) {
+        for (QLineEdit* edit : root->findChildren<QLineEdit*>()) {
+            edit->installEventFilter(this);
+            edit->setCursorPosition(0);
+        }
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Resize) {
+            auto* edit = qobject_cast<QLineEdit*>(watched);
+            // Leave the field alone while it is being typed in.
+            if (edit && !edit->hasFocus()) edit->setCursorPosition(0);
+        }
+        return QObject::eventFilter(watched, event);
+    }
+};
+
 template <typename Layout>
 std::pair<QGroupBox*, Layout*> makeGroup(const QString& title) {
     auto* box = new QGroupBox(title);
@@ -120,6 +189,30 @@ inline std::pair<QWidget*, QVBoxLayout*> makePage() {
     layout->setSpacing(8);
     return {page, layout};
 }
+
+// A scroll area whose preferred height is the height its content actually
+// needs.
+//
+// QScrollArea::sizeHint() stops at twenty-four lines of text no matter how tall
+// the content is, so a block of controls taller than that is handed less room
+// than it needs and grows a scroll bar even when the window has space to spare.
+// Rows that wrap make this worse, because their height depends on the width the
+// area ends up with. Callers still cap the area with setMaximumHeight() to
+// decide how much of the window it may take.
+class ContentSizedScrollArea : public QScrollArea {
+public:
+    QSize sizeHint() const override {
+        QWidget* content = widget();
+        if (!content) return QScrollArea::sizeHint();
+        QSize hint = content->sizeHint();
+        const int available = viewport()->width();
+        if (content->hasHeightForWidth() && available > 0) {
+            hint.setHeight(content->heightForWidth(available));
+        }
+        const int frame = 2 * frameWidth();
+        return hint + QSize(frame, frame);
+    }
+};
 
 inline QScrollArea* scrollable(QWidget* page) {
     auto* area = new QScrollArea();

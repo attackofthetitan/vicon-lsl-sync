@@ -1,4 +1,5 @@
 #include "gui/BridgeWindow.h"
+#include "gui/ElidingLabel.h"
 
 #include <QAbstractButton>
 #include <QAbstractSpinBox>
@@ -6,12 +7,15 @@
 #include <QComboBox>
 #include <QDir>
 #include <QEventLoop>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPixmap>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSlider>
+#include <QTabBar>
+#include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QWidget>
@@ -71,6 +75,63 @@ bool noHorizontalScrolling(const QWidget& window) {
     return ok;
 }
 
+// Two visible siblings whose rectangles intersect are painted over each other.
+// The preview controls used to be laid across the drawing area this way when the
+// window was short, which is what "overlapping buttons" looks like on screen.
+bool noOverlappingSiblings(const QWidget& window) {
+    bool ok = true;
+    QList<const QWidget*> parents{&window};
+    for (const QWidget* w : window.findChildren<QWidget*>()) parents << w;
+    for (const QWidget* parent : parents) {
+        // A crowded QTabBar overlaps its own scroll arrows. That is the style's
+        // business, not this layout's, and it is not something the app can fix.
+        if (qobject_cast<const QTabBar*>(parent)) continue;
+        QList<QWidget*> siblings;
+        for (QObject* child : parent->children()) {
+            auto* w = qobject_cast<QWidget*>(child);
+            if (w && w->isVisible() && !w->isWindow() && !w->geometry().isEmpty())
+                siblings << w;
+        }
+        for (int i = 0; i < siblings.size(); ++i) {
+            for (int j = i + 1; j < siblings.size(); ++j) {
+                const QRect shared = siblings[i]->geometry() & siblings[j]->geometry();
+                // One pixel of contact is a shared border, not an overlap.
+                if (shared.width() <= 1 || shared.height() <= 1) continue;
+                std::cerr << "Overlapping widgets inside "
+                          << parent->metaObject()->className() << ": "
+                          << siblings[i]->metaObject()->className() << " and "
+                          << siblings[j]->metaObject()->className()
+                          << " share " << shared.width() << "x" << shared.height()
+                          << " px" << std::endl;
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
+// A caption cut off mid-word reads as text running into the control beside it.
+// Labels that shorten themselves are excluded: eliding is their whole job.
+bool labelsAreNotCutOff(const QWidget& window) {
+    bool ok = true;
+    for (const QLabel* label : window.findChildren<QLabel*>()) {
+        if (!label->isVisible() || label->wordWrap()) continue;
+        if (dynamic_cast<const vicon_lsl::gui_detail::ElidingLabel*>(label)) continue;
+        if (label->sizePolicy().horizontalPolicy() == QSizePolicy::Ignored) continue;
+        // "&" marks the keyboard accelerator and is never drawn.
+        QString drawn = label->text();
+        drawn.remove(QLatin1Char('&'));
+        if (drawn.trimmed().isEmpty()) continue;
+        const int needed = label->fontMetrics().horizontalAdvance(drawn);
+        if (needed > label->width() + 1) {
+            std::cerr << "Cut-off label \"" << drawn.toStdString() << "\": needs "
+                      << needed << " px, has " << label->width() << " px" << std::endl;
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -91,6 +152,10 @@ int main(int argc, char* argv[]) {
     QWidget render_host;
     render_host.setAttribute(Qt::WA_DontShowOnScreen);
     BridgeWindow window(&render_host, true, std::move(settings));
+    // Shown, but never on a screen: the layout checks below ask each widget
+    // whether it is visible, which stays false until the window is shown.
+    render_host.show();
+    window.show();
 
     QTimer::singleShot(0, [&app, &window]() {
         const QSize target_size(800, 600);
@@ -114,10 +179,35 @@ int main(int argc, char* argv[]) {
             !rendered.isNull() &&
             window.size() == target_size &&
             rendered.deviceIndependentSize() == QSizeF(target_size);
+        // Every tab, at the smallest window the user can make and at the
+        // reference size, because a layout only breaks once it runs out of room.
+        bool laid_out_cleanly = true;
+        auto* tabs = window.findChild<QTabWidget*>("sessionControlsTabs");
+        for (const QSize& size : {window.minimumSize(), target_size}) {
+            window.resize(size);
+            QApplication::processEvents(QEventLoop::AllEvents, 20);
+            for (int tab = 0; tab < (tabs ? tabs->count() : 1); ++tab) {
+                if (tabs) tabs->setCurrentIndex(tab);
+                QApplication::processEvents(QEventLoop::AllEvents, 20);
+                if (noOverlappingSiblings(window) && labelsAreNotCutOff(window) &&
+                    noHorizontalScrolling(window)) {
+                    continue;
+                }
+                std::cerr << "  ...at " << size.width() << 'x' << size.height()
+                          << " on tab " << (tabs ? tabs->tabText(tab).toStdString()
+                                                 : std::string("only"))
+                          << std::endl;
+                laid_out_cleanly = false;
+            }
+        }
+        if (tabs) tabs->setCurrentIndex(0);
+        window.resize(target_size);
+        QApplication::processEvents(QEventLoop::AllEvents, 20);
+
         const bool no_sideways_scrolling = noHorizontalScrolling(window);
 
         if (!fits || !controls_are_described || !rendered_at_requested_size ||
-            !no_sideways_scrolling) {
+            !no_sideways_scrolling || !laid_out_cleanly) {
             std::cerr << "GUI check failed: minimum="
                       << minimum.width() << 'x' << minimum.height()
                       << ", window=" << window.width() << 'x' << window.height()
@@ -130,7 +220,7 @@ int main(int argc, char* argv[]) {
         }
 
         app.exit(fits && controls_are_described && rendered_at_requested_size &&
-                 no_sideways_scrolling ? 0 : 1);
+                 no_sideways_scrolling && laid_out_cleanly ? 0 : 1);
     });
 
     return app.exec();
