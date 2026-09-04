@@ -507,9 +507,15 @@ void PreviewPanel::resizeEvent(QResizeEvent* event) {
     if (!controls_scroll_) return;
     // Only a ceiling, never a floor: a floor here would become the window's own
     // minimum height and stop it being made short at all. The ceiling is what is
-    // left once the drawing area keeps its minimum, so the controls take every
-    // row they need while the panel can afford them, and scroll once it cannot.
-    const int cap = (std::max)(0, height() - widget_->minimumHeight() - layout()->spacing());
+    // left once the drawing area keeps its share, so the controls take the rows
+    // they need while the panel can afford them, and scroll once it cannot.
+    // That share is a little over half the panel rather than only the rows the
+    // controls leave over, so the view is not the part squeezed once the
+    // controls no longer fit; a panel with room for both is unaffected, and a
+    // short one falls back to the drawing area's minimum.
+    const int reserved = (std::max)(widget_->minimumHeight(),
+                                    static_cast<int>(height() * 0.55));
+    const int cap = (std::max)(0, height() - reserved - layout()->spacing());
     // Only when it changes: setting it re-enters this handler.
     if (controls_scroll_->maximumHeight() != cap) controls_scroll_->setMaximumHeight(cap);
 }

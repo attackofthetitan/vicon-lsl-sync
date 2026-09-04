@@ -4,6 +4,33 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.5] - 2026-09-04
+
+### Fixed
+
+- The preview floor sits at the foot of the stairs. It was drawn at the padded
+  bottom of the view box, a quarter of a metre below the model, so the ground
+  appeared to float beneath the stairs it was meant to carry.
+
+### Changed
+
+- The preview floor covers the walking area rather than stopping at the stair
+  footprint, reaching 4.6 m past the far end of the stairs and 0.6 m behind and
+  to either side. The extent is taken from the recorded runs, whose valid
+  markers reach 4.10 m past that end and stay inside the stair width. The floor
+  is part of the view fit, so the whole walking range is visible at rest.
+- The preview fits the scene as it is projected, instead of scaling the largest
+  world span against the shorter side of the widget. A walkway several times
+  longer than it is tall now fills a wide panel rather than a square of it.
+- The drawing area keeps a little over half the preview panel once the controls
+  no longer fit, rather than only the rows they leave over. The controls scroll
+  sooner instead of the view being the part squeezed.
+
+### Compatibility
+
+- No configuration, file format, or command line change. Roll back to `v1.13.4`.
+
+
 ## [1.13.4] - 2026-09-03
 
 ### Fixed

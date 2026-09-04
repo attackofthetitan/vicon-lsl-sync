@@ -45,7 +45,30 @@ private:
         bool valid = false;
     };
 
+    // The ground the walking runs happen on: a rectangle at one height rather
+    // than a face of the view box, so it can meet the foot of the stairs and
+    // reach past them along the walkway.
+    struct FloorPlane {
+        double lower_x = 0.0;
+        double upper_x = 0.0;
+        double lower_y = 0.0;
+        double upper_y = 0.0;
+        double z = 0.0;
+        bool valid = false;
+    };
+
+    struct ViewBasis {
+        PreviewVec3 right;
+        PreviewVec3 up;
+    };
+
+    ViewBasis viewBasis() const;
+    double viewScale(const Bounds& bounds, const ViewBasis& basis) const;
+    double usableWidth() const;
+    double usableHeight() const;
     ProjectedPoint project(const PreviewVec3& point, const Bounds& bounds) const;
+    Bounds sceneContentBounds() const;
+    FloorPlane floorPlane() const;
     Bounds currentSceneBounds() const;
     void resetViewFit();
     void lockViewToCurrentScene();
@@ -55,6 +78,7 @@ private:
 
     PreviewFrame frame_;
     std::vector<PreviewTriangle> stair_triangles_;
+    Bounds stair_bounds_;
     Bounds view_bounds_;
     std::map<std::string, std::deque<PreviewVec3>> marker_trails_;
     int trail_point_limit_ = 24;

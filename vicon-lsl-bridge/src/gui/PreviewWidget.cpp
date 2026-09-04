@@ -24,6 +24,22 @@ QColor gridColor() { return QColor(70, 80, 88, 130); }
 
 constexpr double kPi = 3.14159265358979323846;
 
+// How far the drawn ground reaches past the stair model. Taken from the
+// recorded walking runs in this study (sub-04 and sub-05, 33 runs): valid
+// markers reach 4.10 m past the far end of the stairs along the walking axis,
+// stop just short of the near end, and stay inside the stair width. The
+// margins leave a little ground past the widest run rather than ending the
+// floor exactly where a heel last landed.
+constexpr double kFloorBeyondStairM = 4.6;
+constexpr double kFloorBehindStairM = 0.6;
+constexpr double kFloorBesideStairM = 0.6;
+
+// Rows the fit keeps clear so the scene never grows under the status line or
+// the legend, which are drawn over the same surface.
+constexpr double kStatusBandPx = 30.0;
+constexpr double kLegendBandPx = 34.0;
+constexpr double kSideMarginPx = 12.0;
+
 QColor gazeColor(const std::string& name) {
     if (name == "Combined") {
         return QColor("#ffd166");
@@ -59,6 +75,12 @@ PreviewWidget::PreviewWidget(QWidget* parent) : QWidget(parent) {
 
 void PreviewWidget::setStairMesh(const PreviewMesh& mesh, const PreviewTransformProfile& transform) {
     stair_triangles_ = triangulateMesh(mesh, transform);
+    stair_bounds_ = {};
+    for (const auto& triangle : stair_triangles_) {
+        includePoint(stair_bounds_, triangle.a);
+        includePoint(stair_bounds_, triangle.b);
+        includePoint(stair_bounds_, triangle.c);
+    }
     resetViewFit();
     refit_on_next_frame_ = true;
     update();
@@ -154,20 +176,31 @@ void PreviewWidget::paintEvent(QPaintEvent*) {
         return;
     }
 
-    const double z = bounds.lower.z;
-    painter.setPen(QPen(gridColor(), 1.0));
-    const double x_span = spanAxis(bounds.lower.x, bounds.upper.x);
-    const double y_span = spanAxis(bounds.lower.y, bounds.upper.y);
-    const double grid_step = std::max(0.25, std::pow(10.0, std::floor(std::log10(std::max(x_span, y_span))) - 1.0));
-    for (double x = std::floor(bounds.lower.x / grid_step) * grid_step; x <= bounds.upper.x; x += grid_step) {
-        const auto a = project({x, bounds.lower.y, z}, bounds);
-        const auto b = project({x, bounds.upper.y, z}, bounds);
-        painter.drawLine(a.point, b.point);
-    }
-    for (double y = std::floor(bounds.lower.y / grid_step) * grid_step; y <= bounds.upper.y; y += grid_step) {
-        const auto a = project({bounds.lower.x, y, z}, bounds);
-        const auto b = project({bounds.upper.x, y, z}, bounds);
-        painter.drawLine(a.point, b.point);
+    const FloorPlane floor = floorPlane();
+    if (floor.valid) {
+        painter.setPen(QPen(gridColor(), 1.0));
+        painter.setBrush(Qt::NoBrush);
+        const double x_span = spanAxis(floor.lower_x, floor.upper_x);
+        const double y_span = spanAxis(floor.lower_y, floor.upper_y);
+        const double grid_step = std::max(0.25, std::pow(10.0, std::floor(std::log10(std::max(x_span, y_span))) - 1.0));
+        for (double x = std::ceil(floor.lower_x / grid_step) * grid_step; x <= floor.upper_x; x += grid_step) {
+            const auto a = project({x, floor.lower_y, floor.z}, bounds);
+            const auto b = project({x, floor.upper_y, floor.z}, bounds);
+            painter.drawLine(a.point, b.point);
+        }
+        for (double y = std::ceil(floor.lower_y / grid_step) * grid_step; y <= floor.upper_y; y += grid_step) {
+            const auto a = project({floor.lower_x, y, floor.z}, bounds);
+            const auto b = project({floor.upper_x, y, floor.z}, bounds);
+            painter.drawLine(a.point, b.point);
+        }
+        // The grid lines land on whole steps, so the edge of the walkway is
+        // only where the floor really ends once it is drawn outright.
+        QPolygonF edge;
+        edge << project({floor.lower_x, floor.lower_y, floor.z}, bounds).point
+             << project({floor.upper_x, floor.lower_y, floor.z}, bounds).point
+             << project({floor.upper_x, floor.upper_y, floor.z}, bounds).point
+             << project({floor.lower_x, floor.upper_y, floor.z}, bounds).point;
+        painter.drawPolygon(edge);
     }
 
     painter.setPen(Qt::NoPen);
@@ -274,9 +307,7 @@ void PreviewWidget::wheelEvent(QWheelEvent* event) {
     update();
 }
 
-PreviewWidget::ProjectedPoint PreviewWidget::project(const PreviewVec3& point, const Bounds& bounds) const {
-    const PreviewVec3 center = (bounds.lower + bounds.upper) * 0.5;
-    const PreviewVec3 view = point - center;
+PreviewWidget::ViewBasis PreviewWidget::viewBasis() const {
     const double azimuth = radians(azimuth_degrees_);
     const double elevation = radians(elevation_degrees_);
     const PreviewVec3 camera_direction = normalize({
@@ -291,18 +322,50 @@ PreviewWidget::ProjectedPoint PreviewWidget::project(const PreviewVec3& point, c
     } else {
         right = normalize(right);
     }
-    const PreviewVec3 up = normalize(cross(right, forward));
-    const double span = std::max({spanAxis(bounds.lower.x, bounds.upper.x),
-                                  spanAxis(bounds.lower.y, bounds.upper.y),
-                                  spanAxis(bounds.lower.z, bounds.upper.z)});
-    const double scale = std::min(width(), height()) * 0.74 * zoom_ / span;
+    return {right, normalize(cross(right, forward))};
+}
+
+double PreviewWidget::viewScale(const Bounds& bounds, const ViewBasis& basis) const {
+    // Fitting the scene as it is actually projected, rather than its largest
+    // world span against the shorter side of the widget: a walkway several
+    // times longer than it is tall otherwise leaves most of a wide panel empty.
+    const PreviewVec3 center = (bounds.lower + bounds.upper) * 0.5;
+    double half_across = 0.0;
+    double half_down = 0.0;
+    for (int corner = 0; corner < 8; ++corner) {
+        const PreviewVec3 offset = PreviewVec3{
+            (corner & 1) ? bounds.upper.x : bounds.lower.x,
+            (corner & 2) ? bounds.upper.y : bounds.lower.y,
+            (corner & 4) ? bounds.upper.z : bounds.lower.z,
+        } - center;
+        half_across = std::max(half_across, std::abs(dot(offset, basis.right)));
+        half_down = std::max(half_down, std::abs(dot(offset, basis.up)));
+    }
+    const double across = std::max(2.0 * half_across, 0.05);
+    const double down = std::max(2.0 * half_down, 0.05);
+    return std::min(usableWidth() / across, usableHeight() / down) * zoom_;
+}
+
+double PreviewWidget::usableWidth() const {
+    return std::max(40.0, width() - 2.0 * kSideMarginPx);
+}
+
+double PreviewWidget::usableHeight() const {
+    return std::max(40.0, height() - kStatusBandPx - kLegendBandPx);
+}
+
+PreviewWidget::ProjectedPoint PreviewWidget::project(const PreviewVec3& point, const Bounds& bounds) const {
+    const ViewBasis basis = viewBasis();
+    const PreviewVec3 center = (bounds.lower + bounds.upper) * 0.5;
+    const PreviewVec3 view = point - center;
+    const double scale = viewScale(bounds, basis);
     return {
-        QPointF(width() * 0.5 + dot(view, right) * scale,
-                height() * 0.56 - dot(view, up) * scale),
+        QPointF(width() * 0.5 + dot(view, basis.right) * scale,
+                kStatusBandPx + usableHeight() * 0.5 - dot(view, basis.up) * scale),
     };
 }
 
-PreviewWidget::Bounds PreviewWidget::currentSceneBounds() const {
+PreviewWidget::Bounds PreviewWidget::sceneContentBounds() const {
     Bounds bounds;
     for (const auto& marker : frame_.markers) {
         if (marker.valid) {
@@ -319,10 +382,51 @@ PreviewWidget::Bounds PreviewWidget::currentSceneBounds() const {
             includePoint(bounds, ray.origin);
         }
     }
-    for (const auto& triangle : stair_triangles_) {
-        includePoint(bounds, triangle.a);
-        includePoint(bounds, triangle.b);
-        includePoint(bounds, triangle.c);
+    if (stair_bounds_.valid) {
+        includePoint(bounds, stair_bounds_.lower);
+        includePoint(bounds, stair_bounds_.upper);
+    }
+    return bounds;
+}
+
+PreviewWidget::FloorPlane PreviewWidget::floorPlane() const {
+    const Bounds content = sceneContentBounds();
+    const Bounds& base = stair_bounds_.valid ? stair_bounds_ : content;
+    if (!base.valid) {
+        return {};
+    }
+
+    FloorPlane floor;
+    floor.valid = true;
+    // The height the stairs stand on, not the padded bottom of the view box:
+    // padding there is what left the ground floating below the model.
+    floor.z = base.lower.z;
+    // Without a model there is no walkway to reach along, so the ground covers
+    // what the samples cover and no more.
+    const double beyond = stair_bounds_.valid ? kFloorBeyondStairM : 0.0;
+    const double behind = stair_bounds_.valid ? kFloorBehindStairM : 0.0;
+    const double beside = stair_bounds_.valid ? kFloorBesideStairM : 0.0;
+    floor.lower_x = base.lower.x - behind;
+    floor.upper_x = base.upper.x + beyond;
+    floor.lower_y = base.lower.y - beside;
+    floor.upper_y = base.upper.y + beside;
+    if (content.valid) {
+        floor.lower_x = std::min(floor.lower_x, content.lower.x);
+        floor.upper_x = std::max(floor.upper_x, content.upper.x);
+        floor.lower_y = std::min(floor.lower_y, content.lower.y);
+        floor.upper_y = std::max(floor.upper_y, content.upper.y);
+    }
+    return floor;
+}
+
+PreviewWidget::Bounds PreviewWidget::currentSceneBounds() const {
+    Bounds bounds = sceneContentBounds();
+    // Fitting to the floor as well is what makes the walkway visible at rest:
+    // otherwise the view frames the stairs and the ground runs off the edge.
+    const FloorPlane floor = floorPlane();
+    if (floor.valid) {
+        includePoint(bounds, {floor.lower_x, floor.lower_y, floor.z});
+        includePoint(bounds, {floor.upper_x, floor.upper_y, floor.z});
     }
 
     if (!bounds.valid) {
