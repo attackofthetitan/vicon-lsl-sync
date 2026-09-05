@@ -19,6 +19,7 @@
 #include <QThread>
 #include <QUrl>
 
+#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -158,14 +159,25 @@ TEST_CASE("Session waits for the bridge unless recorder-only mode is enabled, an
         QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
         const bool canceled = waitUntil([&] { return sessionStopped(window); });
         window.close();
-        waitUntil([&] {
+        // Destroying a QThread that is still running is fatal, and the process
+        // dies before any assertion below can be reported. Wait generously, and
+        // if one is still going, name it while the window is still alive.
+        const bool threads_stopped = waitUntil([&] {
             for (auto* thread : window.findChildren<QThread*>()) if (thread->isRunning()) return false;
             return true;
-        });
+        }, 15000);
+        if (!threads_stopped) {
+            for (auto* thread : window.findChildren<QThread*>()) {
+                if (!thread->isRunning()) continue;
+                std::cerr << "Still running at teardown: "
+                          << thread->metaObject()->className() << std::endl;
+            }
+        }
         REQUIRE(bridge_started == !recorder_only);
         REQUIRE(connecting);
         REQUIRE(discovery_started == recorder_only);
         REQUIRE(canceled);
+        REQUIRE(threads_stopped);
     }
 }
 
