@@ -12,6 +12,11 @@ namespace GazeLSL
     {
         private const int ChannelCount = GazeStreamContract.ChannelCount;
         private const int StopTimeoutMilliseconds = 500;
+        private const float RateCheckIntervalSeconds = 2f;
+        private const float LowRateWarningIntervalSeconds = 10f;
+
+        // Matches the low-rate line the preview and the runbook already use.
+        private const double LowRateFraction = 0.8;
 
         [SerializeField] private GazeLSLConfig config;
         [SerializeField] private GazeDataProvider gazeProvider;
@@ -24,6 +29,11 @@ namespace GazeLSL
         private bool failureReported;
         private bool providerRecoveryReported;
         private bool stopWarningReported;
+        private bool lowRateReported;
+        private bool calibrationReported;
+        private int reportedCalibrationChangeCount;
+        private float nextRateCheckTime;
+        private float nextLowRateWarningTime;
         private int reportedProviderExceptionCount;
 
         private void Start()
@@ -55,6 +65,78 @@ namespace GazeLSL
             }
 
             return true;
+        }
+
+        // Never restarts the outlet: the declared rate is fixed in the stream header,
+        // and tearing the stream down mid-recording costs more than the low rate.
+        private void ReportMeasuredRate()
+        {
+            if (nominalRate == 0u || Time.realtimeSinceStartup < nextRateCheckTime)
+            {
+                return;
+            }
+
+            nextRateCheckTime = Time.realtimeSinceStartup + RateCheckIntervalSeconds;
+            ReportCalibrationState();
+
+            double measuredRate;
+            long measuredGeneration;
+            if (!gazeProvider.TryGetMeasuredFrameRate(out measuredRate, out measuredGeneration) ||
+                measuredGeneration != sessionGeneration)
+            {
+                return;
+            }
+
+            if (measuredRate < nominalRate * LowRateFraction)
+            {
+                if (Time.realtimeSinceStartup >= nextLowRateWarningTime)
+                {
+                    nextLowRateWarningTime =
+                        Time.realtimeSinceStartup + LowRateWarningIntervalSeconds;
+                    lowRateReported = true;
+                    Debug.LogWarning(
+                        $"Gaze is arriving at {measuredRate:F1} Hz against a nominal " +
+                        $"{nominalRate} Hz. {DescribeCaptureIntervals()} Recordings made " +
+                        "now will be short of samples.");
+                }
+            }
+            else if (lowRateReported)
+            {
+                lowRateReported = false;
+                nextLowRateWarningTime = 0f;
+                Debug.Log($"Gaze rate recovered to {measuredRate:F1} Hz.");
+            }
+        }
+
+        // Names the cause, so a low-rate report is a diagnosis and not a symptom.
+        private string DescribeCaptureIntervals()
+        {
+            double minMilliseconds;
+            double maxMilliseconds;
+            if (!gazeProvider.TryGetCaptureIntervals(out minMilliseconds, out maxMilliseconds))
+            {
+                return string.Empty;
+            }
+
+            string cause = maxMilliseconds - minMilliseconds < 0.5 * minMilliseconds
+                ? "the tracker is publishing at that rate"
+                : "the tracker is publishing faster and readings are being lost";
+            return $"Capture gaps {minMilliseconds:F1}-{maxMilliseconds:F1} ms, so {cause}.";
+        }
+
+        private void ReportCalibrationState()
+        {
+            bool valid;
+            int changeCount;
+            if (!gazeProvider.TryGetCalibrationState(out valid, out changeCount) ||
+                (calibrationReported && changeCount == reportedCalibrationChangeCount))
+            {
+                return;
+            }
+
+            calibrationReported = true;
+            reportedCalibrationChangeCount = changeCount;
+            Debug.Log($"Eye tracker calibration valid: {valid} (change {changeCount}).");
         }
 
         private void CreateOutlet()
@@ -97,7 +179,10 @@ namespace GazeLSL
             acquisition.append_child_value("device", "HoloLens2");
             acquisition.append_child_value("sdk", "Microsoft.MixedReality.EyeTracking");
             acquisition.append_child_value("nominal_srate", rate.ToString());
-            acquisition.append_child_value("acquisition_mode", "extended_eye_tracking_90hz");
+            acquisition.append_child_value(
+                "acquisition_mode", $"extended_eye_tracking_{rate}hz");
+            acquisition.append_child_value(
+                "reading_retrieval", "sequential_drain_after_last_capture");
             acquisition.append_child_value("timestamp", "eye_gaze_tracker_timestamp");
             acquisition.append_child_value("timestamp_units", "seconds");
             acquisition.append_child_value(
@@ -115,13 +200,15 @@ namespace GazeLSL
                 "timestamp_mapping", "query_lsl_clock_minus_query_to_capture_age");
             synchronization.append_child_value("can_drop_samples", "true");
             synchronization.append_child_value(
-                "backlog_policy", "drop_when_capture_span_exceeds_25ms_retain_latest");
+                "backlog_policy", "drop_when_capture_span_exceeds_500ms_retain_latest");
         }
 
         private void Update()
         {
             if (worker != null)
             {
+                ReportMeasuredRate();
+
                 int providerExceptionCount = worker.ProviderExceptionCount;
                 int reportInterval = (int)Math.Max(1u, nominalRate);
                 if (providerExceptionCount > reportedProviderExceptionCount &&
@@ -208,6 +295,13 @@ namespace GazeLSL
                 failureReported = false;
                 providerRecoveryReported = false;
                 reportedProviderExceptionCount = 0;
+                lowRateReported = false;
+                calibrationReported = false;
+                reportedCalibrationChangeCount = 0;
+                nextLowRateWarningTime = 0f;
+                // Give the estimator a window to fill before judging the rate.
+                nextRateCheckTime =
+                    Time.realtimeSinceStartup + RateCheckIntervalSeconds;
             }
             catch (Exception e)
             {

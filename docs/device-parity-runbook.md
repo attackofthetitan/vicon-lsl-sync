@@ -211,7 +211,8 @@ treating a fallback as complete.
 - Smallest, middle, 95th-percentile, and largest gap between sample times.
 - Rate for the whole recording and for useful two-second windows.
 - Count of duplicate or earlier times; expected count is zero.
-- Count and length of gaps over 25 ms.
+- Count and length of gaps over 500 ms.
+- Captured fraction of the 90 Hz grid: divide the sample count by the recording length in 11.111 ms steps. Acquisition drains the tracker buffer, so this should sit near 100%. A steady shortfall means readings are being lost before the queues, not dropped by them.
 - A picture of persistent stream health after a normal update and after the
   source is deliberately allowed to become stale.
 - Skipped older input, display replacements, and maximum displayed preview
@@ -225,7 +226,7 @@ Do not invent a new allowed drop rate during code cleanup. Compare with the know
 Use a controlled load that you can repeat and undo. It should delay Unity's main-thread conversion work or create a queue without changing the code being checked. Write down the exact load.
 
 1. Record a stable period before the load.
-2. Apply the load long enough to build more than 25 ms of captured data.
+2. Apply the load long enough to build more than 500 ms of captured data.
 3. Remove the load and let the app recover.
 4. Review timestamps and gaze/Vicon visual alignment.
 

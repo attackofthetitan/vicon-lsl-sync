@@ -45,6 +45,11 @@ namespace GazeLSL
         private SpatialGraphNode trackerNode;
         private Transform mixedRealityPlayspace;
         private readonly GazeReadingGate readingGate = new GazeReadingGate();
+        private readonly GazeRateEstimator rateEstimator = new GazeRateEstimator();
+        private uint selectedFrameRate;
+        private bool calibrationValid;
+        private bool hasCalibrationState;
+        private int calibrationChangeCount;
         private long sessionGeneration;
         private long watcherGeneration;
         private long trackerLifecycleGeneration;
@@ -88,8 +93,83 @@ namespace GazeLSL
                     return false;
                 }
 
-                rate = RequiredFrameRate;
+                if (selectedFrameRate == 0u)
+                {
+                    return false;
+                }
+
+                rate = selectedFrameRate;
                 generation = sessionGeneration;
+                return true;
+            }
+#else
+            return false;
+#endif
+        }
+
+        // TryGetEffectiveFrameRate reports what the device was asked for and cannot
+        // reveal a tracker that has throttled itself; this measures what arrived.
+        public bool TryGetMeasuredFrameRate(out double samplesPerSecond, out long generation)
+        {
+            samplesPerSecond = 0.0;
+            generation = 0L;
+
+#if ENABLE_WINMD_SUPPORT
+            lock (trackerGate)
+            {
+                if (tracker == null || trackerNode == null)
+                {
+                    return false;
+                }
+
+                generation = sessionGeneration;
+                return rateEstimator.TryGetRate(out samplesPerSecond);
+            }
+#else
+            return false;
+#endif
+        }
+
+        // Shortest and longest gap between accepted captures, in milliseconds.
+        public bool TryGetCaptureIntervals(out double minMilliseconds, out double maxMilliseconds)
+        {
+            minMilliseconds = 0.0;
+            maxMilliseconds = 0.0;
+
+#if ENABLE_WINMD_SUPPORT
+            lock (trackerGate)
+            {
+                if (tracker == null || trackerNode == null)
+                {
+                    return false;
+                }
+
+                return rateEstimator.TryGetIntervalSummary(
+                    out minMilliseconds,
+                    out maxMilliseconds);
+            }
+#else
+            return false;
+#endif
+        }
+
+        // changeCount rises on every transition, so a caller polling slowly still
+        // learns that calibration moved even if it missed the intermediate value.
+        public bool TryGetCalibrationState(out bool valid, out int changeCount)
+        {
+            valid = false;
+            changeCount = 0;
+
+#if ENABLE_WINMD_SUPPORT
+            lock (trackerGate)
+            {
+                if (!hasCalibrationState)
+                {
+                    return false;
+                }
+
+                valid = calibrationValid;
+                changeCount = calibrationChangeCount;
                 return true;
             }
 #else
@@ -162,11 +242,42 @@ namespace GazeLSL
         }
 
 #if ENABLE_WINMD_SUPPORT
+        // Drains every reading published since the last accepted one. Asking for the
+        // reading at "now" returns only one, so a late poll loses the frames between;
+        // walking the cursor makes capture independent of poll punctuality.
         private void AcquireRawReadingLocked()
         {
             DateTime queryTime = DateTime.Now;
             double queryLslTime = LSL.LSL.local_clock();
 
+            if (!readingGate.HasReading)
+            {
+                SeedReadingCursorLocked(queryTime, queryLslTime);
+                return;
+            }
+
+            for (int index = 0; index < GazeTiming.MaxReadingsPerAcquire; index++)
+            {
+                EyeGazeTrackerReading reading =
+                    tracker.TryGetReadingAfterSystemRelativeTime(
+                        TimeSpan.FromTicks(readingGate.LastTimestampTicks));
+                if (reading == null)
+                {
+                    return;
+                }
+
+                if (!EnqueueReadingLocked(reading, queryTime, queryLslTime))
+                {
+                    // The cursor did not advance, so this would loop on one reading.
+                    return;
+                }
+            }
+        }
+
+        // Once a cursor exists an old reading means this poll is catching up, not
+        // that the tracker stalled, so only the seed is judged on age.
+        private void SeedReadingCursorLocked(DateTime queryTime, double queryLslTime)
+        {
             EyeGazeTrackerReading reading =
                 tracker.TryGetReadingAtTimestamp(queryTime);
             if (reading == null)
@@ -174,18 +285,32 @@ namespace GazeLSL
                 return;
             }
 
-            double ageSeconds =
-                (queryTime - reading.Timestamp).TotalSeconds;
-            if (Math.Abs(ageSeconds) > 0.050)
+            if (!GazeTiming.IsFreshCaptureTimestamp(
+                    reading.SystemRelativeTime.Ticks,
+                    GazeTiming.CurrentSystemRelativeTimeTicks(),
+                    GazeTiming.MaxSeedCaptureAgeTicks))
             {
                 return;
             }
 
+            EnqueueReadingLocked(reading, queryTime, queryLslTime);
+        }
+
+        // False when the reading did not advance the cursor: the drain's stop
+        // condition as well as the duplicate guard.
+        private bool EnqueueReadingLocked(
+            EyeGazeTrackerReading reading,
+            DateTime queryTime,
+            double queryLslTime)
+        {
             long systemRelativeTimeTicks = reading.SystemRelativeTime.Ticks;
             if (!readingGate.TryAccept(systemRelativeTimeTicks))
             {
-                return;
+                return false;
             }
+
+            // One query pair anchors the batch; each reading keeps its capture time.
+            double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
 
             RawGazeReading raw = new RawGazeReading
             {
@@ -207,6 +332,18 @@ namespace GazeLSL
                 GetRawTimestampTicks,
                 MaxQueuedSamples,
                 GazeTiming.MaxBacklogSpanTicks);
+
+            rateEstimator.Add(systemRelativeTimeTicks);
+
+            bool readingCalibrationValid = reading.IsCalibrationValid;
+            if (!hasCalibrationState || readingCalibrationValid != calibrationValid)
+            {
+                hasCalibrationState = true;
+                calibrationValid = readingCalibrationValid;
+                calibrationChangeCount++;
+            }
+
+            return true;
         }
 
         private void TransformReadingsOnMainThread()
@@ -406,7 +543,8 @@ namespace GazeLSL
             {
                 await newTracker.OpenAsync(true);
 
-                if (!TrySelect90Hz(newTracker))
+                uint activeFrameRate = TrySelectRequiredFrameRate(newTracker);
+                if (activeFrameRate == 0u)
                 {
                     Debug.LogError("This eye tracker does not expose the required 90 Hz mode.");
                     CloseTracker(newTracker);
@@ -441,6 +579,7 @@ namespace GazeLSL
                         // lifecycle; readings from the previous SDK session must
                         // never be compared with this session's clock.
                         ResetReadingPipelineLocked();
+                        selectedFrameRate = activeFrameRate;
                         includeIndividualEyes = perEye;
                         sessionGeneration++;
                     }
@@ -497,12 +636,14 @@ namespace GazeLSL
             }
         }
 
-        private static bool TrySelect90Hz(EyeGazeTracker currentTracker)
+        // Returns the rate the device reported for the mode it accepted, or zero if
+        // the required mode is not offered, so nominal describes the actual mode.
+        private static uint TrySelectRequiredFrameRate(EyeGazeTracker currentTracker)
         {
             var supportedRates = currentTracker.SupportedTargetFrameRates;
             if (supportedRates == null)
             {
-                return false;
+                return 0u;
             }
 
             for (int i = 0; i < supportedRates.Count; i++)
@@ -510,11 +651,11 @@ namespace GazeLSL
                 if (supportedRates[i].FramesPerSecond == RequiredFrameRate)
                 {
                     currentTracker.SetTargetFrameRate(supportedRates[i]);
-                    return true;
+                    return supportedRates[i].FramesPerSecond;
                 }
             }
 
-            return false;
+            return 0u;
         }
 
         private static TrackerSpaceRay ReadCombinedRay(
@@ -603,6 +744,10 @@ namespace GazeLSL
         private void ResetReadingPipelineLocked()
         {
             readingGate.Reset();
+            rateEstimator.Reset();
+            calibrationValid = false;
+            hasCalibrationState = false;
+            calibrationChangeCount = 0;
             pendingRawReadings.Clear();
             pendingSamples.Clear();
             consecutiveLocateFailures = 0;
@@ -614,6 +759,7 @@ namespace GazeLSL
         {
             tracker = null;
             trackerNode = null;
+            selectedFrameRate = 0u;
             includeIndividualEyes = false;
             ResetReadingPipelineLocked();
         }

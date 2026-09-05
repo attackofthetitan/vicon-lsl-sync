@@ -11,8 +11,21 @@ namespace GazeLSL
     internal static class GazeTiming
     {
         public static readonly long SystemRelativeTicksPerSecond = Stopwatch.Frequency;
+
+        // Must stay above a full drain batch: 32 readings at 90 Hz span 355 ms, and
+        // a tighter budget would collapse the queue part-way through a batch,
+        // discarding the readings the drain just recovered.
         public static readonly long MaxBacklogSpanTicks =
-            (long)Math.Round(Stopwatch.Frequency * 0.025, MidpointRounding.AwayFromZero);
+            (long)Math.Round(Stopwatch.Frequency * 0.500, MidpointRounding.AwayFromZero);
+
+        // Only the reading that seeds the drain cursor is judged on age; later ones
+        // are reached by walking forward rather than by asking for "now".
+        public static readonly long MaxSeedCaptureAgeTicks =
+            (long)Math.Round(Stopwatch.Frequency * 0.050, MidpointRounding.AwayFromZero);
+
+        // Ceiling on work done under the tracker lock in one acquisition call.
+        public const int MaxReadingsPerAcquire = 32;
+
         private static readonly long MaximumFutureLeadTicks =
             (long)Math.Round(Stopwatch.Frequency * 0.001, MidpointRounding.AwayFromZero);
 
@@ -53,6 +66,11 @@ namespace GazeLSL
         private bool hasLastTimestamp;
         private long lastTimestampTicks;
 
+        // The accepted timestamp doubles as the drain cursor.
+        public bool HasReading => hasLastTimestamp;
+
+        public long LastTimestampTicks => lastTimestampTicks;
+
         public bool TryAccept(long systemRelativeTimeTicks)
         {
             if (hasLastTimestamp && systemRelativeTimeTicks <= lastTimestampTicks)
@@ -69,6 +87,84 @@ namespace GazeLSL
         {
             hasLastTimestamp = false;
             lastTimestampTicks = 0L;
+        }
+    }
+
+    // The rate that arrived, measured from capture timestamps. A throttled tracker
+    // keeps reporting its configured rate, so only this shows a short recording.
+    internal sealed class GazeRateEstimator
+    {
+        // One second at 90 Hz.
+        public const int WindowSize = 90;
+        private const int MinimumSamples = 16;
+
+        private readonly long[] captureTicks = new long[WindowSize];
+        private int count;
+        private int next;
+
+        public void Add(long systemRelativeTimeTicks)
+        {
+            captureTicks[next] = systemRelativeTimeTicks;
+            next = (next + 1) % WindowSize;
+            if (count < WindowSize)
+            {
+                count++;
+            }
+        }
+
+        public bool TryGetRate(out double samplesPerSecond)
+        {
+            samplesPerSecond = 0.0;
+            if (count < MinimumSamples)
+            {
+                return false;
+            }
+
+            long newest = captureTicks[(next - 1 + WindowSize) % WindowSize];
+            long oldest = captureTicks[(next - count + WindowSize) % WindowSize];
+            long spanTicks = newest - oldest;
+            if (spanTicks <= 0L)
+            {
+                return false;
+            }
+
+            samplesPerSecond =
+                (count - 1) * (double)GazeTiming.SystemRelativeTicksPerSecond / spanTicks;
+            return true;
+        }
+
+        // A steady slow tracker shows the same min and max; readings lost at full
+        // rate show a low min beside a high max.
+        public bool TryGetIntervalSummary(out double minMilliseconds, out double maxMilliseconds)
+        {
+            minMilliseconds = 0.0;
+            maxMilliseconds = 0.0;
+            if (count < MinimumSamples)
+            {
+                return false;
+            }
+
+            long minTicks = long.MaxValue;
+            long maxTicks = long.MinValue;
+            int start = (next - count + WindowSize) % WindowSize;
+            for (int i = 1; i < count; i++)
+            {
+                long delta = captureTicks[(start + i) % WindowSize] -
+                             captureTicks[(start + i - 1) % WindowSize];
+                if (delta < minTicks) minTicks = delta;
+                if (delta > maxTicks) maxTicks = delta;
+            }
+
+            double ticksPerMillisecond = GazeTiming.SystemRelativeTicksPerSecond / 1000.0;
+            minMilliseconds = minTicks / ticksPerMillisecond;
+            maxMilliseconds = maxTicks / ticksPerMillisecond;
+            return true;
+        }
+
+        public void Reset()
+        {
+            count = 0;
+            next = 0;
         }
     }
 
