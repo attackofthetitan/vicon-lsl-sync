@@ -149,6 +149,14 @@ Origins use `meters`, directions use `normalized`, and valid values use `bool`.
 
 The app creates the stream only after the tracker reports an active 90 Hz mode and supplies a spatial graph node. It sends the original positive, finite capture timestamp. It drops a sample with a bad timestamp instead of giving it a new time.
 
+The declared rate is the rate the tracker reported for the mode it accepted. That
+value is fixed in the stream header and describes what the device was asked for,
+not what it delivers: a tracker that throttles itself keeps reporting its
+configured rate. The app therefore also measures the rate arriving from accepted
+capture timestamps and logs a warning while that stays below 80% of the declared
+rate. It does not recreate the stream in response, because the declared rate
+cannot change mid-stream and a restart would cost more data than the low rate.
+
 If the tracker does not support data for one eye, that eye stays in the 21-value layout and is marked invalid.
 
 A lasting provider error stops the worker, restarts tracker discovery, and later recreates the stream. A fatal worker or stream error that is not a recoverable provider error disables publishing after it logs the error.
@@ -157,14 +165,15 @@ The gaze stream includes these values:
 
 - `device = HoloLens2`
 - `sdk = Microsoft.MixedReality.EyeTracking`
-- `acquisition_mode = extended_eye_tracking_90hz`
+- `acquisition_mode = extended_eye_tracking_<selected>hz`, from the frame rate the tracker reported for the mode it accepted
+- `reading_retrieval = sequential_drain_after_last_capture`
 - `timestamp = sdk_system_relative_time`
 - `timestamp_units = seconds`
 - `capture_clock_domain = windows_qpc_system_relative`
 - `clock_domain = lsl_local_clock`
 - `coordinate_frame = hololens_stationary_shared_with_gaze`
 - `coordinate_units = meters`
-- Backlog rule: `drop_when_capture_span_exceeds_25ms_retain_latest`
+- Backlog rule: `drop_when_capture_span_exceeds_500ms_retain_latest`
 
 ### `HoloLensModelTargetPose`
 

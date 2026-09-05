@@ -89,27 +89,45 @@ The production code and device-independent checks both read the SDK count direct
 
 ### Ask for a current reading
 
-The publishing side asks the SDK for a reading at:
+The publishing side does not ask for the reading at the current time. Asking for
+the reading at "now" returns exactly one reading per call, so a poll that lands
+more than one tracker frame after the previous one loses every frame in between.
+The publishing step runs at the same rate the tracker publishes, so ordinary
+thread jitter was enough to drop about one reading in six.
 
-`TimeSpan.FromTicks(Stopwatch.GetTimestamp())`
+Instead each step drains forward from the last accepted capture time:
 
-A reading may pass only when:
+`TryGetReadingAfterSystemRelativeTime(TimeSpan.FromTicks(last_accepted_ticks))`
+
+The step repeats until the SDK returns no newer reading, or until it has taken 32
+readings. Capture rate is then independent of how punctually the step runs.
+
+The first step of a tracker session has no cursor, so it seeds one from
+`TryGetReadingAtTimestamp(now)`. That seed reading is the only one judged on age:
 
 - `capture_ticks > 0`.
 - `query_ticks > 0`.
-- It is no more than 25 ms old.
+- It is no more than 50 ms old.
 - If its time is slightly ahead, it is no more than 1 ms ahead.
 
-`GazeReadingGate` then accepts only a timestamp later than the last accepted timestamp in the same tracker session. It drops duplicates and earlier values. The gate resets when the tracker session changes.
+Once a cursor exists, a reading being old means the step is catching up, not that
+the tracker has stalled, so age is not a reason to drop it.
+
+`GazeReadingGate` then accepts only a timestamp later than the last accepted timestamp in the same tracker session. It drops duplicates and earlier values. Its last accepted timestamp is the drain cursor, so a rejected reading also ends the drain rather than being requested again. The gate resets when the tracker session changes.
 
 ### Limit queued data
 
-The raw queue and the world-space queue each allow at most 360 items and at most 25 ms between oldest and newest capture times.
+The raw queue and the world-space queue each allow at most 360 items and at most 500 ms between oldest and newest capture times.
+
+A drained batch is several readings wide, so the span budget has to stay above a
+full batch or the queue policy would discard exactly the readings draining
+recovers. At 90 Hz a full 32-reading batch already spans 355 ms; the budget
+exists only to bound staleness after a real stall.
 
 When adding an item:
 
 1. Remove oldest items while the queue already has 360 items.
-2. If the new item makes the time span negative or greater than 25 ms, clear the queue.
+2. If the new item makes the time span negative or greater than 500 ms, clear the queue.
 3. Add the new item.
 
 Before sending a world-space sample, reduce an over-limit queue to its newest item.
@@ -117,6 +135,13 @@ Before sending a world-space sample, reduce an over-limit queue to its newest it
 This creates a clear timestamp gap during overload. Do not replay old samples, fill in missing samples, or give old samples a new current time.
 
 ### Publishing schedule and errors
+
+A publishing step sends at most one queued sample, so steps run at 1.25 times the
+declared rate. Without that margin a queue built up while the main thread was
+stalled can never shrink, because samples arrive as fast as they leave; the
+latency would be permanent and would accumulate across stalls until the span
+budget dumped the queue. A step that finds nothing sends nothing. The margin
+paces the worker only and does not change the rate declared on the stream.
 
 - The worker schedules one step every `1000 / nominal_rate` ms. The current rate is exactly 90 Hz.
 - After a missed schedule, move to the next interval from the current time. Do not run an unlimited catch-up loop.

@@ -26,6 +26,11 @@ namespace GazeLSL
 
     public sealed class GazePublisherWorker
     {
+        // A step publishes at most one sample, so unless steps outpace the tracker a
+        // queue built during a stall never shrinks and accumulates until the backlog
+        // policy dumps it. Does not affect the rate declared on the stream.
+        private const double PublishOversample = 1.25;
+
         private readonly object lifecycleLock = new object();
         private readonly IGazeSampleProvider provider;
         private readonly IGazeSampleOutlet outlet;
@@ -135,11 +140,12 @@ namespace GazeLSL
             try
             {
                 double[] sampleBuffer = new double[GazeSampleEncoder.ChannelCount];
-                double intervalMilliseconds = 1000.0 / nominalRate;
+                double stepRate = nominalRate * PublishOversample;
+                double intervalMilliseconds = 1000.0 / stepRate;
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 double nextSampleMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
                 int consecutiveProviderFailures = 0;
-                int providerRecoveryThreshold = (int)Math.Max(3u, nominalRate);
+                int providerRecoveryThreshold = (int)Math.Max(3.0, stepRate);
 
                 while (!stopSignal.IsSet)
                 {
