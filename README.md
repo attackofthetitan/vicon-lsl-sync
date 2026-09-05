@@ -110,9 +110,10 @@ compatibility remain visible as stream status changes.
 
 Restarting the HoloLens app can create a new Unity world, so run the alignment again after a restart. If the physical stairs move, update the fixed Vicon stair pose before relying on the result.
 
-The Unity app keeps the original device capture time. It drops duplicate, old,
-invalid, or out-of-order readings. If processing falls more than 25 ms behind,
-it drops the older queued readings and keeps the newest one. This leaves a
+The Unity app keeps the original device capture time. It drops duplicate,
+invalid, or out-of-order readings, and walks forward through every reading the
+tracker published since the last accepted one. If processing falls more than
+500 ms behind, it drops the older queued readings and keeps the newest one. This leaves a
 visible time gap instead of replaying old gaze data. See [How time and
 coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
 

@@ -39,7 +39,9 @@ The app asks the user for eye-gaze permission. It starts publishing only when th
 
 The tracking work is split between two threads:
 
-- A 90 Hz worker reads gaze from the eye-tracking SDK.
+- A worker drains gaze from the eye-tracking SDK. It steps at 1.25 times the
+  90 Hz nominal rate, because a step sends at most one sample and a queue built
+  during a stall can only shrink if steps outpace the tracker.
 - Unity's main thread converts each reading into the current Unity/OpenXR world at the time when the device captured it.
 
 This keeps the gaze ray in the same stationary world as the optional Vuforia model-target stream.
@@ -50,14 +52,17 @@ Each eye-tracking reading includes `SystemRelativeTime`. On this device path, th
 
 It does not use the fixed .NET `TimeSpan` rate. It also does not replace capture time with the time when Unity happened to read the sample.
 
+Each step walks forward from the last accepted capture time, taking up to 32 readings, rather than asking for the reading at the current time. Asking for the reading at "now" returns one reading per call, so a poll that lands late loses every frame in between.
+
 The app drops a reading when its timestamp is:
 
 - Missing or not positive.
 - A duplicate of the last reading.
 - Earlier than the last reading.
-- More than 25 ms old.
 
-The raw and converted queues may hold a normal small batch. If either queue spans more than 25 ms, the app drops the older queued readings and keeps only the newest sample. This creates a time gap instead of sending delayed gaze after the matching Vicon motion.
+Age is judged only on the reading that seeds the cursor at the start of a tracker session, which must be no more than 50 ms old. Once a cursor exists, an old reading means the step is catching up rather than that the tracker stalled.
+
+The raw and converted queues may hold a normal small batch. If either queue spans more than 500 ms, the app drops the older queued readings and keeps only the newest sample. This creates a time gap instead of sending delayed gaze after the matching Vicon motion. The budget stays above one full drained batch, which spans 355 ms at 90 Hz, so the queue does not discard the readings draining just recovered.
 
 LSL and LabRecorder still handle clock differences between the HoloLens and the recording computer.
 

@@ -21,16 +21,35 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
   preview waits for live preview to stop. Closing cancels a queued file open.
 - The bridge status follows disconnects and reconnects instead of staying Running.
 - Starting another recording waits until the previous file check finishes.
+- HoloLens gaze no longer loses about one reading in six. Each acquisition asked
+  the tracker for the reading at the current time, which returns exactly one, so
+  a poll landing more than one tracker frame late lost every frame in between.
+  Acquisition now walks forward from the last accepted capture time, taking up
+  to 32 readings per step, so the captured rate no longer depends on how
+  punctually the step runs.
 
 ### Changed
 
 - Simplified session start and stop, removed redundant state and JSON wrappers,
   and kept preview button updates in one place.
 - Reused stream schema constants and clarified playback names and status text.
+- The gaze backlog budget is 500 ms rather than 25 ms. A full drained batch
+  spans 355 ms at 90 Hz, so a tighter budget would discard exactly the readings
+  draining recovers. Gaze publishing steps run at 1.25 times the nominal rate,
+  because a step sends at most one sample and a queue built during a stall can
+  only shrink if steps outpace the tracker.
+- The gaze stream declares the frame rate the tracker reported for the mode it
+  accepted, and the app measures the rate that actually arrives, warning while
+  it stays below 80% of nominal and naming whether the tracker is publishing
+  slowly or readings are being lost. Eye tracker calibration validity is logged.
 
 ### Compatibility
 
 - No configuration, file format, or command line change. Roll back to `v1.13.5`.
+- The gaze stream header changes value: `acquisition_mode` now carries the
+  selected rate, `backlog_policy` reports the 500 ms budget, and a new
+  `reading_retrieval` value records that readings are drained in sequence.
+  Anything that matched the previous strings exactly needs updating.
 
 ## [1.13.5] - 2026-09-04
 
