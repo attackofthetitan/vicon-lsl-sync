@@ -4,6 +4,27 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.6] - 2026-09-05
+
+### Fixed
+
+- Stop Session sends Stop to the selected-stream recorder, including during
+  startup, and cancels recording starts that are still finding streams.
+- Opening a recording directly, from recent files, or by dropping it into the
+  preview waits for live preview to stop. Closing cancels a queued file open.
+- The bridge status follows disconnects and reconnects instead of staying Running.
+- Starting another recording waits until the previous file check finishes.
+
+### Changed
+
+- Simplified session start and stop, removed redundant state and JSON wrappers,
+  and kept preview button updates in one place.
+- Reused stream schema constants and clarified playback names and status text.
+
+### Compatibility
+
+- No configuration, file format, or command line change. Roll back to `v1.13.5`.
+
 ## [1.13.5] - 2026-09-04
 
 ### Fixed

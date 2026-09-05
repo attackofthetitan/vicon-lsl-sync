@@ -1,5 +1,6 @@
 #include "gui/BridgeWindow.h"
 #include "gui/ElidingLabel.h"
+#include "TestSupport.h"
 
 #include <QAbstractButton>
 #include <QAbstractSpinBox>
@@ -137,6 +138,7 @@ bool labelsAreNotCutOff(const QWidget& window) {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("Vicon LSL Bridge GUI Check");
+    app.setQuitOnLastWindowClosed(false);
 
     QTemporaryDir settings_directory;
     if (!settings_directory.isValid()) return 1;
@@ -219,8 +221,9 @@ int main(int argc, char* argv[]) {
                       << std::endl;
         }
 
+        const bool session_flows_passed = test_support::runAllTests() == 0;
         app.exit(fits && controls_are_described && rendered_at_requested_size &&
-                 no_sideways_scrolling && laid_out_cleanly ? 0 : 1);
+                 no_sideways_scrolling && laid_out_cleanly && session_flows_passed ? 0 : 1);
     });
 
     return app.exec();

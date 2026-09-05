@@ -5,40 +5,11 @@
 namespace labrecorder_client_tests {
 namespace {
 
-using vicon_lsl::gui::GuidedStartInputs;
-using vicon_lsl::gui::GuidedStartStep;
-using vicon_lsl::gui::GuidedStopInputs;
-using vicon_lsl::gui::GuidedStopStep;
 using vicon_lsl::gui::ShutdownInputs;
 using vicon_lsl::gui::endOwnedProcessDecision;
-using vicon_lsl::gui::nextGuidedStartStep;
-using vicon_lsl::gui::nextGuidedStopStep;
 using vicon_lsl::gui::recorderConnectionLostExternally;
 using vicon_lsl::gui::shutdownStatusText;
 using vicon_lsl::gui::shutdownWaitingOn;
-
-// A session with every component available and nothing started yet.
-GuidedStartInputs startInputs() {
-    GuidedStartInputs inputs;
-    inputs.recorder_only = false;
-    inputs.bridge = ComponentLifecycleState::Idle;
-    inputs.bridge_worker_present = false;
-    inputs.preview_available = true;
-    inputs.preview = ComponentLifecycleState::Idle;
-    return inputs;
-}
-
-GuidedStopInputs stopInputs() {
-    GuidedStopInputs inputs;
-    inputs.recording_active_or_pending = false;
-    inputs.recorder_stopping = false;
-    inputs.verification_active = false;
-    inputs.preview_available = true;
-    inputs.preview_shutdown_ready = true;
-    inputs.bridge_worker_present = false;
-    inputs.owns_graphical_recorder = false;
-    return inputs;
-}
 
 // Closing with every component already stopped and no recorder of our own.
 ShutdownInputs settledShutdown() {
@@ -58,95 +29,6 @@ ShutdownInputs settledShutdown() {
 }
 
 } // namespace
-
-void testGuidedStartOrder() {
-    GuidedStartInputs inputs = startInputs();
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartBridge,
-           "a guided start begins with the bridge");
-
-    inputs.bridge_worker_present = true;
-    inputs.bridge = ComponentLifecycleState::Starting;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::AwaitBridge,
-           "a bridge that is already starting is waited for, not started twice");
-
-    inputs.bridge = ComponentLifecycleState::Running;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartPreview,
-           "the preview starts only once the bridge is running");
-
-    inputs.preview = ComponentLifecycleState::Starting;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::AwaitPreview,
-           "a preview that is already starting is waited for, not started twice");
-
-    inputs.preview = ComponentLifecycleState::Running;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartRecording,
-           "recording starts once the bridge and preview are running");
-
-    // A preview that stopped on its own is started again rather than waited on.
-    inputs.preview = ComponentLifecycleState::Stopped;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartPreview,
-           "a stopped preview is started again");
-
-    inputs.preview_available = false;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartRecording,
-           "a session without a preview goes straight to recording");
-}
-
-void testGuidedStartFailuresAndRecorderOnly() {
-    GuidedStartInputs inputs = startInputs();
-    inputs.bridge = ComponentLifecycleState::Failed;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::BridgeFailed,
-           "a failed bridge stops the guided start");
-
-    // Recorder-only sessions do not need the bridge at all, so its state is
-    // not allowed to block or fail the start.
-    inputs.recorder_only = true;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartPreview,
-           "a recorder-only session ignores a failed bridge");
-
-    inputs.preview = ComponentLifecycleState::Failed;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::PreviewFailed,
-           "a failed preview stops the guided start");
-
-    inputs.preview_available = false;
-    expect(nextGuidedStartStep(inputs) == GuidedStartStep::StartRecording,
-           "a recorder-only session with no preview records immediately");
-}
-
-void testGuidedStopOrder() {
-    GuidedStopInputs inputs = stopInputs();
-    inputs.recording_active_or_pending = true;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::StopRecording,
-           "a guided stop stops the recording first");
-
-    inputs.recorder_stopping = true;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::AwaitRecorder,
-           "a stop already in flight is not requested again");
-
-    inputs.recording_active_or_pending = false;
-    inputs.recorder_stopping = false;
-    inputs.verification_active = true;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::AwaitVerification,
-           "the file check finishes before anything else is torn down");
-
-    inputs.verification_active = false;
-    inputs.preview_shutdown_ready = false;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::ShutDownPreview,
-           "the preview releases its inlets before the bridge stops");
-
-    inputs.preview_shutdown_ready = true;
-    inputs.bridge_worker_present = true;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::StopBridge,
-           "the bridge stops after the preview");
-
-    inputs.bridge_worker_present = false;
-    inputs.owns_graphical_recorder = true;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::EndOwnedRecorder,
-           "a recorder started here is closed last");
-
-    inputs.owns_graphical_recorder = false;
-    expect(nextGuidedStopStep(inputs) == GuidedStopStep::Finished,
-           "the guided stop finishes once nothing is left running");
-}
 
 void testShutdownWaitsForEachComponent() {
     expect(shutdownWaitingOn(settledShutdown()).isEmpty(),

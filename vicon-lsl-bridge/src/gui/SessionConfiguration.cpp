@@ -1,6 +1,8 @@
 #include "gui/SessionConfiguration.h"
 
 #include "StreamDefaults.h"
+#include "HoloLensGazeSchema.h"
+#include "HoloLensModelTargetSchema.h"
 
 #include <QDir>
 #include <QFile>
@@ -19,25 +21,9 @@ QString jsonString(const QJsonObject& object) {
     return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
 }
 
-bool rBool(const QJsonObject& o, const char* k, bool def = false) {
-    const auto v = o.value(QLatin1String(k));
-    return v.isBool() ? v.toBool() : def;
-}
-
-int rInt(const QJsonObject& o, const char* k, int def = 0) {
-    const auto v = o.value(QLatin1String(k));
-    return v.isDouble() ? v.toInt(def) : def;
-}
-
-double rDouble(const QJsonObject& o, const char* k, double def = 0.0) {
-    const auto v = o.value(QLatin1String(k));
-    const double val = v.isDouble() ? v.toDouble(def) : def;
-    return std::isfinite(val) ? val : def;
-}
-
-QString rString(const QJsonObject& o, const char* k, const QString& def = {}) {
-    const auto v = o.value(QLatin1String(k));
-    return v.isString() ? v.toString() : def;
+double readFiniteDouble(const QJsonObject& object, const char* key, double default_value = 0.0) {
+    const double value = object.value(QLatin1String(key)).toDouble(default_value);
+    return std::isfinite(value) ? value : default_value;
 }
 
 bool parseConfiguration(const QByteArray& bytes, const QString& bad_json,
@@ -112,26 +98,26 @@ QJsonObject StreamIdentity::toJson() const {
 
 StreamIdentity StreamIdentity::fromJson(const QJsonObject& o) {
     StreamIdentity id;
-    id.role = rString(o, "role");
-    id.name = rString(o, "name");
-    id.type = rString(o, "type");
-    id.source_id = rString(o, "sourceId");
-    id.hostname = rString(o, "hostname");
-    id.session_id = rString(o, "sessionId");
-    id.uid = rString(o, "uid");
-    id.publisher_created_at = rDouble(o, "publisherCreatedAt");
-    id.channel_count = rInt(o, "channelCount");
-    id.nominal_rate = rDouble(o, "nominalRate");
-    id.effective_rate = rDouble(o, "effectiveRate");
-    id.coordinate_frame = rString(o, "coordinateFrame");
-    id.metadata_complete = rBool(o, "metadataComplete", id.metadata_complete);
-    id.schema_compatible = rBool(o, "schemaCompatible", id.schema_compatible);
-    id.present = rBool(o, "present", id.present);
-    id.selected = rBool(o, "selected", id.selected);
-    id.required = rBool(o, "required", id.required);
-    id.freshness_ms = static_cast<qint64>(rDouble(o, "freshnessMs", -1));
-    id.discovered_at = QDateTime::fromString(rString(o, "discoveredAt"), Qt::ISODateWithMs);
-    id.warning = rString(o, "warning");
+    id.role = o.value("role").toString();
+    id.name = o.value("name").toString();
+    id.type = o.value("type").toString();
+    id.source_id = o.value("sourceId").toString();
+    id.hostname = o.value("hostname").toString();
+    id.session_id = o.value("sessionId").toString();
+    id.uid = o.value("uid").toString();
+    id.publisher_created_at = readFiniteDouble(o, "publisherCreatedAt");
+    id.channel_count = o.value("channelCount").toInt();
+    id.nominal_rate = readFiniteDouble(o, "nominalRate");
+    id.effective_rate = readFiniteDouble(o, "effectiveRate");
+    id.coordinate_frame = o.value("coordinateFrame").toString();
+    id.metadata_complete = o.value("metadataComplete").toBool(id.metadata_complete);
+    id.schema_compatible = o.value("schemaCompatible").toBool(id.schema_compatible);
+    id.present = o.value("present").toBool(id.present);
+    id.selected = o.value("selected").toBool(id.selected);
+    id.required = o.value("required").toBool(id.required);
+    id.freshness_ms = static_cast<qint64>(readFiniteDouble(o, "freshnessMs", -1));
+    id.discovered_at = QDateTime::fromString(o.value("discoveredAt").toString(), Qt::ISODateWithMs);
+    id.warning = o.value("warning").toString();
     return id;
 }
 
@@ -215,24 +201,26 @@ QJsonObject StreamBinding::toJson() const {
 
 StreamBinding StreamBinding::fromJson(const QJsonObject& o) {
     StreamBinding b;
-    b.role = rString(o, "role");
-    b.name = rString(o, "name");
-    b.source_id = rString(o, "sourceId");
-    b.reconnection = rString(o, "reconnection").compare("follow-name", Qt::CaseInsensitive) == 0
+    b.role = o.value("role").toString();
+    b.name = o.value("name").toString();
+    b.source_id = o.value("sourceId").toString();
+    b.reconnection = o.value("reconnection").toString().compare("follow-name", Qt::CaseInsensitive) == 0
         ? StreamReconnectionMode::FollowName : StreamReconnectionMode::SourceIdentity;
-    b.required = rBool(o, "required", b.required);
-    b.expected_channels = rInt(o, "expectedChannels");
-    b.expected_nominal_rate = rDouble(o, "expectedNominalRate");
-    b.expected_coordinate_frame = rString(o, "expectedCoordinateFrame");
+    b.required = o.value("required").toBool(b.required);
+    b.expected_channels = o.value("expectedChannels").toInt();
+    b.expected_nominal_rate = readFiniteDouble(o, "expectedNominalRate");
+    b.expected_coordinate_frame = o.value("expectedCoordinateFrame").toString();
     return b;
 }
 
 SessionConfiguration::SessionConfiguration() {
     preview_markers = makeBinding("markers", stream_defaults::ViconMarkers, true);
     preview_segments = makeBinding("segments", stream_defaults::ViconSegments, false);
-    preview_gaze = makeBinding("gaze", stream_defaults::HoloLensGaze, false, 21, 90.0,
+    preview_gaze = makeBinding("gaze", stream_defaults::HoloLensGaze, false,
+                               static_cast<int>(kHoloLensGazeChannelCount), kHoloLensGazeNominalSrate,
                                "hololens_stationary_shared_with_gaze");
-    preview_calibration = makeBinding("calibration", stream_defaults::HoloLensModelTargetPose, false, 8, 0.0,
+    preview_calibration = makeBinding("calibration", stream_defaults::HoloLensModelTargetPose, false,
+                                      static_cast<int>(kHoloLensModelTargetChannelCount), kHoloLensModelTargetNominalSrate,
                                       "hololens_stationary_shared_with_gaze");
     recording_streams = {preview_markers, preview_segments, preview_gaze, preview_calibration};
     recording_root = QDir::homePath();
@@ -289,35 +277,35 @@ QJsonObject SessionConfiguration::toJson() const {
 
 SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QString* error) {
     SessionConfiguration res;
-    const int ver = rInt(o, "version");
+    const int ver = o.value("version").toInt();
     if (ver != CurrentVersion) {
         if (error) *error = "Unsupported session configuration version " + QString::number(ver);
         return res;
     }
     const auto vicon = o.value("vicon").toObject();
-    res.vicon_endpoint = rString(vicon, "endpoint", res.vicon_endpoint);
-    res.marker_output_name = rString(vicon, "markerOutput", res.marker_output_name);
-    res.segment_output_name = rString(vicon, "segmentOutput", res.segment_output_name);
+    res.vicon_endpoint = vicon.value("endpoint").toString(res.vicon_endpoint);
+    res.marker_output_name = vicon.value("markerOutput").toString(res.marker_output_name);
+    res.segment_output_name = vicon.value("segmentOutput").toString(res.segment_output_name);
 
     const auto prev = o.value("preview").toObject();
-    res.preview_external_streams = rBool(prev, "externalStreams", res.preview_external_streams);
+    res.preview_external_streams = prev.value("externalStreams").toBool(res.preview_external_streams);
     if (prev.value("markers").isObject()) res.preview_markers = StreamBinding::fromJson(prev.value("markers").toObject());
     if (prev.value("segments").isObject()) res.preview_segments = StreamBinding::fromJson(prev.value("segments").toObject());
     if (prev.value("gaze").isObject()) res.preview_gaze = StreamBinding::fromJson(prev.value("gaze").toObject());
     if (prev.value("calibration").isObject()) res.preview_calibration = StreamBinding::fromJson(prev.value("calibration").toObject());
-    res.preview_match_tolerance = rDouble(prev, "matchTolerance", res.preview_match_tolerance);
-    res.preview_render_hz = std::clamp(rInt(prev, "renderHz", res.preview_render_hz), 1, 60);
-    res.preview_cache_megabytes = std::clamp(rInt(prev, "cacheMegabytes", res.preview_cache_megabytes), 16, 2048);
-    res.preview_trail_points = std::clamp(rInt(prev, "trailPoints", res.preview_trail_points), 2, 500);
-    res.preview_playback_speed = std::clamp(rDouble(prev, "playbackSpeed", res.preview_playback_speed), 0.1, 4.0);
-    res.preview_loop_playback = rBool(prev, "loopPlayback", res.preview_loop_playback);
+    res.preview_match_tolerance = readFiniteDouble(prev, "matchTolerance", res.preview_match_tolerance);
+    res.preview_render_hz = std::clamp(prev.value("renderHz").toInt(res.preview_render_hz), 1, 60);
+    res.preview_cache_megabytes = std::clamp(prev.value("cacheMegabytes").toInt(res.preview_cache_megabytes), 16, 2048);
+    res.preview_trail_points = std::clamp(prev.value("trailPoints").toInt(res.preview_trail_points), 2, 500);
+    res.preview_playback_speed = std::clamp(readFiniteDouble(prev, "playbackSpeed", res.preview_playback_speed), 0.1, 4.0);
+    res.preview_loop_playback = prev.value("loopPlayback").toBool(res.preview_loop_playback);
 
     const auto rec = o.value("recorder").toObject();
-    res.recorder_host = rString(rec, "host", res.recorder_host);
-    res.recorder_port = std::clamp(rInt(rec, "port", res.recorder_port), 1, 65535);
-    res.recorder_executable = rString(rec, "executable");
-    res.recorder_automatic_launch = rBool(rec, "automaticLaunch", res.recorder_automatic_launch);
-    res.record_every_visible_stream = rBool(rec, "recordEveryVisible", res.record_every_visible_stream);
+    res.recorder_host = rec.value("host").toString(res.recorder_host);
+    res.recorder_port = std::clamp(rec.value("port").toInt(res.recorder_port), 1, 65535);
+    res.recorder_executable = rec.value("executable").toString();
+    res.recorder_automatic_launch = rec.value("automaticLaunch").toBool(res.recorder_automatic_launch);
+    res.record_every_visible_stream = rec.value("recordEveryVisible").toBool(res.record_every_visible_stream);
     if (rec.value("streams").isArray()) {
         res.recording_streams.clear();
         for (const auto& val : rec.value("streams").toArray()) {
@@ -326,24 +314,24 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QStrin
     }
 
     const auto recing = o.value("recording").toObject();
-    res.recording_root = rString(recing, "root", res.recording_root);
-    res.recording_template = rString(recing, "template", res.recording_template);
-    res.participant = rString(recing, "participant", res.participant);
-    res.session = rString(recing, "session", res.session);
-    res.task = rString(recing, "task", res.task);
-    res.run = std::clamp(rInt(recing, "run", res.run), 1, 999999);
-    res.acquisition = rString(recing, "acquisition", res.acquisition);
-    res.modality = rString(recing, "modality", res.modality);
-    res.storage_warning_gib = (std::max)(0.0, rDouble(recing, "storageWarningGiB", res.storage_warning_gib));
-    res.automatic_run_increment = rBool(recing, "automaticRunIncrement", res.automatic_run_increment);
-    res.allow_overwrite = rBool(recing, "allowOverwrite", res.allow_overwrite);
-    res.allow_outside_study_root = rBool(recing, "allowOutsideStudyRoot", res.allow_outside_study_root);
+    res.recording_root = recing.value("root").toString(res.recording_root);
+    res.recording_template = recing.value("template").toString(res.recording_template);
+    res.participant = recing.value("participant").toString(res.participant);
+    res.session = recing.value("session").toString(res.session);
+    res.task = recing.value("task").toString(res.task);
+    res.run = std::clamp(recing.value("run").toInt(res.run), 1, 999999);
+    res.acquisition = recing.value("acquisition").toString(res.acquisition);
+    res.modality = recing.value("modality").toString(res.modality);
+    res.storage_warning_gib = (std::max)(0.0, readFiniteDouble(recing, "storageWarningGiB", res.storage_warning_gib));
+    res.automatic_run_increment = recing.value("automaticRunIncrement").toBool(res.automatic_run_increment);
+    res.allow_overwrite = recing.value("allowOverwrite").toBool(res.allow_overwrite);
+    res.allow_outside_study_root = recing.value("allowOutsideStudyRoot").toBool(res.allow_outside_study_root);
 
     const auto cal = o.value("calibration").toObject();
-    res.stair_model_path = rString(cal, "stairModel");
-    res.calibration_profile_id = rString(cal, "profileId");
-    res.calibration_required = rBool(cal, "required", res.calibration_required);
-    res.recorder_only_mode = rBool(o.value("workflow").toObject(), "recorderOnly", res.recorder_only_mode);
+    res.stair_model_path = cal.value("stairModel").toString();
+    res.calibration_profile_id = cal.value("profileId").toString();
+    res.calibration_required = cal.value("required").toBool(res.calibration_required);
+    res.recorder_only_mode = o.value("workflow").toObject().value("recorderOnly").toBool(res.recorder_only_mode);
     res.version = CurrentVersion;
     res.bindPreviewOutputs();
     if (error) error->clear();

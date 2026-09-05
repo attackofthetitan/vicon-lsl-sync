@@ -64,6 +64,12 @@ QDoubleSpinBox* makeDistanceSpin(double val = 0.0) { return makeDoubleSpin(-100.
 QDoubleSpinBox* makePoseSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 6, 0.001, val); }
 QDoubleSpinBox* makeQuaternionSpin(double val = 0.0) { return makeDoubleSpin(-1.0, 1.0, 6, 0.01, val); }
 
+std::optional<PreviewFileType> recordingFileType(const QString& path) {
+    if (path.endsWith(".xdf", Qt::CaseInsensitive)) return PreviewFileType::Xdf;
+    if (path.endsWith(".csv", Qt::CaseInsensitive)) return PreviewFileType::Csv;
+    return std::nullopt;
+}
+
 } // namespace
 
 PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
@@ -234,13 +240,11 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* button_row = new FlowLayout();
     start_button_ = new QPushButton("Start Preview");
     stop_button_ = new QPushButton("Stop Preview");
-    stop_button_->setEnabled(false);
     open_csv_button_ = new QPushButton("Open CSV");
     open_xdf_button_ = new QPushButton("Open XDF");
-    play_csv_button_ = new QPushButton("Play Recording");
-    play_csv_button_->setEnabled(false);
-    status_text_ = "Preview stopped";
-    status_label_ = new ElidingLabel(status_text_);
+    play_recording_button_ = new QPushButton("Play Recording");
+    play_recording_button_->setEnabled(false);
+    status_label_ = new ElidingLabel("Preview stopped");
     auto* delivery_metrics = new ElidingLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
     // The explanation is worth more here than a copy of the numbers already shown.
     delivery_metrics->setAutomaticToolTip(false);
@@ -250,7 +254,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
     auto* export_image_button = makeButton("Export Image", "Export the current preview view as a PNG image without changing source data.");
     for (QWidget* control : {start_button_, stop_button_, open_csv_button_, open_xdf_button_,
-                             play_csv_button_, fit_view_button, reset_camera_button, export_image_button}) {
+                             play_recording_button_, fit_view_button, reset_camera_button, export_image_button}) {
         button_row->addWidget(control);
     }
     controls_layout->addLayout(button_row);
@@ -261,8 +265,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     controls_layout->addWidget(delivery_metrics_label_);
 
     auto* load_row = new FlowLayout();
-    file_state_text_ = "No recording loaded";
-    file_state_label_ = new ElidingLabel(file_state_text_);
+    file_state_label_ = new ElidingLabel("No recording loaded");
     memory_label_ = new QLabel("memory 0 MiB");
     load_progress_ = new QProgressBar();
     load_progress_->setRange(0, 100);
@@ -342,8 +345,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     controls_scroll_->setWidget(controls_group);
     layout->addWidget(controls_scroll_);
 
-    csv_timer_ = new QTimer(this);
-    csv_timer_->setInterval(16);
+    playback_timer_ = new QTimer(this);
+    playback_timer_->setInterval(16);
     playback_elapsed_.start();
     live_render_timer_ = new QTimer(this);
     live_render_timer_->setTimerType(Qt::PreciseTimer);
@@ -352,7 +355,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     start_button_->setShortcut(QKeySequence("Alt+P"));
     stop_button_->setShortcut(QKeySequence("Alt+Shift+P"));
     open_xdf_button_->setShortcut(QKeySequence::Open);
-    play_csv_button_->setShortcut(Qt::Key_Space);
+    play_recording_button_->setShortcut(Qt::Key_Space);
     fit_view_button->setShortcut(Qt::Key_F);
     reset_camera_button->setShortcut(Qt::Key_R);
 
@@ -375,8 +378,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     connect(stop_button_, &QPushButton::clicked, this, &PreviewPanel::stopPreview);
     connect(open_csv_button_, &QPushButton::clicked, this, &PreviewPanel::openMergedCsv);
     connect(open_xdf_button_, &QPushButton::clicked, this, &PreviewPanel::openXdf);
-    connect(play_csv_button_, &QPushButton::clicked, this, &PreviewPanel::toggleCsvPlayback);
-    connect(csv_timer_, &QTimer::timeout, this, &PreviewPanel::advanceCsvPlayback);
+    connect(play_recording_button_, &QPushButton::clicked, this, &PreviewPanel::togglePlayback);
+    connect(playback_timer_, &QTimer::timeout, this, &PreviewPanel::advancePlayback);
     connect(live_render_timer_, &QTimer::timeout, this, &PreviewPanel::displayLatestLiveFrame);
     connect(fit_view_button, &QPushButton::clicked, this, &PreviewPanel::fitView);
     connect(reset_camera_button, &QPushButton::clicked, this, &PreviewPanel::resetCamera);
@@ -389,17 +392,17 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     });
     connect(jump_start_button, &QPushButton::clicked, this, [this]() { seekToFrame(0); });
     connect(jump_end_button, &QPushButton::clicked, this, [this]() {
-        if (!csv_frames_.empty()) seekToFrame(csv_frames_.size() - 1);
+        if (!recording_frames_.empty()) seekToFrame(recording_frames_.size() - 1);
     });
     connect(step_back_button, &QPushButton::clicked, this, [this]() {
-        if (csv_frames_.empty()) return;
+        if (recording_frames_.empty()) return;
         const std::size_t idx = playback_clock_.frameIndex(playback_elapsed_.elapsed() / 1000.0);
         seekToFrame(idx == 0 ? 0 : idx - 1);
     });
     connect(step_forward_button, &QPushButton::clicked, this, [this]() {
-        if (csv_frames_.empty()) return;
+        if (recording_frames_.empty()) return;
         const std::size_t idx = playback_clock_.frameIndex(playback_elapsed_.elapsed() / 1000.0);
-        seekToFrame((std::min)(csv_frames_.size() - 1, idx + 1));
+        seekToFrame((std::min)(recording_frames_.size() - 1, idx + 1));
     });
     connect(jump_back_button, &QPushButton::clicked, this, [this]() { seekBySeconds(-jump_seconds_spin_->value()); });
     connect(jump_forward_button, &QPushButton::clicked, this, [this]() { seekBySeconds(jump_seconds_spin_->value()); });
@@ -487,9 +490,10 @@ void PreviewPanel::updateSessionConfiguration(gui::SessionConfiguration& c) cons
 }
 
 void PreviewPanel::requestShutdown() {
+    pending_recording_path_.clear();
     if (file_loader_) cancelFileLoad();
     stopPreview();
-    csv_timer_->stop();
+    playback_timer_->stop();
 }
 
 bool PreviewPanel::shutdownReady() const {
@@ -497,9 +501,18 @@ bool PreviewPanel::shutdownReady() const {
 }
 
 void PreviewPanel::openRecording(const QString& path) {
-    if (path.endsWith(".xdf", Qt::CaseInsensitive)) startFileLoad(PreviewFileType::Xdf, path);
-    else if (path.endsWith(".csv", Qt::CaseInsensitive)) startFileLoad(PreviewFileType::Csv, path);
-    else setStatus("Unsupported preview recording type: " + QFileInfo(path).suffix());
+    const auto type = recordingFileType(path);
+    if (!type) {
+        setStatus("Unsupported preview recording type: " + QFileInfo(path).suffix());
+        return;
+    }
+    if (worker_) {
+        pending_recording_path_ = path;
+        stopPreview();
+        setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
+        return;
+    }
+    startFileLoad(*type, path);
 }
 
 void PreviewPanel::resizeEvent(QResizeEvent* event) {
@@ -535,12 +548,13 @@ void PreviewPanel::exportPreviewImage() {
 }
 
 void PreviewPanel::startPreview() {
+    if (file_loader_ || !pending_recording_path_.isEmpty()) return;
     if (worker_) {
         stopPreview();
         if (worker_) return;
     }
-    csv_timer_->stop();
-    play_csv_button_->setText("Play Recording");
+    playback_timer_->stop();
+    play_recording_button_->setText("Play Recording");
     saveSettings();
     widget_->setTrailPointLimit(trail_points_spin_->value());
     widget_->resetForNewSource();
@@ -607,16 +621,12 @@ void PreviewPanel::startPreview() {
         emit lifecycleChanged(lifecycle_state_, "Preview stopped");
         live_render_timer_->stop();
         worker_stopping_ = false;
-        start_button_->setEnabled(true);
-        stop_button_->setEnabled(false);
-        open_csv_button_->setEnabled(true);
-        open_xdf_button_->setEnabled(true);
         refreshControlStates();
-        if (pending_recording_type_) processPendingRecordingOpen();
-        else setStatus("Preview stopped");
+        if (!pending_recording_path_.isEmpty()) {
+            const QString path = std::exchange(pending_recording_path_, QString());
+            openRecording(path);
+        } else setStatus("Preview stopped");
     });
-    start_button_->setEnabled(false);
-    stop_button_->setEnabled(true);
     refreshControlStates();
     setStatus("Finding the selected LSL streams; stair calibration is ready when requested...");
     lifecycle_state_ = ComponentLifecycleState::Starting;
@@ -626,21 +636,11 @@ void PreviewPanel::startPreview() {
 }
 
 void PreviewPanel::stopPreview() {
-    if (!worker_) {
-        worker_stopping_ = false;
-        start_button_->setEnabled(true);
-        stop_button_->setEnabled(false);
-        return;
-    }
-    if (worker_stopping_) return;
+    if (!worker_ || worker_stopping_) return;
     worker_stopping_ = true;
     lifecycle_state_ = ComponentLifecycleState::Stopping;
     emit lifecycleChanged(lifecycle_state_, "Preview stop requested");
     worker_->requestInterruption();
-    start_button_->setEnabled(false);
-    stop_button_->setEnabled(false);
-    open_csv_button_->setEnabled(false);
-    open_xdf_button_->setEnabled(false);
     refreshControlStates();
     setStatus("Preview stopping in the background...");
 }
@@ -650,7 +650,6 @@ void PreviewPanel::displayLatestLiveFrame() {
     PreviewFrame frame;
     PreviewDeliveryMetrics metrics;
     if (worker_->takeLatestFrame(frame, metrics)) widget_->setFrame(std::move(frame));
-    last_delivery_metrics_ = metrics;
     const bool late = metrics.display_latency_ms > kMaximumLivePreviewDelayMs;
     delivery_metrics_label_->setText(
         QString(late ? "PREVIEW DELAYED | skipped preview frames " : "skipped preview frames ") +
@@ -769,22 +768,12 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
             QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg", calibration_metadata_compatible_);
 }
 
-void PreviewPanel::openMergedCsv() { openRecording(PreviewFileType::Csv, "Open merged preview CSV", "CSV files (*.csv);;All files (*)"); }
-void PreviewPanel::openXdf() { openRecording(PreviewFileType::Xdf, "Open recorded XDF", "XDF files (*.xdf);;All files (*)"); }
+void PreviewPanel::openMergedCsv() { browseRecording("Open merged preview CSV", "CSV files (*.csv);;All files (*)"); }
+void PreviewPanel::openXdf() { browseRecording("Open recorded XDF", "XDF files (*.xdf);;All files (*)"); }
 
-void PreviewPanel::openRecording(PreviewFileType type, const QString& title, const QString& filter) {
+void PreviewPanel::browseRecording(const QString& title, const QString& filter) {
     const QString path = QFileDialog::getOpenFileName(this, title, QString(), filter);
-    if (path.isEmpty()) return;
-    if (worker_) {
-        pending_recording_type_ = type;
-        pending_recording_path_ = path;
-        stopPreview();
-        if (worker_) {
-            setStatus("Stopping preview before opening " + QFileInfo(path).fileName() + "...");
-            return;
-        }
-    }
-    startFileLoad(type, path);
+    if (!path.isEmpty()) openRecording(path);
 }
 
 void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
@@ -800,13 +789,12 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
 
     auto* loader = new PreviewFileLoader(type, path, vicon_xform, gazeTransform(), tolerance_spin_->value(), opt, this);
     file_loader_ = loader;
+    refreshControlStates();
     setFileState("Loading " + QFileInfo(path).fileName());
     emit fileStateChanged(gui::SessionFileState::Loading, "Loading " + QFileInfo(path).fileName());
     load_progress_->setValue(0);
     load_progress_->setVisible(true);
     cancel_load_button_->setEnabled(true);
-    open_csv_button_->setEnabled(false);
-    open_xdf_button_->setEnabled(false);
     connect(loader, &PreviewFileLoader::progressChanged, this, [this, loader](const QString& stage, int pct, const QString& detail) {
         if (file_loader_ != loader) return;
         load_progress_->setValue(pct);
@@ -830,8 +818,7 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
         file_loader_ = nullptr;
         load_progress_->setVisible(false);
         cancel_load_button_->setEnabled(false);
-        open_csv_button_->setEnabled(true);
-        open_xdf_button_->setEnabled(true);
+        refreshControlStates();
     });
     loader->start();
 }
@@ -844,15 +831,15 @@ void PreviewPanel::applyLoadedRecording(PreviewFileLoader* loader, const QString
         setFileState("No usable frames");
         return;
     }
-    csv_timer_->stop();
-    play_csv_button_->setText("Play Recording");
+    playback_timer_->stop();
+    play_recording_button_->setText("Play Recording");
     widget_->resetForNewSource();
-    csv_frames_ = std::move(loaded->frames);
-    playback_clock_.setFrameTimeline(csv_frames_);
+    recording_frames_ = std::move(loaded->frames);
+    playback_clock_.setFrameTimeline(recording_frames_);
     playback_clock_.setLooping(loop_playback_check_->isChecked(), playback_elapsed_.elapsed() / 1000.0);
     playback_clock_.setSpeed(playback_speed_spin_->value(), playback_elapsed_.elapsed() / 1000.0);
-    widget_->setFrame(csv_frames_.front());
-    play_csv_button_->setEnabled(true);
+    widget_->setFrame(recording_frames_.front());
+    play_recording_button_->setEnabled(true);
     timeline_slider_->setEnabled(true);
     refreshControlStates();
     memory_label_->setText("memory " + QString::number(static_cast<double>(loaded->estimated_memory_bytes) / (1024.0 * 1024.0), 'f', 1) + " MiB");
@@ -905,7 +892,7 @@ void PreviewPanel::requestRecordedStreamMapping(PreviewFileLoader* loader, const
     }
     const int s_master = master_combo->findData(static_cast<qulonglong>(analysis.suggested_mapping.master_stream_id));
     if (s_master >= 0) master_combo->setCurrentIndex(s_master);
-    form->addRow("Master timeline:", master_combo);
+    form->addRow("Timing source:", master_combo);
     layout->addLayout(form);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -924,43 +911,35 @@ void PreviewPanel::requestRecordedStreamMapping(PreviewFileLoader* loader, const
     loader->provideMapping(mapping);
 }
 
-void PreviewPanel::processPendingRecordingOpen() {
-    const std::optional<PreviewFileType> type = pending_recording_type_;
-    const QString path = pending_recording_path_;
-    pending_recording_type_.reset();
-    pending_recording_path_.clear();
-    if (type) startFileLoad(*type, path);
-}
-
-void PreviewPanel::toggleCsvPlayback() {
-    if (csv_frames_.empty()) return;
-    if (csv_timer_->isActive()) {
+void PreviewPanel::togglePlayback() {
+    if (recording_frames_.empty()) return;
+    if (playback_timer_->isActive()) {
         playback_clock_.pause(playback_elapsed_.elapsed() / 1000.0);
-        csv_timer_->stop();
-        play_csv_button_->setText("Play Recording");
+        playback_timer_->stop();
+        play_recording_button_->setText("Play Recording");
     } else {
         if (playback_clock_.atEnd(playback_elapsed_.elapsed() / 1000.0)) {
             playback_clock_.seek(0.0, playback_elapsed_.elapsed() / 1000.0);
         }
         playback_clock_.play(playback_elapsed_.elapsed() / 1000.0);
-        csv_timer_->start();
-        play_csv_button_->setText("Pause Recording");
+        playback_timer_->start();
+        play_recording_button_->setText("Pause Recording");
     }
 }
 
-void PreviewPanel::advanceCsvPlayback() {
-    if (csv_frames_.empty()) {
-        csv_timer_->stop();
-        play_csv_button_->setText("Play Recording");
+void PreviewPanel::advancePlayback() {
+    if (recording_frames_.empty()) {
+        playback_timer_->stop();
+        play_recording_button_->setText("Play Recording");
         return;
     }
     const double now = playback_elapsed_.elapsed() / 1000.0;
-    widget_->setFrame(csv_frames_[playback_clock_.frameIndex(now)]);
+    widget_->setFrame(recording_frames_[playback_clock_.frameIndex(now)]);
     updatePlaybackDisplay();
     if (playback_clock_.atEnd(now)) {
         playback_clock_.pause(now);
-        csv_timer_->stop();
-        play_csv_button_->setText("Play Recording");
+        playback_timer_->stop();
+        play_recording_button_->setText("Play Recording");
     }
 }
 
@@ -973,35 +952,35 @@ void PreviewPanel::cancelFileLoad() {
 }
 
 void PreviewPanel::seekPlaybackFromSlider(int value) {
-    if (csv_frames_.empty()) return;
+    if (recording_frames_.empty()) return;
     const double dur = playback_clock_.duration();
     playback_clock_.seek(dur * static_cast<double>(value) / static_cast<double>(timeline_slider_->maximum()),
                          playback_elapsed_.elapsed() / 1000.0);
     const std::size_t idx = playback_clock_.frameIndex(playback_elapsed_.elapsed() / 1000.0);
-    widget_->setFrame(csv_frames_[idx]);
+    widget_->setFrame(recording_frames_[idx]);
     updatePlaybackDisplay();
 }
 
 void PreviewPanel::seekToFrame(std::size_t frame_index) {
-    if (csv_frames_.empty()) return;
-    frame_index = (std::min)(frame_index, csv_frames_.size() - 1);
-    const double pos = csv_frames_[frame_index].timestamp - csv_frames_.front().timestamp;
+    if (recording_frames_.empty()) return;
+    frame_index = (std::min)(frame_index, recording_frames_.size() - 1);
+    const double pos = recording_frames_[frame_index].timestamp - recording_frames_.front().timestamp;
     playback_clock_.seek(pos, playback_elapsed_.elapsed() / 1000.0);
-    widget_->setFrame(csv_frames_[frame_index]);
+    widget_->setFrame(recording_frames_[frame_index]);
     updatePlaybackDisplay();
 }
 
 void PreviewPanel::seekBySeconds(double seconds) {
-    if (csv_frames_.empty()) return;
+    if (recording_frames_.empty()) return;
     const double now = playback_elapsed_.elapsed() / 1000.0;
     playback_clock_.seek(playback_clock_.position(now) + seconds, now);
     const std::size_t idx = playback_clock_.frameIndex(now);
-    widget_->setFrame(csv_frames_[idx]);
+    widget_->setFrame(recording_frames_[idx]);
     updatePlaybackDisplay();
 }
 
 void PreviewPanel::updatePlaybackDisplay() {
-    if (csv_frames_.empty()) {
+    if (recording_frames_.empty()) {
         playback_position_label_->setText("0.000 / 0.000 s | frame 0/0");
         return;
     }
@@ -1016,7 +995,7 @@ void PreviewPanel::updatePlaybackDisplay() {
     }
     playback_position_label_->setText(
         QString::number(pos, 'f', 3) + " / " + QString::number(playback_clock_.duration(), 'f', 3) + " s | frame " +
-        QString::number(idx + 1) + "/" + QString::number(csv_frames_.size()));
+        QString::number(idx + 1) + "/" + QString::number(recording_frames_.size()));
 }
 
 void PreviewPanel::rememberRecentFile(const QString& path) {
@@ -1045,7 +1024,7 @@ void PreviewPanel::dragEnterEvent(QDragEnterEvent* event) {
     if (event->mimeData()->hasUrls()) {
         for (const QUrl& url : event->mimeData()->urls()) {
             const QString path = url.toLocalFile();
-            if (path.endsWith(".xdf", Qt::CaseInsensitive) || path.endsWith(".csv", Qt::CaseInsensitive)) {
+            if (recordingFileType(path)) {
                 event->acceptProposedAction();
                 return;
             }
@@ -1056,13 +1035,8 @@ void PreviewPanel::dragEnterEvent(QDragEnterEvent* event) {
 void PreviewPanel::dropEvent(QDropEvent* event) {
     for (const QUrl& url : event->mimeData()->urls()) {
         const QString path = url.toLocalFile();
-        if (path.endsWith(".xdf", Qt::CaseInsensitive)) {
-            startFileLoad(PreviewFileType::Xdf, path);
-            event->acceptProposedAction();
-            return;
-        }
-        if (path.endsWith(".csv", Qt::CaseInsensitive)) {
-            startFileLoad(PreviewFileType::Csv, path);
+        if (recordingFileType(path)) {
+            openRecording(path);
             event->acceptProposedAction();
             return;
         }
@@ -1109,6 +1083,11 @@ PreviewTransformProfile PreviewPanel::gazeTransform() const {
 }
 
 void PreviewPanel::refreshControlStates() {
+    start_button_->setEnabled(!worker_ && !file_loader_ && pending_recording_path_.isEmpty());
+    stop_button_->setEnabled(worker_ && !worker_stopping_);
+    const bool can_open = !worker_stopping_ && !file_loader_;
+    open_csv_button_->setEnabled(can_open);
+    open_xdf_button_->setEnabled(can_open);
     const bool calibrated = calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
                             calibration_state_ == gui::SessionCalibrationState::SavedProfile;
     const bool collecting = calibration_state_ == gui::SessionCalibrationState::Collecting;
@@ -1118,7 +1097,7 @@ void PreviewPanel::refreshControlStates() {
     if (save_calibration_button_) save_calibration_button_->setEnabled(calibrated);
     const bool has_profile = selectedCalibrationProfile() != nullptr;
     for (QWidget* control : profile_selection_controls_) control->setEnabled(has_profile);
-    const bool recording_loaded = !csv_frames_.empty();
+    const bool recording_loaded = !recording_frames_.empty();
     if (playback_area_) playback_area_->setVisible(recording_loaded);
     for (QWidget* control : playback_controls_) control->setEnabled(recording_loaded);
     if (open_recent_button_ && recent_files_combo_) {
@@ -1428,24 +1407,11 @@ QString PreviewPanel::defaultStairModelPath() const {
 }
 
 void PreviewPanel::setStatus(const QString& status) {
-    status_text_ = status;
-    refreshStatusText();
+    status_label_->setText(status);
 }
 
 void PreviewPanel::setFileState(const QString& text) {
-    file_state_text_ = text;
-    if (!file_state_label_) return;
-    // The loader's completion detail lists every stream. The label keeps it to
-    // one line and offers the rest as a tooltip, so opening a file no longer
-    // grows the control area by several lines.
     file_state_label_->setText(text);
-}
-
-void PreviewPanel::refreshStatusText() {
-    if (!status_label_) return;
-    // A recording summary runs to several hundred characters; the label elides
-    // it to the width it has rather than wrapping and growing the control area.
-    status_label_->setText(status_text_);
 }
 
 } // namespace vicon_lsl

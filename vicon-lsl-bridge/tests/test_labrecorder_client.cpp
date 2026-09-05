@@ -28,9 +28,6 @@ int main(int argc, char** argv) {
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);
     run("bundled executable resolution", testBundledExecutableResolution);
-    run("guided start order", testGuidedStartOrder);
-    run("guided start failures", testGuidedStartFailuresAndRecorderOnly);
-    run("guided stop order", testGuidedStopOrder);
     run("shutdown waiting", testShutdownWaitsForEachComponent);
     run("shutdown owned recorder", testShutdownEndsOwnedRecorderOnceOrOnDeadline);
     run("shutdown lost recorder", testShutdownReportsLostExternalRecorder);

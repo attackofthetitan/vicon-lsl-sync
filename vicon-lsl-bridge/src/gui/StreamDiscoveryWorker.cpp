@@ -1,6 +1,9 @@
 #include "gui/StreamDiscoveryWorker.h"
 
 #include "StreamDefaults.h"
+#include "HoloLensGazeSchema.h"
+#include "HoloLensModelTargetSchema.h"
+#include "StreamSchema.h"
 #include "gui/LslStreamIdentity.h"
 
 #include <lsl_cpp.h>
@@ -36,10 +39,10 @@ QString inferRole(const lsl::stream_info& stream,
 }
 
 bool expectedSchema(const gui::StreamIdentity& identity) {
-    if (identity.role == "gaze") return identity.channel_count == 21;
-    if (identity.role == "calibration") return identity.channel_count == 8;
-    if (identity.role == "markers") return identity.channel_count >= 0 && identity.channel_count % 4 == 0;
-    if (identity.role == "segments") return identity.channel_count >= 0 && identity.channel_count % 7 == 0;
+    if (identity.role == "gaze") return identity.channel_count == static_cast<int>(kHoloLensGazeChannelCount);
+    if (identity.role == "calibration") return identity.channel_count == static_cast<int>(kHoloLensModelTargetChannelCount);
+    if (identity.role == "markers") return identity.channel_count >= 0 && identity.channel_count % std::tuple_size_v<MarkerSample> == 0;
+    if (identity.role == "segments") return identity.channel_count >= 0 && identity.channel_count % std::tuple_size_v<SegmentSample> == 0;
     return true;
 }
 

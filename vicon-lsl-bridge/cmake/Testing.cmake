@@ -107,9 +107,11 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
 
     if(TARGET vicon-lsl-bridge-gui-components)
         add_executable(vicon-lsl-bridge-gui-tests
-            tests/test_bridge_gui.cpp)
+            tests/test_bridge_gui.cpp
+            tests/SessionFlowTests.cpp)
         target_link_libraries(vicon-lsl-bridge-gui-tests PRIVATE
             vicon-lsl-bridge-gui-components)
+        add_dependencies(vicon-lsl-bridge-gui-tests vicon-lsl-recorder-process-fixture)
 
         set(VICON_LSL_GUI_TEST_ENV
             ${VICON_LSL_QT_TEST_ENV}

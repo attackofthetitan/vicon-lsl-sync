@@ -7,55 +7,7 @@
 
 namespace vicon_lsl::gui {
 
-// The order a guided session starts, stops, and closes in, as pure decisions
-// over component state. BridgeWindow owns the widgets, threads, and processes;
-// this owns the question of what should happen next, so the ordering rules can
-// be read and tested without a running session behind them.
-
-enum class GuidedStartStep {
-    StartBridge,        // no bridge worker yet
-    AwaitBridge,        // bridge is starting; nothing to do but wait
-    BridgeFailed,       // give up: the bridge cannot start
-    StartPreview,       // preview is idle or stopped
-    AwaitPreview,       // preview is starting; nothing to do but wait
-    PreviewFailed,      // give up: the preview cannot start
-    StartRecording,     // every prerequisite is running
-};
-
-struct GuidedStartInputs {
-    bool recorder_only = false;
-    ComponentLifecycleState bridge = ComponentLifecycleState::Idle;
-    bool bridge_worker_present = false;
-    bool preview_available = false;
-    ComponentLifecycleState preview = ComponentLifecycleState::Idle;
-};
-
-GuidedStartStep nextGuidedStartStep(const GuidedStartInputs& inputs);
-
-enum class GuidedStopStep {
-    StopRecording,      // recording is active and has not been asked to stop
-    AwaitRecorder,      // a stop is already in flight
-    AwaitVerification,  // the recording file is still being checked
-    ShutDownPreview,    // preview still holds inlets
-    StopBridge,         // bridge worker still running
-    EndOwnedRecorder,   // a recorder this app started is still up
-    Finished,           // every owned component has stopped
-};
-
-struct GuidedStopInputs {
-    bool recording_active_or_pending = false;
-    bool recorder_stopping = false;
-    bool verification_active = false;
-    bool preview_available = false;
-    bool preview_shutdown_ready = true;
-    bool bridge_worker_present = false;
-    bool owns_graphical_recorder = false;
-};
-
-GuidedStopStep nextGuidedStopStep(const GuidedStopInputs& inputs);
-
-// Closing runs the same teardown but reports progress instead of driving it,
-// and it may force a recorder that will not stop on its own.
+// Tracks what still needs to stop before the window can close.
 struct ShutdownInputs {
     bool bridge_done = false;
     bool preview_done = false;

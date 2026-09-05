@@ -2,49 +2,6 @@
 
 namespace vicon_lsl::gui {
 
-GuidedStartStep nextGuidedStartStep(const GuidedStartInputs& inputs) {
-    if (!inputs.recorder_only) {
-        if (inputs.bridge == ComponentLifecycleState::Failed) {
-            return GuidedStartStep::BridgeFailed;
-        }
-        if (inputs.bridge != ComponentLifecycleState::Running) {
-            return inputs.bridge_worker_present ? GuidedStartStep::AwaitBridge
-                                                : GuidedStartStep::StartBridge;
-        }
-    }
-    if (inputs.preview_available) {
-        if (inputs.preview == ComponentLifecycleState::Failed) {
-            return GuidedStartStep::PreviewFailed;
-        }
-        if (inputs.preview != ComponentLifecycleState::Running) {
-            return inputs.preview == ComponentLifecycleState::Starting
-                       ? GuidedStartStep::AwaitPreview
-                       : GuidedStartStep::StartPreview;
-        }
-    }
-    return GuidedStartStep::StartRecording;
-}
-
-GuidedStopStep nextGuidedStopStep(const GuidedStopInputs& inputs) {
-    if (inputs.recording_active_or_pending) {
-        return inputs.recorder_stopping ? GuidedStopStep::AwaitRecorder
-                                        : GuidedStopStep::StopRecording;
-    }
-    if (inputs.verification_active) {
-        return GuidedStopStep::AwaitVerification;
-    }
-    if (inputs.preview_available && !inputs.preview_shutdown_ready) {
-        return GuidedStopStep::ShutDownPreview;
-    }
-    if (inputs.bridge_worker_present) {
-        return GuidedStopStep::StopBridge;
-    }
-    if (inputs.owns_graphical_recorder) {
-        return GuidedStopStep::EndOwnedRecorder;
-    }
-    return GuidedStopStep::Finished;
-}
-
 namespace {
 
 // A selected-stream recorder is this app's own process, so it is safe once that

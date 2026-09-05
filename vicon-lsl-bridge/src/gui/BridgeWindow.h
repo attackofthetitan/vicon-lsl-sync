@@ -49,10 +49,7 @@ protected:
     void run() override;
 
 private:
-    void setLifecycleState(ComponentLifecycleState state, const QString& detail = {});
-
     std::unique_ptr<ViconLSLBridge> bridge_;
-    std::atomic<ComponentLifecycleState> lifecycle_state_{ComponentLifecycleState::Idle};
     std::atomic<bool> stop_requested_{false};
 };
 
@@ -154,6 +151,7 @@ private:
     RecorderRecordingState effectiveRecordingState() const;
     RecorderOperationState effectiveOperationState() const;
     bool recordingActiveOrPending() const;
+    bool verificationActive() const;
     bool bridgeStatusRecent() const;
     void beginClose();
 
@@ -191,7 +189,7 @@ private:
     bool closing() const { return sequence_ == SessionSequence::Closing; }
 
     SessionSequence sequence_ = SessionSequence::None;
-    bool stop_requested_ = false;
+    bool recording_stop_requested_ = false;
     vicon_lsl::gui::SessionFileState file_state_ =
         vicon_lsl::gui::SessionFileState::None;
     ComponentLifecycleState bridge_lifecycle_ = ComponentLifecycleState::Idle;
@@ -209,7 +207,6 @@ private:
     bool startup_launch_attempted_ = false;
     bool pending_recording_start_ = false;
     bool setup_check_start_waiting_ = false;
-    bool verification_waiting_for_file_ = false;
     bool close_finalizing_ = false;
     bool owned_process_end_requested_ = false;
     bool recorder_connection_loss_reported_ = false;

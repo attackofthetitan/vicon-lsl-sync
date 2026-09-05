@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.13.5 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.13.6 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

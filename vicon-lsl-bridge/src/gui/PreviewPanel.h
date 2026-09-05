@@ -13,7 +13,6 @@
 #include <QWidget>
 
 #include <memory>
-#include <optional>
 #include <vector>
 
 class QDoubleSpinBox;
@@ -81,8 +80,8 @@ private slots:
     void reloadStairModel();
     void openMergedCsv();
     void openXdf();
-    void toggleCsvPlayback();
-    void advanceCsvPlayback();
+    void togglePlayback();
+    void advancePlayback();
     void cancelFileLoad();
     void seekPlaybackFromSlider(int value);
     void openRecentRecording();
@@ -100,9 +99,7 @@ private:
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
     void resetCalibrationSession();
-    void openRecording(PreviewFileType type,
-                       const QString& title,
-                       const QString& filter);
+    void browseRecording(const QString& title, const QString& filter);
     void startFileLoad(PreviewFileType type, const QString& path);
     void applyLoadedRecording(PreviewFileLoader* loader, const QString& summary);
     void requestRecordedStreamMapping(PreviewFileLoader* loader,
@@ -111,12 +108,10 @@ private:
     void seekBySeconds(double seconds);
     void updatePlaybackDisplay();
     void rememberRecentFile(const QString& path);
-    void processPendingRecordingOpen();
     void loadSettings();
     void saveSettings() const;
     QString defaultStairModelPath() const;
     void setStatus(const QString& status);
-    void refreshStatusText();
     void setFileState(const QString& text);
     void loadCalibrationProfiles();
     void saveCalibrationProfiles();
@@ -133,8 +128,6 @@ private:
 
     PreviewWidget* widget_ = nullptr;
     QScrollArea* controls_scroll_ = nullptr;
-    QString status_text_;
-    QString file_state_text_;
     QLineEdit* marker_stream_edit_ = nullptr;
     QLineEdit* segment_stream_edit_ = nullptr;
     QLineEdit* gaze_stream_edit_ = nullptr;
@@ -148,7 +141,7 @@ private:
     QPushButton* stop_button_ = nullptr;
     QPushButton* open_csv_button_ = nullptr;
     QPushButton* open_xdf_button_ = nullptr;
-    QPushButton* play_csv_button_ = nullptr;
+    QPushButton* play_recording_button_ = nullptr;
     QPushButton* calibrate_button_ = nullptr;
     QPushButton* clear_calibration_button_ = nullptr;
     QPushButton* save_calibration_button_ = nullptr;
@@ -184,15 +177,14 @@ private:
     QDoubleSpinBox* jump_seconds_spin_ = nullptr;
     QComboBox* recent_files_combo_ = nullptr;
     QPushButton* cancel_load_button_ = nullptr;
-    QTimer* csv_timer_ = nullptr;
+    QTimer* playback_timer_ = nullptr;
     QTimer* live_render_timer_ = nullptr;
-    std::vector<PreviewFrame> csv_frames_;
+    std::vector<PreviewFrame> recording_frames_;
     QElapsedTimer playback_elapsed_;
     PreviewPlaybackClock playback_clock_;
     PreviewStreamWorker* worker_ = nullptr;
     PreviewFileLoader* file_loader_ = nullptr;
     bool worker_stopping_ = false;
-    std::optional<PreviewFileType> pending_recording_type_;
     QString pending_recording_path_;
     bool stair_model_loaded_ = false;
     ComponentLifecycleState lifecycle_state_ = ComponentLifecycleState::Idle;
@@ -210,7 +202,6 @@ private:
     QString calibration_rejection_reason_;
     bool calibration_metadata_compatible_ = true;
     QElapsedTimer calibration_progress_throttle_;
-    PreviewDeliveryMetrics last_delivery_metrics_;
     std::shared_ptr<QSettings> settings_;
 };
 
