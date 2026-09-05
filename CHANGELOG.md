@@ -4,25 +4,17 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
-## [1.13.7] - 2026-09-06
+## [1.13.6] - 2026-09-06
 
 ### Fixed
 
 - Stop Session no longer appears to hang for five seconds when the bridge is in
-  the middle of a connection attempt. The Vicon SDK waits for its connection
+  the middle of a connection attempt. The Vicon SDK waits for its own connection
   timeout before it reports an unreachable server, and nothing can cancel that
   wait once it has started, so its five second default decided how long a stop
-  request sat unanswered. The bridge now asks for a one second connection
-  timeout and leaves the pacing of retries to its own reconnect interval.
-
-### Compatibility
-
-- No configuration, file format, or command line change. Roll back to `v1.13.6`.
-
-## [1.13.6] - 2026-09-05
-
-### Fixed
-
+  request sat unanswered. The bridge now opens a plain connection to the
+  endpoint first, with a much shorter budget, and asks the SDK to connect only
+  when something answers there.
 - Stop Session sends Stop to the selected-stream recorder, including during
   startup, and cancels recording starts that are still finding streams.
 - Opening a recording directly, from recent files, or by dropping it into the
