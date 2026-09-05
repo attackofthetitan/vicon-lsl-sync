@@ -58,6 +58,13 @@ std::shared_ptr<QSettings> sessionSettings(const QTemporaryDir& directory, bool 
     return settings;
 }
 
+QString bridgeStateText(const BridgeWindow& window) {
+    for (const auto* label : window.findChildren<QLabel*>()) {
+        if (label->accessibleName() == "Detailed bridge state") return label->text();
+    }
+    return {};
+}
+
 bool sessionStopped(const BridgeWindow& window) {
     const auto* log = window.findChild<QPlainTextEdit*>();
     return log && log->toPlainText().contains("Session stopped");
@@ -143,6 +150,11 @@ TEST_CASE("Session waits for the bridge unless recorder-only mode is enabled, an
         QMetaObject::invokeMethod(&window, "onStartSession", Qt::DirectConnection);
         const bool bridge_started = window.findChild<BridgeWorker*>() != nullptr;
         const bool discovery_started = window.findChild<StreamDiscoveryWorker*>() != nullptr;
+        // Cancel the bridge from inside its connection attempt. The attempt is
+        // the one part of a start that a stop cannot interrupt directly, so
+        // cancelling before it begins would leave the slow path untested.
+        const bool connecting = !bridge_started ||
+            waitUntil([&] { return bridgeStateText(window).startsWith("Connecting"); });
         QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
         const bool canceled = waitUntil([&] { return sessionStopped(window); });
         window.close();
@@ -151,6 +163,7 @@ TEST_CASE("Session waits for the bridge unless recorder-only mode is enabled, an
             return true;
         });
         REQUIRE(bridge_started == !recorder_only);
+        REQUIRE(connecting);
         REQUIRE(discovery_started == recorder_only);
         REQUIRE(canceled);
     }

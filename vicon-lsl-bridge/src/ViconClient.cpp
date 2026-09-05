@@ -11,6 +11,15 @@ namespace SDK = ViconDataStreamSDK::CPP;
 
 namespace {
 
+// Connect() blocks until the server answers or this timeout expires, and
+// nothing can cancel it in between, so it also sets how long a stop request
+// waits when the server is unreachable. The SDK default is five seconds, which
+// is far longer than a reply from a lab server takes and long enough for the
+// operator to think Stop Session was ignored. Keep the blocking window short
+// and leave the retry pacing to the bridge, which waits the reconnect interval
+// in slices that notice a stop within a tenth of a second.
+constexpr unsigned int kConnectionTimeoutMs = 1000;
+
 const char* sdkResultName(SDK::Result::Enum result) {
     switch (result) {
         case SDK::Result::Unknown: return "Unknown";
@@ -82,6 +91,12 @@ ViconClient::~ViconClient() {
 }
 
 bool ViconClient::connect() {
+    const auto timeout = client_.SetConnectionTimeout(kConnectionTimeoutMs);
+    if (timeout.Result != SDK::Result::Success) {
+        std::cerr << "Vicon setup failed: operation=SetConnectionTimeout"
+                  << " sdk_result=" << describeSdkResult(timeout.Result) << std::endl;
+    }
+
     auto result = client_.Connect(server_address_);
     if (result.Result != SDK::Result::Success) {
         std::cerr << "Failed to connect to " << server_address_
