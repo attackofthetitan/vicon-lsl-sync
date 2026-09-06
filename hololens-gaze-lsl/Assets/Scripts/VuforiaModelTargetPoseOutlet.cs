@@ -20,6 +20,8 @@ namespace GazeLSL
         private StreamInfo info;
         private StreamOutlet outlet;
         private readonly double[] sampleBuffer = new double[ChannelCount];
+        private VuforiaBehaviour vuforiaBehaviour;
+        private bool vuforiaTrackingPaused;
 
         private void Start()
         {
@@ -28,6 +30,16 @@ namespace GazeLSL
                 Debug.LogError("VuforiaModelTargetPoseOutlet requires a GazeLSLConfig and Vuforia Model Target.");
                 enabled = false;
                 return;
+            }
+
+            vuforiaBehaviour = VuforiaBehaviour.Instance;
+            if (vuforiaBehaviour != null)
+            {
+                vuforiaTrackingPaused = !vuforiaBehaviour.enabled;
+            }
+            else
+            {
+                Debug.LogWarning("VuforiaBehaviour was not available when the model target outlet started; the M-key tracking toggle will retry when pressed.");
             }
 
             try
@@ -48,6 +60,37 @@ namespace GazeLSL
             {
                 DisableWithError($"Could not create model target LSL outlet - {e.Message}");
             }
+        }
+
+        private void Update()
+        {
+            if (Input.GetKeyDown(KeyCode.M))
+            {
+                ToggleVuforiaTracking();
+            }
+        }
+
+        private void ToggleVuforiaTracking()
+        {
+            if (vuforiaBehaviour == null)
+            {
+                vuforiaBehaviour = VuforiaBehaviour.Instance;
+            }
+
+            if (vuforiaBehaviour == null)
+            {
+                Debug.LogWarning("M key pressed, but no VuforiaBehaviour is available to toggle.");
+                return;
+            }
+
+            bool resumeTracking = !vuforiaBehaviour.enabled;
+            vuforiaBehaviour.enabled = resumeTracking;
+            vuforiaTrackingPaused = !resumeTracking;
+
+            Debug.Log(
+                resumeTracking
+                    ? "Vuforia tracking resumed with M key."
+                    : "Vuforia tracking paused with M key.");
         }
 
         private static void AppendMetadata(StreamInfo streamInfo)
@@ -85,7 +128,7 @@ namespace GazeLSL
                 return;
             }
 
-            bool tracked = IsTracked(modelTarget.TargetStatus.Status);
+            bool tracked = !vuforiaTrackingPaused && IsTracked(modelTarget.TargetStatus.Status);
             Transform targetTransform = modelTarget.transform;
             Vector3 position = targetTransform.position;
             Quaternion rotation = targetTransform.rotation;
