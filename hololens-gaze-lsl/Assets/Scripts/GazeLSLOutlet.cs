@@ -128,6 +128,42 @@ namespace GazeLSL
                         $"pushed; {snapshot.PushedValidGazeSampleCount} contained at least one valid ray.");
                     break;
             }
+
+            if (snapshot.State != GazeDeliveryState.PublishingValidGaze)
+            {
+                ReportAcquisitionCounters();
+            }
+        }
+
+        // Delivery state names the stage the outlet can see. This names the three
+        // inside the provider, each of which can discard every reading and leave
+        // the same "pushed 0 samples" line behind it.
+        private void ReportAcquisitionCounters()
+        {
+            GazeAcquisitionSnapshot acquisition;
+            if (gazeProvider == null ||
+                !gazeProvider.TryGetAcquisitionSnapshot(out acquisition))
+            {
+                return;
+            }
+
+            Debug.LogWarning(
+                $"Gaze acquisition: reading at current time {acquisition.SeedAttempts} " +
+                $"asked, {acquisition.SeedEmptyResults} empty, " +
+                $"{acquisition.SeedStaleReadings} too old. Drain " +
+                $"{acquisition.DrainRequests} asked, {acquisition.DrainReadings} read, " +
+                $"{acquisition.DrainEmptyResults} empty, " +
+                $"{acquisition.DrainFailedEmptyResults} failed inside the SDK, " +
+                $"{acquisition.DrainStepsSkippedAsTooSoon} skipped as too soon, " +
+                $"abandoned {acquisition.HasAbandonedDrain}. Accepted " +
+                $"{acquisition.ReadingsAccepted}, not newer " +
+                $"{acquisition.ReadingsRejectedAsNotNewer}, " +
+                $"{acquisition.PendingRawReadings} waiting to convert. Conversion " +
+                $"{acquisition.TransformPasses} passes, " +
+                $"{acquisition.SamplesConverted} converted, " +
+                $"{acquisition.LocateFailures} locate failures, " +
+                $"{acquisition.ReadingsDroppedByGeneration} dropped as stale session, " +
+                $"{acquisition.PendingSamples} waiting to publish.");
         }
 
         // Never restarts the outlet: the declared rate is fixed in the stream header,

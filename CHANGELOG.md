@@ -21,6 +21,14 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
   a sample that is ready; the failure is reported once the queue is empty, so
   persistent failures still re-enumerate the tracker.
 
+### Added
+
+- The Unity log now counts every stage between the SDK and a sample waiting to be
+  published, and prints them beside any gaze delivery state other than publishing
+  valid gaze. A stream that publishes nothing looks the same from outside whether
+  acquisition, main-thread conversion, or delivery is the stage losing the
+  reading, and the counters say which.
+
 ### Changed
 
 - The drain no longer asks for a reading that should not exist yet. It waits until

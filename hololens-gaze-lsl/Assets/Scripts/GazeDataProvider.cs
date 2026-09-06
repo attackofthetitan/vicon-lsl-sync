@@ -9,6 +9,30 @@ using Microsoft.MixedReality.OpenXR;
 
 namespace GazeLSL
 {
+    // Counts every stage between the SDK and a sample waiting to be published.
+    // Each stage can discard a reading without any other trace, so a stream that
+    // publishes nothing looks identical from outside whichever one is at fault.
+    public struct GazeAcquisitionSnapshot
+    {
+        public int SeedAttempts;
+        public int SeedEmptyResults;
+        public int SeedStaleReadings;
+        public int DrainStepsSkippedAsTooSoon;
+        public int DrainRequests;
+        public int DrainReadings;
+        public int DrainEmptyResults;
+        public int DrainFailedEmptyResults;
+        public bool HasAbandonedDrain;
+        public int ReadingsAccepted;
+        public int ReadingsRejectedAsNotNewer;
+        public int PendingRawReadings;
+        public int TransformPasses;
+        public int SamplesConverted;
+        public int LocateFailures;
+        public int ReadingsDroppedByGeneration;
+        public int PendingSamples;
+    }
+
     // Minimal HoloLens 2 Extended Eye Tracking provider.
     // Rays are located in the Unity/OpenXR scene before they are published.
     public sealed class GazeDataProvider : MonoBehaviour, IGazeSampleProvider
@@ -58,6 +82,7 @@ namespace GazeLSL
         private bool restartInProgress;
         private int consecutiveLocateFailures;
         private double lastAcceptedCaptureLslTime;
+        private GazeAcquisitionSnapshot counters;
         private volatile bool destroyed;
 #endif
 
@@ -179,6 +204,25 @@ namespace GazeLSL
 #endif
         }
 
+        // A stream that publishes nothing is the same log line whether acquisition,
+        // main-thread conversion, or delivery is the stage losing the reading.
+        public bool TryGetAcquisitionSnapshot(out GazeAcquisitionSnapshot snapshot)
+        {
+#if ENABLE_WINMD_SUPPORT
+            lock (trackerGate)
+            {
+                snapshot = counters;
+                snapshot.HasAbandonedDrain = drainPolicy.HasAbandonedDrain;
+                snapshot.PendingRawReadings = pendingRawReadings.Count;
+                snapshot.PendingSamples = pendingSamples.Count;
+                return true;
+            }
+#else
+            snapshot = default(GazeAcquisitionSnapshot);
+            return false;
+#endif
+        }
+
         private void Update()
         {
 #if ENABLE_WINMD_SUPPORT
@@ -292,10 +336,12 @@ namespace GazeLSL
                         lastAcceptedCaptureLslTime,
                         NominalFramePeriodSecondsLocked()))
                 {
+                    counters.DrainStepsSkippedAsTooSoon++;
                     return;
                 }
 
                 EyeGazeTrackerReading reading;
+                counters.DrainRequests++;
                 try
                 {
                     reading = tracker.TryGetReadingAfterSystemRelativeTime(
@@ -308,14 +354,18 @@ namespace GazeLSL
                     // result arrives as a NullReferenceException and leaves an
                     // object whose finalizer then throws as well. It ends the step,
                     // and a few of them end the drain for this tracker session.
+                    counters.DrainFailedEmptyResults++;
                     NoteFailedDrainEmptyResultLocked();
                     return;
                 }
 
                 if (reading == null)
                 {
+                    counters.DrainEmptyResults++;
                     return;
                 }
+
+                counters.DrainReadings++;
 
                 if (!EnqueueReadingLocked(reading, queryTime, queryLslTime))
                 {
@@ -353,10 +403,12 @@ namespace GazeLSL
         // drained reading being old means the step is catching up instead.
         private void AcquireReadingAtTimestampLocked(DateTime queryTime, double queryLslTime)
         {
+            counters.SeedAttempts++;
             EyeGazeTrackerReading reading =
                 tracker.TryGetReadingAtTimestamp(queryTime);
             if (reading == null)
             {
+                counters.SeedEmptyResults++;
                 return;
             }
 
@@ -365,6 +417,7 @@ namespace GazeLSL
                     GazeTiming.CurrentSystemRelativeTimeTicks(),
                     GazeTiming.MaxSeedCaptureAgeTicks))
             {
+                counters.SeedStaleReadings++;
                 return;
             }
 
@@ -381,8 +434,11 @@ namespace GazeLSL
             long systemRelativeTimeTicks = reading.SystemRelativeTime.Ticks;
             if (!readingGate.TryAccept(systemRelativeTimeTicks))
             {
+                counters.ReadingsRejectedAsNotNewer++;
                 return false;
             }
+
+            counters.ReadingsAccepted++;
 
             // One query pair anchors the batch; each reading keeps its capture time.
             double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
@@ -425,6 +481,12 @@ namespace GazeLSL
         private void TransformReadingsOnMainThread()
         {
             Exception locateFailure = null;
+            lock (trackerGate)
+            {
+                // A pass count that stays at zero says Unity is not calling Update
+                // on this component at all, which no other line here would show.
+                counters.TransformPasses++;
+            }
 
             for (int index = 0; index < MaxTransformsPerUpdate; index++)
             {
@@ -444,6 +506,7 @@ namespace GazeLSL
                     raw = pendingRawReadings.Dequeue();
                     if (raw.Generation != sessionGeneration || trackerNode == null)
                     {
+                        counters.ReadingsDroppedByGeneration++;
                         continue;
                     }
                     node = trackerNode;
@@ -470,6 +533,7 @@ namespace GazeLSL
                     }
                     else
                     {
+                        counters.LocateFailures++;
                         consecutiveLocateFailures++;
                         if (consecutiveLocateFailures == 1 ||
                             consecutiveLocateFailures % (int)RequiredFrameRate == 0)
@@ -490,8 +554,11 @@ namespace GazeLSL
                 {
                     if (raw.Generation != sessionGeneration)
                     {
+                        counters.ReadingsDroppedByGeneration++;
                         continue;
                     }
+
+                    counters.SamplesConverted++;
                     GazeBacklogPolicy.Enqueue(
                         pendingSamples,
                         new QueuedGazeSample
@@ -829,6 +896,7 @@ namespace GazeLSL
             pendingSamples.Clear();
             consecutiveLocateFailures = 0;
             lastAcceptedCaptureLslTime = 0.0;
+            counters = default(GazeAcquisitionSnapshot);
         }
 
         // The caller must hold trackerGate. Generation counters are deliberately
