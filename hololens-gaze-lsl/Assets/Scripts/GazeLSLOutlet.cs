@@ -112,14 +112,15 @@ namespace GazeLSL
                     break;
                 case GazeDeliveryState.RejectingInvalidTimestamp:
                     Debug.LogWarning(
-                        $"Gaze delivery: provider samples are arriving, but " +
-                        $"{snapshot.RejectedTimestampCount} sample(s) were rejected for an invalid " +
-                        "capture timestamp; the LSL outlet has pushed 0 samples.");
+                        $"Gaze delivery: the latest provider sample had an invalid capture timestamp. " +
+                        $"{snapshot.RejectedTimestampCount} sample(s) rejected so far; " +
+                        $"{snapshot.PushedSampleCount} LSL sample(s) pushed so far.");
                     break;
                 case GazeDeliveryState.PublishingSamplesWithoutValidRays:
                     Debug.LogWarning(
-                        $"Gaze delivery: LSL is publishing ({snapshot.PushedSampleCount} sample(s) pushed), " +
-                        "but no published sample has contained a valid combined, left-eye, or right-eye ray yet.");
+                        $"Gaze delivery: the latest published sample had no valid combined, left-eye, " +
+                        $"or right-eye ray. {snapshot.PushedSampleCount} LSL sample(s) pushed so far; " +
+                        $"{snapshot.PushedValidGazeSampleCount} contained at least one valid ray.");
                     break;
                 case GazeDeliveryState.PublishingValidGaze:
                     Debug.Log(
