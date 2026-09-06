@@ -21,6 +21,15 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
   a sample that is ready; the failure is reported once the queue is empty, so
   persistent failures still re-enumerate the tracker.
 
+### Fixed
+
+- A reading's age is judged again on the SDK's own wall-clock timestamp against
+  the clock read to fetch it, rather than by comparing its `SystemRelativeTime`
+  tick count with `Stopwatch.GetTimestamp()`. The tick rate behind that value is
+  not established for this runtime, and on the device the comparison rejected
+  every reading the tracker offered: 2077 asked for, 2077 returned, 2077 refused
+  as too old, and so no reading ever entered the pipeline.
+
 ### Added
 
 - The Unity log now counts every stage between the SDK and a sample waiting to be

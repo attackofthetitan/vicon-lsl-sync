@@ -17,6 +17,9 @@ namespace GazeLSL
         public int SeedAttempts;
         public int SeedEmptyResults;
         public int SeedStaleReadings;
+        public double LastReadingAgeSeconds;
+        public double LastReadingTimerAgeSeconds;
+        public long TimerFrequencyHz;
         public int DrainStepsSkippedAsTooSoon;
         public int DrainRequests;
         public int DrainReadings;
@@ -212,6 +215,7 @@ namespace GazeLSL
             lock (trackerGate)
             {
                 snapshot = counters;
+                snapshot.TimerFrequencyHz = GazeTiming.SystemRelativeTicksPerSecond;
                 snapshot.HasAbandonedDrain = drainPolicy.HasAbandonedDrain;
                 snapshot.PendingRawReadings = pendingRawReadings.Count;
                 snapshot.PendingSamples = pendingSamples.Count;
@@ -412,10 +416,18 @@ namespace GazeLSL
                 return;
             }
 
-            if (!GazeTiming.IsFreshCaptureTimestamp(
-                    reading.SystemRelativeTime.Ticks,
-                    GazeTiming.CurrentSystemRelativeTimeTicks(),
-                    GazeTiming.MaxSeedCaptureAgeTicks))
+            // Recorded both ways on every reading offered. A reading the tracker
+            // captured moments ago and one it captured minutes ago are the same
+            // rejection from outside, and the two ages disagreeing would itself say
+            // the device timer is not the clock behind SystemRelativeTime.
+            double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
+            counters.LastReadingAgeSeconds = ageSeconds;
+            counters.LastReadingTimerAgeSeconds =
+                (GazeTiming.CurrentSystemRelativeTimeTicks() -
+                 reading.SystemRelativeTime.Ticks) /
+                (double)GazeTiming.SystemRelativeTicksPerSecond;
+
+            if (!GazeTiming.IsFreshSeedAge(ageSeconds))
             {
                 counters.SeedStaleReadings++;
                 return;

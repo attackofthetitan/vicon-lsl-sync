@@ -31,6 +31,12 @@ second line counting all three:
 - Accepted, not newer than the last accepted reading, and waiting to convert.
 - Conversion: passes, converted, locate failures, dropped as a stale tracker
   session, and waiting to publish.
+- The age of the last reading the SDK offered, measured twice: on the SDK's own
+  wall clock, and on the device timer against the reading's tick count, with that
+  timer's frequency. Only the first decides anything. The second is there because
+  a reading captured moments ago and one captured minutes ago are the same
+  rejection from outside, and the two ages disagreeing says the device timer is
+  not the clock behind `SystemRelativeTime`.
 
 Read them as a chain. Nothing accepted means the SDK is not handing over readings.
 Readings accepted with nothing converted means the Unity main thread is not

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using GazeLSL;
 
 internal static partial class Program
@@ -14,9 +15,6 @@ internal static partial class Program
         Equal(
             (long)Math.Round(runtimeFrequency * 0.500, MidpointRounding.AwayFromZero),
             GazeTiming.MaxBacklogSpanTicks);
-        Equal(
-            (long)Math.Round(runtimeFrequency * 0.050, MidpointRounding.AwayFromZero),
-            GazeTiming.MaxSeedCaptureAgeTicks);
         // A drained batch must fit the span budget, or acquisition would recover
         // readings only for the queue policy to throw them away again.
         True(
@@ -25,27 +23,44 @@ internal static partial class Program
             "A full 90 Hz drain batch must fit inside the backlog span budget.");
     }
 
-    private static void GazeTimingRejectsStaleAndInvalidCaptures()
+    private static void GazeTimingJudgesSeedAgeOnOneClock()
     {
-        long now = GazeTiming.SystemRelativeTicksPerSecond;
+        // The age must be taken in the SDK's own wall-clock domain. Comparing the
+        // reading's tick count against a timer of ours rejected every reading the
+        // tracker offered, on a device where nothing was wrong with the readings.
+        foreach (string name in new[] { "IsFreshCaptureTimestamp", "MaxSeedCaptureAgeTicks" })
+        {
+            True(
+                typeof(GazeTiming).GetMember(
+                    name,
+                    BindingFlags.Public | BindingFlags.NonPublic |
+                    BindingFlags.Static | BindingFlags.Instance).Length == 0,
+                $"GazeTiming.{name} judges a reading's age across two clocks.");
+        }
+
         True(
-            GazeTiming.IsFreshCaptureTimestamp(
-                now - GazeTiming.MaxBacklogSpanTicks,
-                now,
-                GazeTiming.MaxBacklogSpanTicks),
-            "A capture exactly at the freshness boundary should be accepted.");
+            GazeTiming.IsFreshSeedAge(0.0),
+            "A reading captured at the query time should be accepted.");
+        True(
+            GazeTiming.IsFreshSeedAge(GazeTiming.MaxSeedCaptureAgeSeconds),
+            "A reading exactly at the age boundary should be accepted.");
         False(
-            GazeTiming.IsFreshCaptureTimestamp(
-                now - GazeTiming.MaxBacklogSpanTicks - 1L,
-                now,
-                GazeTiming.MaxBacklogSpanTicks),
-            "A stalled tracker reading beyond the freshness boundary should be rejected.");
+            GazeTiming.IsFreshSeedAge(GazeTiming.MaxSeedCaptureAgeSeconds + 0.001),
+            "A stalled tracker reading beyond the boundary should be rejected.");
+
+        // The reading returned for "now" can be captured a frame either side of the
+        // query, so a small lead must not be read as a broken clock.
+        True(
+            GazeTiming.IsFreshSeedAge(-0.011),
+            "A reading one 90 Hz frame ahead of the query should be accepted.");
         False(
-            GazeTiming.IsFreshCaptureTimestamp(0L, now, GazeTiming.MaxBacklogSpanTicks),
-            "A nonpositive capture timestamp should be rejected.");
+            GazeTiming.IsFreshSeedAge(-GazeTiming.MaxSeedCaptureAgeSeconds - 0.001),
+            "A reading far ahead of the query should be rejected.");
+
+        False(GazeTiming.IsFreshSeedAge(double.NaN), "An unusable age should be rejected.");
         False(
-            GazeTiming.IsFreshCaptureTimestamp(-1L, now, GazeTiming.MaxBacklogSpanTicks),
-            "A negative capture timestamp should be rejected.");
+            GazeTiming.IsFreshSeedAge(double.PositiveInfinity),
+            "An infinite age should be rejected.");
     }
 
     private static void GazeReadingGateRejectsDuplicateAndRegression()

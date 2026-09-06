@@ -128,12 +128,20 @@ takes at most one reading per step. A clean `null` return is ordinary and is not
 counted, so a runtime whose projection is correct keeps the drain.
 
 The first step of a tracker session has no cursor, so it seeds one from
-`TryGetReadingAtTimestamp(now)`. That seed reading is the only one judged on age:
+`TryGetReadingAtTimestamp(now)`. That reading is the only one judged on age, and
+the age is `query_time - reading.Timestamp`: both wall-clock values the SDK
+reports, so no assumption about the device timer enters into it.
 
-- `capture_ticks > 0`.
-- `query_ticks > 0`.
-- It is no more than 50 ms old.
-- If its time is slightly ahead, it is no more than 1 ms ahead.
+- The age is finite.
+- Its size is no more than 50 ms, in either direction. The tolerance is symmetric
+  because the reading returned for "now" can be captured a frame either side of
+  the query.
+
+Do not take that age by comparing `SystemRelativeTime.Ticks` against
+`Stopwatch.GetTimestamp()`. The tick rate behind `SystemRelativeTime` is not
+established for this runtime, and a build that made that comparison rejected
+every reading the tracker offered, on a device that was offering one to every
+single call.
 
 Once a cursor exists, a reading being old means the step is catching up, not that
 the tracker has stalled, so age is not a reason to drop it.

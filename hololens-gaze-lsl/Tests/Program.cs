@@ -10,7 +10,7 @@ internal static partial class Program
             GazeTrackerRayTransformsIntoWorld,
             GazeSampleEncodingMatchesContract,
             GazeTimingConvertsSystemRelativeTicks,
-            GazeTimingRejectsStaleAndInvalidCaptures,
+            GazeTimingJudgesSeedAgeOnOneClock,
             GazeReadingGateRejectsDuplicateAndRegression,
             GazeReadingGateExposesDrainCursor,
             GazeDrainAsksOnlyWhenAReadingCouldExist,

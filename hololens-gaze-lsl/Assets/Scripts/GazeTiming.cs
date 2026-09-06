@@ -18,16 +18,12 @@ namespace GazeLSL
         public static readonly long MaxBacklogSpanTicks =
             (long)Math.Round(Stopwatch.Frequency * 0.500, MidpointRounding.AwayFromZero);
 
-        // Only the reading that seeds the drain cursor is judged on age; later ones
-        // are reached by walking forward rather than by asking for "now".
-        public static readonly long MaxSeedCaptureAgeTicks =
-            (long)Math.Round(Stopwatch.Frequency * 0.050, MidpointRounding.AwayFromZero);
+        // Only a reading fetched for "now" is judged on age; later ones are reached
+        // by walking the cursor forward rather than by asking for the current time.
+        public const double MaxSeedCaptureAgeSeconds = 0.050;
 
         // Ceiling on work done under the tracker lock in one acquisition call.
         public const int MaxReadingsPerAcquire = 32;
-
-        private static readonly long MaximumFutureLeadTicks =
-            (long)Math.Round(Stopwatch.Frequency * 0.001, MidpointRounding.AwayFromZero);
 
         public static long CurrentSystemRelativeTimeTicks()
         {
@@ -39,22 +35,19 @@ namespace GazeLSL
             return systemRelativeTimeTicks / (double)Stopwatch.Frequency;
         }
 
-        public static bool IsFreshCaptureTimestamp(
-            long captureTicks,
-            long queryTicks,
-            long maximumAgeTicks)
+        // Judged as the SDK's own reading timestamp against the wall clock read to
+        // fetch it: one domain, and the only one here whose unit is established.
+        // The tick rate behind SystemRelativeTime is not, so a reading's age must
+        // never be taken by comparing those ticks with a timer of ours; if the two
+        // disagree, every reading looks ancient and none is ever accepted.
+        //
+        // The tolerance is symmetric because the reading returned for "now" can be
+        // captured a frame either side of the query.
+        public static bool IsFreshSeedAge(double ageSeconds)
         {
-            if (captureTicks <= 0L || queryTicks <= 0L || maximumAgeTicks < 0L)
-            {
-                return false;
-            }
-
-            if (captureTicks > queryTicks)
-            {
-                return captureTicks - queryTicks <= MaximumFutureLeadTicks;
-            }
-
-            return queryTicks - captureTicks <= maximumAgeTicks;
+            return !double.IsNaN(ageSeconds) &&
+                   !double.IsInfinity(ageSeconds) &&
+                   Math.Abs(ageSeconds) <= MaxSeedCaptureAgeSeconds;
         }
     }
 
