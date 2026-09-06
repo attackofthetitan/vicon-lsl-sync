@@ -51,12 +51,12 @@ stateDiagram-v2
 3. After a failed attempt, report the wait time and sleep in pieces no longer than 100 ms.
 4. A complete connection sets `ServerPush` mode and enables segment and marker data.
 5. If any setup call fails, disconnect the SDK client and treat the connection as failed.
-6. If Stop arrives during retry, leave the loop and report `Stopped`.
+6. If Stop arrives during a connection attempt or retry, close any completed connection and report `Stopped`.
 
 ### Read the first frame and create streams
 
 1. Read one Vicon frame before discovering names or creating streams.
-2. If this first `GetFrame` fails, report `Connecting`, disconnect, and start the outer connection loop again. This path does not call the normal retry wait first.
+2. If this first `GetFrame` fails, report `Connecting` and disconnect. Retry the first failure immediately; repeated first-frame failures use the normal retry wait. A successful first frame resets this rule.
 3. On success, update `frame_count_`.
 4. Stop discovery at the first failed count or name read. Return no layout and include the errors.
 5. Clear errors from an earlier session only after discovery succeeds.
@@ -71,7 +71,7 @@ For each pass through the streaming loop:
 
 1. Read a frame. Leave the session if `GetFrame` fails.
 2. Choose a finite timestamp that is later than the previous one. If no finite time can be made, skip that frame without sending it.
-3. `buildViconFrame` reads every known marker and segment and returns fixed-size values plus any errors.
+3. `buildViconFrame` reads every known marker and segment and returns their values, read status, and errors. Each stream converts unavailable values to its specified NaN sample.
 4. Send markers first and segments second with the same timestamp.
 5. A hidden or failed item becomes an invalid fixed-size value. It does not stop the session.
 6. If either LSL send fails, report that streams will be recreated and leave the session.

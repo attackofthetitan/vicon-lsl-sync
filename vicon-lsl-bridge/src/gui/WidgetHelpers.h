@@ -40,9 +40,7 @@ inline QLabel* makeTooltipLabel(const QString& text, QWidget* control, const QSt
     return label;
 }
 
-// Status values share one convention: a single line that elides when the window
-// is narrow. Uniform row heights are what make a dashboard grid readable, and a
-// value that wrapped to three lines used to drag its whole row out of line.
+// Shorten status text to one line when space is limited.
 inline ElidingLabel* makeStateValue(const QString& text, const QString& accessible_name,
                                     Qt::TextElideMode mode = Qt::ElideRight) {
     auto* label = new ElidingLabel(text, nullptr, mode);
@@ -50,8 +48,7 @@ inline ElidingLabel* makeStateValue(const QString& text, const QString& accessib
     return label;
 }
 
-// A hairline divider that groups related items on one row without the visual
-// weight of a box around them.
+// A vertical divider between related controls.
 inline QFrame* makeSeparator() {
     auto* line = new QFrame();
     line->setFrameShape(QFrame::VLine);
@@ -60,8 +57,7 @@ inline QFrame* makeSeparator() {
     return line;
 }
 
-// A sentence of explanation, not a compact status value: these wrap onto as many
-// lines as they need rather than eliding, because the detail is the point.
+// Wrap explanations so the full message stays readable.
 inline QLabel* makeMessageValue(const QString& text, const QString& accessible_name) {
     auto* label = new QLabel(text);
     label->setWordWrap(true);
@@ -117,9 +113,7 @@ inline void addField(QGridLayout* layout, int row, int col, const QString& label
     layout->addWidget(control, row, col + 1, 1, span);
 }
 
-// A caption and its control bound together as one unit, so a FlowLayout can
-// keep them side by side and wrap the pair as a whole. A plain grid cannot: its
-// columns are fixed, so a narrow panel scrolls sideways instead of reflowing.
+// Keep the label beside its control when FlowLayout wraps rows.
 inline QWidget* makeFieldChip(const QString& label, QWidget* control,
                               const QString& tooltip, int control_width = 160) {
     auto* chip = new QWidget();
@@ -133,29 +127,11 @@ inline QWidget* makeFieldChip(const QString& label, QWidget* control,
     return chip;
 }
 
-inline void addSpinRow(QGridLayout* layout, int row, const QString& label,
-                       const QString& tooltip,
-                       std::initializer_list<QDoubleSpinBox*> spins) {
-    auto* text = new QLabel(label);
-    text->setToolTip(tooltip);
-    layout->addWidget(text, row, 0);
-    int col = 1;
-    for (QDoubleSpinBox* spin : spins) {
-        spin->setToolTip(tooltip);
-        layout->addWidget(spin, row, col++);
-    }
-}
-
 inline void addWidgets(QBoxLayout* layout, std::initializer_list<QWidget*> widgets) {
     for (QWidget* widget : widgets) layout->addWidget(widget);
 }
 
-// Keeps every text field showing the start of its value.
-//
-// A QLineEdit made narrower keeps the horizontal scroll offset it had when it
-// was wide, so a study root read as "ders/9z/t6lypx..." and a stream name as
-// "iconMarkers" - both look like the front of the value was lost. Watching the
-// fields themselves resize is the exact moment to scroll them back.
+// Show the start of inactive text fields after resizing.
 class LineEditStartKeeper : public QObject {
 public:
     explicit LineEditStartKeeper(QWidget* root) : QObject(root) {
@@ -190,15 +166,7 @@ inline std::pair<QWidget*, QVBoxLayout*> makePage() {
     return {page, layout};
 }
 
-// A scroll area whose preferred height is the height its content actually
-// needs.
-//
-// QScrollArea::sizeHint() stops at twenty-four lines of text no matter how tall
-// the content is, so a block of controls taller than that is handed less room
-// than it needs and grows a scroll bar even when the window has space to spare.
-// Rows that wrap make this worse, because their height depends on the width the
-// area ends up with. Callers still cap the area with setMaximumHeight() to
-// decide how much of the window it may take.
+// Size the area to its content, including wrapped rows. Callers may cap its height.
 class ContentSizedScrollArea : public QScrollArea {
 public:
     QSize sizeHint() const override {

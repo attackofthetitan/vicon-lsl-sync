@@ -31,7 +31,7 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int c
         emit commandFinished("connect", false, "Recorder shutdown is already in progress");
         return;
     }
-    if (have_active_batch_ || start_may_have_reached_server_ || recording_state_ == RecorderRecordingState::Recording) {
+    if (active_batch_ || start_may_have_reached_server_ || recording_state_ == RecorderRecordingState::Recording) {
         emit commandFinished("connect", false, "Recorder connection cannot be replaced while recording work is active");
         return;
     }
@@ -51,7 +51,7 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int c
 void LabRecorderClient::disconnectFromServer() {
     connection_timeout_.stop();
     command_timeout_.stop();
-    if (have_active_batch_) finishActiveBatch(false, "LabRecorder connection detached");
+    if (active_batch_) finishActiveBatch(false, "LabRecorder connection detached");
     pending_payload_.clear();
     response_buffer_.clear();
     socket_.abort();
@@ -72,7 +72,7 @@ RecorderRecordingState LabRecorderClient::desiredRecordingState() const {
 }
 
 bool LabRecorderClient::shutdownReady() const {
-    return shutdown_requested_ && !have_active_batch_;
+    return shutdown_requested_ && !active_batch_;
 }
 
 bool LabRecorderClient::shutdownSettledSafely() const {
@@ -80,11 +80,11 @@ bool LabRecorderClient::shutdownSettledSafely() const {
 }
 
 bool LabRecorderClient::sendCommand(const QString& command) {
-    return beginBatch(CommandKind::Generic, command, {command}, RecorderRecordingState::Unknown);
+    return beginBatch(RecorderOperationState::Refreshing, command, {command});
 }
 
 bool LabRecorderClient::refreshStreams() {
-    return beginBatch(CommandKind::Refresh, "refresh streams", {"update"}, RecorderRecordingState::Unknown);
+    return beginBatch(RecorderOperationState::Refreshing, "refresh streams", {"update"});
 }
 
 bool LabRecorderClient::updateFilename(const LabRecorderFilenameFields& fields) {
@@ -92,8 +92,8 @@ bool LabRecorderClient::updateFilename(const LabRecorderFilenameFields& fields) 
         emit commandFinished("update filename", false, "Filename changes are unavailable while recording");
         return false;
     }
-    return beginBatch(CommandKind::Filename, "update filename",
-                      {LabRecorderFilenamePolicy::filenameCommand(fields)}, RecorderRecordingState::Unknown);
+    return beginBatch(RecorderOperationState::UpdatingFilename, "update filename",
+                      {LabRecorderFilenamePolicy::filenameCommand(fields)});
 }
 
 bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields, bool select_all_first) {
@@ -101,9 +101,8 @@ bool LabRecorderClient::startRecording(const LabRecorderFilenameFields& fields, 
         emit commandFinished("start recording", false, "A recording is already active");
         return false;
     }
-    return beginBatch(CommandKind::Start, "start recording",
-                      LabRecorderFilenamePolicy::startRecordingCommands(fields, select_all_first),
-                      RecorderRecordingState::Recording);
+    return beginBatch(RecorderOperationState::Starting, "start recording",
+                      LabRecorderFilenamePolicy::startRecordingCommands(fields, select_all_first));
 }
 
 bool LabRecorderClient::stopRecording() {
@@ -122,13 +121,12 @@ bool LabRecorderClient::beginShutdown() {
     return !shutdownReady();
 }
 
-bool LabRecorderClient::beginBatch(CommandKind kind, QString operation, QStringList commands,
-                                   RecorderRecordingState success_state) {
-    if (shutdown_requested_ && kind != CommandKind::Stop) {
+bool LabRecorderClient::beginBatch(RecorderOperationState state, QString operation, QStringList commands) {
+    if (shutdown_requested_ && state != RecorderOperationState::Stopping) {
         emit commandFinished(operation, false, "Recorder shutdown is already in progress");
         return false;
     }
-    if (have_active_batch_) {
+    if (active_batch_) {
         emit commandFinished(operation, false, "Another LabRecorder operation is already active");
         return false;
     }
@@ -140,8 +138,7 @@ bool LabRecorderClient::beginBatch(CommandKind kind, QString operation, QStringL
         emit commandFinished(operation, false, "No LabRecorder commands were provided");
         return false;
     }
-    active_batch_ = {kind, std::move(operation), std::move(commands), 0, success_state};
-    have_active_batch_ = true;
+    active_batch_ = CommandBatch{state, std::move(operation), std::move(commands)};
     pending_payload_.clear();
     response_buffer_.clear();
     updateOperationState();
@@ -150,12 +147,12 @@ bool LabRecorderClient::beginBatch(CommandKind kind, QString operation, QStringL
 }
 
 bool LabRecorderClient::requestStop(QString operation) {
-    return beginBatch(CommandKind::Stop, std::move(operation), {"stop"}, RecorderRecordingState::Stopped);
+    return beginBatch(RecorderOperationState::Stopping, std::move(operation), {"stop"});
 }
 
 void LabRecorderClient::continueShutdown() {
     if (!shutdown_requested_) return;
-    if (have_active_batch_) {
+    if (active_batch_) {
         updateOperationState();
         return;
     }
@@ -171,18 +168,18 @@ void LabRecorderClient::continueShutdown() {
 }
 
 void LabRecorderClient::writeNextCommand() {
-    if (!have_active_batch_) return;
-    if (active_batch_.next_command >= active_batch_.commands.size()) {
+    if (!active_batch_) return;
+    if (active_batch_->next_command >= active_batch_->commands.size()) {
         finishActiveBatch(true, "Recorder confirmed the command");
         return;
     }
     if (pending_payload_.isEmpty()) {
-        const QString cmd = active_batch_.commands.at(active_batch_.next_command);
+        const QString cmd = active_batch_->commands.at(active_batch_->next_command);
         pending_payload_ = cmd.toUtf8() + '\n';
         response_buffer_.clear();
         command_timeout_.start();
-        emit commandProgress(active_batch_.operation, static_cast<int>(active_batch_.next_command + 1),
-                             static_cast<int>(active_batch_.commands.size()), cmd);
+        emit commandProgress(active_batch_->operation, static_cast<int>(active_batch_->next_command + 1),
+                             static_cast<int>(active_batch_->commands.size()), cmd);
     }
     const qint64 accepted = socket_.write(pending_payload_);
     if (accepted < 0) {
@@ -190,29 +187,31 @@ void LabRecorderClient::writeNextCommand() {
         return;
     }
     if (accepted > 0) {
-        const QString cmd = active_batch_.commands.at(active_batch_.next_command);
-        if (active_batch_.kind == CommandKind::Start && cmd == "start") start_may_have_reached_server_ = true;
+        const QString cmd = active_batch_->commands.at(active_batch_->next_command);
+        if (active_batch_->state == RecorderOperationState::Starting && cmd == "start") start_may_have_reached_server_ = true;
         pending_payload_.remove(0, accepted);
     }
 }
 
 void LabRecorderClient::finishActiveBatch(bool ok, const QString& message) {
-    if (!have_active_batch_) return;
+    if (!active_batch_) return;
     command_timeout_.stop();
     pending_payload_.clear();
     response_buffer_.clear();
-    const QString op = active_batch_.operation;
-    const CommandKind kind = active_batch_.kind;
-    const RecorderRecordingState succ = active_batch_.success_state;
-    have_active_batch_ = false;
+    const CommandBatch completed = std::move(*active_batch_);
+    active_batch_.reset();
 
     if (ok) {
-        if (succ != RecorderRecordingState::Unknown) setRecordingState(succ);
-        if (kind == CommandKind::Stop) start_may_have_reached_server_ = false;
+        if (completed.state == RecorderOperationState::Starting) {
+            setRecordingState(RecorderRecordingState::Recording);
+        } else if (completed.state == RecorderOperationState::Stopping) {
+            setRecordingState(RecorderRecordingState::Stopped);
+            start_may_have_reached_server_ = false;
+        }
     } else {
         setRecordingState(RecorderRecordingState::Unknown);
     }
-    emit commandFinished(op, ok, message);
+    emit commandFinished(completed.operation, ok, message);
     updateOperationState();
     continueShutdown();
 }
@@ -223,7 +222,7 @@ void LabRecorderClient::failActiveConnection(const QString& message) {
     socket_.abort();
     setRecordingState(RecorderRecordingState::Unknown);
     setConnectionState(RecorderConnectionState::Error, message);
-    if (have_active_batch_) finishActiveBatch(false, message);
+    if (active_batch_) finishActiveBatch(false, message);
     pending_payload_.clear();
     response_buffer_.clear();
     updateOperationState();
@@ -241,19 +240,8 @@ void LabRecorderClient::setRecordingState(RecorderRecordingState state) {
     emit recordingStateChanged(state);
 }
 
-RecorderOperationState LabRecorderClient::operationForKind(CommandKind kind) {
-    switch (kind) {
-        case CommandKind::Generic:
-        case CommandKind::Refresh: return RecorderOperationState::Refreshing;
-        case CommandKind::Filename: return RecorderOperationState::UpdatingFilename;
-        case CommandKind::Start: return RecorderOperationState::Starting;
-        case CommandKind::Stop: return RecorderOperationState::Stopping;
-    }
-    return RecorderOperationState::Idle;
-}
-
 void LabRecorderClient::updateOperationState() {
-    RecorderOperationState next = have_active_batch_ ? operationForKind(active_batch_.kind)
+    RecorderOperationState next = active_batch_ ? active_batch_->state
                                  : (shutdown_requested_ ? RecorderOperationState::ShuttingDown : RecorderOperationState::Idle);
     if (next == operation_state_) return;
     operation_state_ = next;
@@ -273,7 +261,7 @@ void LabRecorderClient::onDisconnected() {
     if (connection_state_ != RecorderConnectionState::Error) {
         setConnectionState(RecorderConnectionState::Disconnected, "LabRecorder disconnected");
     }
-    if (have_active_batch_) finishActiveBatch(false, "LabRecorder disconnected during command");
+    if (active_batch_) finishActiveBatch(false, "LabRecorder disconnected during command");
     pending_payload_.clear();
     response_buffer_.clear();
     setRecordingState(RecorderRecordingState::Unknown);
@@ -285,12 +273,12 @@ void LabRecorderClient::onSocketError(QAbstractSocket::SocketError error) {
 }
 
 void LabRecorderClient::onBytesWritten(qint64) {
-    if (have_active_batch_ && !pending_payload_.isEmpty()) writeNextCommand();
+    if (active_batch_ && !pending_payload_.isEmpty()) writeNextCommand();
 }
 
 void LabRecorderClient::onReadyRead() {
     response_buffer_.append(socket_.readAll());
-    if (!have_active_batch_ || !pending_payload_.isEmpty()) return;
+    if (!active_batch_ || !pending_payload_.isEmpty()) return;
 
     while (!response_buffer_.isEmpty() &&
            (response_buffer_.front() == '\r' || response_buffer_.front() == '\n' ||
@@ -304,7 +292,7 @@ void LabRecorderClient::onReadyRead() {
     }
     command_timeout_.stop();
     response_buffer_.remove(0, 2);
-    ++active_batch_.next_command;
+    ++active_batch_->next_command;
     writeNextCommand();
 }
 
@@ -315,5 +303,5 @@ void LabRecorderClient::onConnectionTimeout() {
 }
 
 void LabRecorderClient::onCommandTimeout() {
-    if (have_active_batch_) failActiveConnection("Timed out waiting for a LabRecorder reply");
+    if (active_batch_) failActiveConnection("Timed out waiting for a LabRecorder reply");
 }

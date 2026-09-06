@@ -53,6 +53,53 @@ TEST_CASE("Preview parser extracts HoloLens gaze rays from native LSL labels") {
     REQUIRE(near(vicon_lsl::length(rays.front().direction), 1.0));
 }
 
+TEST_CASE("Marker lookup prefers plain labels and the first duplicate") {
+    const std::vector<std::string> labels{
+        "ViconMarkers_S:M:X", "ViconMarkers_S:M:Y", "S:M:Y", "S:M:Y",
+        "ViconMarkers_S:M:Z", "ViconMarkers_S:M:Valid", "S:M:Valid"};
+    auto markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88, 3, 0, 1}, {});
+    REQUIRE_EQ(markers.size(), std::size_t{1});
+    REQUIRE(markers[0].valid);
+    REQUIRE(near(markers[0].position.y, 2));
+    REQUIRE(near(markers[0].position.z, 3));
+
+    markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88, 3, 1, 0}, {});
+    REQUIRE(!markers[0].valid);
+    // A missing validity value has always allowed a finite marker position.
+    markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88, 3}, {});
+    REQUIRE(markers[0].valid);
+    markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88}, {});
+    REQUIRE(!markers[0].valid);
+    REQUIRE(vicon_lsl::parseMarkerSample({"S:M:X", "S:M:Y"}, {1, 2}, {}).empty());
+}
+
+TEST_CASE("Segment lookup supports mixed prefixes and rejects incomplete poses") {
+    const std::vector<std::string> labels{
+        "ViconSegments_S:Hip:X", "ViconSegments_S:Hip:Y", "S:Hip:Y", "S:Hip:Y",
+        "ViconSegments_S:Hip:Z", "S:Hip:QX", "S:Hip:QY", "S:Hip:QZ", "S:Hip:QW"};
+    auto segments = vicon_lsl::parseSegmentSample(labels, {1, 99, 2, 88, 3, 0, 0, 0, 1}, {});
+    REQUIRE_EQ(segments.size(), std::size_t{1});
+    REQUIRE(segments[0].valid);
+    REQUIRE(near(segments[0].position.y, 2));
+    REQUIRE(near(segments[0].rotation.w, 1));
+    segments = vicon_lsl::parseSegmentSample(labels, {1, 99, 2, 88, 3}, {});
+    REQUIRE(!segments[0].valid);
+    REQUIRE(vicon_lsl::parseSegmentSample({"S:Hip:X", "S:Hip:Y"}, {1, 2}, {}).empty());
+}
+
+TEST_CASE("Custom target stream recognition requires every target channel") {
+    vicon_lsl::PreviewStreamSchema schema;
+    schema.channel_labels = calibrationLabels();
+    REQUIRE_EQ(vicon_lsl::inferPreviewStreamRole(schema),
+               vicon_lsl::PreviewStreamRole::HoloLensCalibrationTarget);
+    for (std::size_t index = 0; index < calibrationLabels().size(); ++index) {
+        schema.channel_labels = calibrationLabels();
+        schema.channel_labels.erase(schema.channel_labels.begin() + index);
+        REQUIRE_EQ(vicon_lsl::inferPreviewStreamRole(schema),
+                   vicon_lsl::PreviewStreamRole::Unknown);
+    }
+}
+
 TEST_CASE("Preview preserves raw eye-tracker basis and rejects world calibration") {
     std::vector<double> sample(vicon_lsl::kHoloLensGazeChannelCount, 0.0);
     sample[2] = -0.25;

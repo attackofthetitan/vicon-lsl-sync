@@ -7,14 +7,8 @@
 #include <utility>
 #include <vector>
 
-namespace {
-
-constexpr vicon_lsl::detail::ViconNumericOutletProfile kSegmentOutletProfile{"Segment", "segment"};
-
-} // namespace
-
 SegmentStream::SegmentStream(StreamOutletFactory outlet_factory)
-    : outlet_(std::move(outlet_factory), kSegmentOutletProfile) {}
+    : outlet_(std::move(outlet_factory), "Segment", "segment") {}
 
 void SegmentStream::initialize(
     const std::vector<std::pair<std::string, std::string>>& segment_names,
@@ -39,14 +33,11 @@ bool SegmentStream::isInitialized() const {
 StreamPushResult SegmentStream::pushSample(
     const std::vector<vicon_lsl::SegmentPoseRead>& segments,
     double timestamp) {
-    return outlet_.pushSample([&segments] {
-        std::vector<double> channels;
-        channels.reserve(segments.size() * std::tuple_size_v<vicon_lsl::SegmentSample>);
-        for (const auto& segment : segments) {
-            const vicon_lsl::SegmentSample sample =
-                vicon_lsl::segmentSampleForLsl(segment.translation, segment.rotation);
-            channels.insert(channels.end(), sample.begin(), sample.end());
-        }
-        return channels;
-    }, timestamp);
+    std::vector<double> channels;
+    channels.reserve(segments.size() * std::tuple_size_v<vicon_lsl::SegmentSample>);
+    for (const auto& segment : segments) {
+        const auto sample = vicon_lsl::segmentSampleForLsl(segment.translation, segment.rotation);
+        channels.insert(channels.end(), sample.begin(), sample.end());
+    }
+    return outlet_.pushSample(channels, timestamp);
 }

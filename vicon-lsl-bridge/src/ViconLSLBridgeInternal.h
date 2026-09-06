@@ -47,28 +47,18 @@ public:
 using Clock = std::function<double()>;
 using Wait = std::function<void(std::chrono::milliseconds)>;
 
-struct Collaborators {
+struct Dependencies {
     std::shared_ptr<ViconClient> client;
     StreamOutletFactory outlet_factory;
     Clock clock;
     Wait wait;
 };
 
-enum class ConnectedSessionEnd {
-    InitialFrameFailed,
-    InitialStreamInitializationFailed,
-    FrameReadFailed,
-    ClientDisconnected,
-    OutletFailed,
-    LayoutStreamInitializationFailed,
-    StopRequested,
-};
-
 class BridgeTestAccess {
 public:
     static std::unique_ptr<::ViconLSLBridge> create(
         const Config& config,
-        Collaborators collaborators);
+        Dependencies dependencies);
 };
 
 } // namespace vicon_lsl::bridge_internal

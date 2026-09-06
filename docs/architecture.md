@@ -68,7 +68,7 @@ Vicon DataStream server
         v
 ViconClient ---- read results ----> ViconFrameMapper
         |                                  |
-        | frame time                       | fixed-size samples and errors
+        | frame time                       | read values, status, and errors
         v                                  v
 ViconLSLBridge -----------------> MarkerStream / SegmentStream
                                              |
@@ -82,7 +82,11 @@ Each class has one main job:
   values do not pass beyond this class, except as text in error messages.
 - `ViconFrameMapper` keeps Vicon discovery order, decides whether values are valid, creates fixed-size invalid values, gathers errors, and keeps timestamps increasing.
 - `MarkerStream` and `SegmentStream` keep their existing public interfaces. A shared private helper creates the common LSL information, checks sample size, owns the output stream, and handles send errors.
-- `ViconLSLBridge` owns the connection loop, retries, layout checks, stream replacement, source IDs, status messages, and cleanup order.
+- `ViconLSLBridge::run()` connects, reads the first frame, creates streams, and
+  cleans up before retrying. `streamFrames()` sends frames and checks for layout
+  changes. Retry decisions stay in `run()` without a separate session-result type.
+- Marker and segment streams build their channel values with ordinary loops,
+  then pass them to the shared output helper for size checks and sending.
 
 ## Desktop app work
 
@@ -120,11 +124,17 @@ The main desktop components are:
 - `StreamDiscoveryWorker` finds visible streams immediately before recording.
   `RecorderProcessController` starts and stops only recorder processes launched
   by this app. `LabRecorderClient` runs one remote command group at a time.
+  An optional command group holds its operation state and progress; there is no
+  separate active flag or second command-type enum. Completion clears the group
+  before notifying callers, so a callback can safely start the next operation.
 - `PreviewFileLoader` reads CSV or XDF files, corrects time, applies calibration,
   and prepares a memory-limited set of frames away from the window thread.
   `RecordingVerifier` reads the finished XDF and reports sample and timing health.
 
 The preview only reads streams. It must not change source timestamps or layouts.
+Each live input uses its last-sample time to track whether a sample is available.
+Connection and read failures share the same sample reset, and stream discovery
+uses one inventory replacement path that releases its lock before sending signals.
 Recorded playback may draw fewer frames, but exact counts, start and end times,
 gaps, clock corrections, and timestamp repairs are kept for the file check.
 

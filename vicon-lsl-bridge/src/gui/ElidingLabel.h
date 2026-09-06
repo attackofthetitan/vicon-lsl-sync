@@ -29,11 +29,6 @@ public:
         setTextInteractionFlags(Qt::TextSelectableByKeyboard | Qt::TextSelectableByMouse);
     }
 
-    void setElideMode(Qt::TextElideMode mode) {
-        mode_ = mode;
-        update();
-    }
-
     // Turn off while a caller supplies a richer tooltip of its own, such as a
     // destination path shown together with its validation summary.
     void setAutomaticToolTip(bool enabled) { automatic_tooltip_ = enabled; }
@@ -55,7 +50,7 @@ protected:
         const QString shown = fontMetrics().elidedText(full, mode_, area.width());
         if (automatic_tooltip_) {
             const QString wanted = shown == full ? QString() : full;
-            if (toolTip() != wanted) const_cast<ElidingLabel*>(this)->setToolTip(wanted);
+            if (toolTip() != wanted) setToolTip(wanted);
         }
         if (shown == full) {
             QLabel::paintEvent(event);

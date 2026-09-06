@@ -141,16 +141,6 @@ bool isValid(const NameRead& read) {
     return read.status == ViconReadStatus::Ok;
 }
 
-bool layoutChanged(const ViconLayout& current, const ViconLayout& known) {
-    return current != known;
-}
-
-std::string buildStreamSourceId(const std::string& prefix,
-                                const std::string& kind,
-                                const std::string& hostname) {
-    return prefix + kind + "_" + hostname;
-}
-
 std::string formatDiagnostic(const ViconDiagnostic& diagnostic) {
     std::ostringstream out;
     out << "Vicon " << toString(diagnostic.severity)

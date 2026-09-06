@@ -65,12 +65,15 @@ private:
     struct StreamState;
 
     bool connectStream(StreamState& state);
+    bool openStream(StreamState& state, const lsl::stream_info& stream, QString warning);
     bool pollStream(StreamState& state, qint64 now_ms);
     bool streamIsFresh(const StreamState& state, qint64 now_ms) const;
     bool calibrationFramesCompatible() const;
     PreviewTransformProfile currentGazeTransform() const;
     void publishLatestFrame(PreviewFrame frame);
     void updateStatus(qint64 now_ms);
+    void replaceInventory(PreviewStreamRole role, QVector<gui::StreamIdentity> streams,
+                          const QString& warning);
     QString streamStatusText(const StreamState& state, qint64 now_ms) const;
 
     PreviewWorkerConfig config_;

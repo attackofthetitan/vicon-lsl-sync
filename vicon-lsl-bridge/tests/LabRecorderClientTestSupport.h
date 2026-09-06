@@ -49,6 +49,7 @@ void testRenderedFilenameUsesSharedSanitization();
 void testUnresolvedFilenamePlaceholders();
 void testStartRecordingCommands();
 void testTcpCommandSequence();
+void testCompletionCanStartNextCommand();
 void testTcpStartRecordingSequenceWithSelectAll();
 void testFragmentedReplyControlsCommandProgress();
 void testConnectionTimeoutDoesNotShortenCommandTimeout();

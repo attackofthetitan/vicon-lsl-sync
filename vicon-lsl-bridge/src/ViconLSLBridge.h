@@ -20,8 +20,7 @@ namespace bridge_internal {
 
 class BridgeTestAccess;
 class ViconClient;
-struct Collaborators;
-enum class ConnectedSessionEnd;
+struct Dependencies;
 
 } // namespace bridge_internal
 } // namespace vicon_lsl
@@ -54,13 +53,11 @@ private:
     friend class vicon_lsl::bridge_internal::BridgeTestAccess;
 
     ViconLSLBridge(const Config& config,
-                   vicon_lsl::bridge_internal::Collaborators collaborators);
+                   vicon_lsl::bridge_internal::Dependencies dependencies);
     void connectWithRetry();
     void waitForRetry();
-    vicon_lsl::bridge_internal::ConnectedSessionEnd runConnectedSession(
-        vicon_lsl::ViconTimestampState& timestamp_state);
-    void resetConnectedSession(
-        vicon_lsl::bridge_internal::ConnectedSessionEnd end_reason);
+    void streamFrames(vicon_lsl::ViconTimestampState& timestamp_state);
+    void resetConnectedSession();
     bool initializeStreams();
     bool checkLayoutChanged();
     bool streamFrame(double timestamp);
@@ -80,7 +77,6 @@ private:
     vicon_lsl::ViconLayout known_layout_;
     unsigned int frame_count_ = 0;
     unsigned int frames_since_layout_check_ = 0;
-    unsigned int consecutive_initial_frame_failures_ = 0;
     vicon_lsl::DiagnosticAggregator diagnostic_aggregator_;
     std::string last_diagnostic_message_;
 };

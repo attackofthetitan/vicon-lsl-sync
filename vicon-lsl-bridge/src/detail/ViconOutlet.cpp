@@ -1,4 +1,4 @@
-#include "detail/ViconNumericOutlet.h"
+#include "detail/ViconOutlet.h"
 
 #include <cmath>
 #include <exception>
@@ -34,20 +34,23 @@ void appendTimingMetadata(lsl::stream_info& info, double stream_rate) {
 
 } // namespace
 
-ViconNumericOutlet::ViconNumericOutlet(StreamOutletFactory outlet_factory,
-                                       ViconNumericOutletProfile profile)
-    : outlet_factory_(std::move(outlet_factory)), profile_(profile) {}
+ViconOutlet::ViconOutlet(StreamOutletFactory outlet_factory,
+                        const char* display_name,
+                        const char* item_noun)
+    : outlet_factory_(std::move(outlet_factory)),
+      display_name_(display_name),
+      item_noun_(item_noun) {}
 
-void ViconNumericOutlet::initialize(const StreamSchema& schema,
-                                    std::size_t item_count,
-                                    const std::string& source_id,
-                                    double nominal_rate) {
+void ViconOutlet::initialize(const StreamSchema& schema,
+                             std::size_t item_count,
+                             const std::string& source_id,
+                             double nominal_rate) {
     destroy();
     configured_ = true;
     item_count_ = item_count;
     if (item_count_ == 0) {
-        std::cout << "No " << profile_.lower_name << "s discovered; "
-                  << profile_.lower_name << " stream not created" << std::endl;
+        std::cout << "No " << item_noun_ << "s discovered; "
+                  << item_noun_ << " stream not created" << std::endl;
         return;
     }
 
@@ -74,16 +77,16 @@ void ViconNumericOutlet::initialize(const StreamSchema& schema,
     channel_count_ = static_cast<std::size_t>(channel_count);
     outlet_ = outlet_factory_(*info_);
     if (!outlet_) {
-        throw std::runtime_error(std::string(profile_.display_name) +
+        throw std::runtime_error(std::string(display_name_) +
                                  " outlet factory returned no outlet");
     }
 
-    std::cout << profile_.display_name << " stream ready, " << item_count_ << " "
-              << profile_.lower_name << "s, " << channel_count << " channels"
+    std::cout << display_name_ << " stream ready, " << item_count_ << " "
+              << item_noun_ << "s, " << channel_count << " channels"
               << std::endl;
 }
 
-void ViconNumericOutlet::destroy() {
+void ViconOutlet::destroy() {
     const bool was_initialized = outlet_ != nullptr || info_ != nullptr;
     outlet_.reset();
     info_.reset();
@@ -91,18 +94,22 @@ void ViconNumericOutlet::destroy() {
     item_count_ = 0;
     configured_ = false;
     if (was_initialized) {
-        std::cout << profile_.display_name << " stream closed" << std::endl;
+        std::cout << display_name_ << " stream closed" << std::endl;
     }
 }
 
-bool ViconNumericOutlet::isInitialized() const {
+bool ViconOutlet::isInitialized() const {
     return configured_ && (item_count_ == 0 || outlet_ != nullptr);
 }
 
-StreamPushResult ViconNumericOutlet::pushPreparedSample(const std::vector<double>& sample,
-                                                        double timestamp) {
+StreamPushResult ViconOutlet::pushSample(const std::vector<double>& sample,
+                                       double timestamp) {
+    if (!configured_) return StreamPushResult::NotConfigured;
+    if (item_count_ == 0) return StreamPushResult::Pushed;
+    if (!outlet_) return StreamPushResult::Failed;
+
     if (sample.size() != channel_count_) {
-        std::cerr << profile_.display_name << " sample channel mismatch: expected "
+        std::cerr << display_name_ << " sample channel mismatch: expected "
                   << channel_count_ << ", got " << sample.size() << std::endl;
         return StreamPushResult::Failed;
     }
@@ -111,7 +118,7 @@ StreamPushResult ViconNumericOutlet::pushPreparedSample(const std::vector<double
         outlet_->pushSample(sample, timestamp);
         return StreamPushResult::Pushed;
     } catch (const std::exception& ex) {
-        std::cerr << "Failed to push " << profile_.lower_name << " LSL sample: "
+        std::cerr << "Failed to push " << item_noun_ << " LSL sample: "
                   << ex.what() << std::endl;
         destroy();
         return StreamPushResult::Failed;

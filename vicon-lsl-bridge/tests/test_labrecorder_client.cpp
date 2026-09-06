@@ -13,6 +13,7 @@ int main(int argc, char** argv) {
     run("unresolved placeholders", testUnresolvedFilenamePlaceholders);
     run("start commands", testStartRecordingCommands);
     run("TCP command sequence", testTcpCommandSequence);
+    run("completion callback", testCompletionCanStartNextCommand);
     run("TCP Start sequence", testTcpStartRecordingSequenceWithSelectAll);
     run("fragmented reply", testFragmentedReplyControlsCommandProgress);
     run("separate timeouts", testConnectionTimeoutDoesNotShortenCommandTimeout);

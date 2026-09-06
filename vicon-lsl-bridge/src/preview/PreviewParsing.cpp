@@ -56,13 +56,6 @@ bool finiteAt(const std::vector<double>& sample, std::size_t index) {
     return index < sample.size() && std::isfinite(sample[index]);
 }
 
-PreviewVec3 sampleVec3(const std::vector<double>& sample,
-                       std::size_t x,
-                       std::size_t y,
-                       std::size_t z) {
-    return {sample[x], sample[y], sample[z]};
-}
-
 std::optional<PreviewVec3> parseVec3(const std::vector<double>& sample,
                                      std::size_t x,
                                      std::size_t y,
@@ -70,7 +63,26 @@ std::optional<PreviewVec3> parseVec3(const std::vector<double>& sample,
     if (!finiteAt(sample, x) || !finiteAt(sample, y) || !finiteAt(sample, z)) {
         return std::nullopt;
     }
-    return sampleVec3(sample, x, y, z);
+    return PreviewVec3{sample[x], sample[y], sample[z]};
+}
+
+using LabelIndex = std::unordered_map<std::string, std::size_t>;
+
+LabelIndex indexLabels(const std::vector<std::string>& labels) {
+    LabelIndex result;
+    for (std::size_t index = 0; index < labels.size(); ++index) {
+        result.emplace(labels[index], index);
+    }
+    return result;
+}
+
+std::optional<std::size_t> findChannel(const LabelIndex& labels,
+                                      const std::string& name,
+                                      const std::string& prefix) {
+    auto found = labels.find(name);
+    if (found == labels.end()) found = labels.find(prefix + name);
+    if (found == labels.end()) return std::nullopt;
+    return found->second;
 }
 
 } // namespace
@@ -89,19 +101,10 @@ PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema) {
         return PreviewStreamRole::HoloLensCalibrationTarget;
     }
 
-    const auto has_calibration_label = [&schema](const std::string& label) {
-        return std::find(schema.channel_labels.begin(),
-                         schema.channel_labels.end(),
-                         label) != schema.channel_labels.end();
-    };
-    if (has_calibration_label("PositionX") &&
-        has_calibration_label("PositionY") &&
-        has_calibration_label("PositionZ") &&
-        has_calibration_label("RotationX") &&
-        has_calibration_label("RotationY") &&
-        has_calibration_label("RotationZ") &&
-        has_calibration_label("RotationW") &&
-        has_calibration_label("Tracked")) {
+    const auto& target_channels = holoLensModelTargetChannels();
+    if (std::all_of(target_channels.begin(), target_channels.end(), [&](const auto& channel) {
+            return findIndex(schema.channel_labels, std::string(channel.label)).has_value();
+        })) {
         return PreviewStreamRole::HoloLensCalibrationTarget;
     }
 
@@ -117,15 +120,13 @@ PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema) {
         return PreviewStreamRole::ViconSegments;
     }
 
-    bool has_gaze = true;
     for (const auto& channel : holoLensGazeChannels()) {
         const std::string label(channel.label);
         if (!findIndex(schema.channel_labels, label, "_" + label)) {
-            has_gaze = false;
-            break;
+            return PreviewStreamRole::Unknown;
         }
     }
-    return has_gaze ? PreviewStreamRole::HoloLensGaze : PreviewStreamRole::Unknown;
+    return PreviewStreamRole::HoloLensGaze;
 }
 
 std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
@@ -154,10 +155,7 @@ std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
 std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& labels,
                                              const std::vector<double>& sample,
                                              const PreviewTransformProfile& transform) {
-    std::unordered_map<std::string, std::size_t> label_to_index;
-    for (std::size_t index = 0; index < labels.size(); ++index) {
-        label_to_index.emplace(labels[index], index);
-    }
+    const auto label_to_index = indexLabels(labels);
 
     std::vector<PreviewMarker> markers;
     for (std::size_t index = 0; index < labels.size(); ++index) {
@@ -166,33 +164,15 @@ std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& lab
             continue;
         }
         const std::string root = label.substr(0, label.size() - 2);
-        const auto y = label_to_index.find(root + ":Y");
-        const auto z = label_to_index.find(root + ":Z");
-        const auto valid = label_to_index.find(root + ":Valid");
-
-        auto find_prefixed = [&](const std::string& suffix) {
-            return label_to_index.find("ViconMarkers_" + root + suffix);
-        };
-        const auto y_prefixed = find_prefixed(":Y");
-        const auto z_prefixed = find_prefixed(":Z");
-        if (y == label_to_index.end() && y_prefixed == label_to_index.end()) {
-            continue;
-        }
-        if (z == label_to_index.end() && z_prefixed == label_to_index.end()) {
-            continue;
-        }
-
-        const std::size_t x_index = index;
-        const std::size_t y_index = y != label_to_index.end() ? y->second : y_prefixed->second;
-        const std::size_t z_index = z != label_to_index.end() ? z->second : z_prefixed->second;
-        const auto valid_prefixed = find_prefixed(":Valid");
-        const std::size_t valid_index = valid != label_to_index.end()
-            ? valid->second
-            : (valid_prefixed != label_to_index.end() ? valid_prefixed->second : sample.size());
+        const auto y = findChannel(label_to_index, root + ":Y", "ViconMarkers_");
+        const auto z = findChannel(label_to_index, root + ":Z", "ViconMarkers_");
+        const auto valid = findChannel(label_to_index, root + ":Valid", "ViconMarkers_");
+        if (!y || !z) continue;
+        const auto valid_index = valid.value_or(sample.size());
 
         PreviewMarker marker;
         marker.name = displayNameForRoot(root);
-        const auto position = parseVec3(sample, x_index, y_index, z_index);
+        const auto position = parseVec3(sample, index, *y, *z);
         marker.valid = position.has_value() &&
                        (valid_index >= sample.size() || sample[valid_index] > 0.5);
         if (marker.valid) {
@@ -210,10 +190,7 @@ std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& lab
 std::vector<PreviewSegment> parseSegmentSample(const std::vector<std::string>& labels,
                                                const std::vector<double>& sample,
                                                const PreviewTransformProfile& transform) {
-    std::unordered_map<std::string, std::size_t> label_to_index;
-    for (std::size_t index = 0; index < labels.size(); ++index) {
-        label_to_index.emplace(labels[index], index);
-    }
+    const auto label_to_index = indexLabels(labels);
 
     std::vector<PreviewSegment> segments;
     for (std::size_t index = 0; index < labels.size(); ++index) {
@@ -222,16 +199,8 @@ std::vector<PreviewSegment> parseSegmentSample(const std::vector<std::string>& l
             continue;
         }
         const std::string root = label.substr(0, label.size() - 2);
-        auto get = [&](const std::string& suffix) -> std::optional<std::size_t> {
-            const auto direct = label_to_index.find(root + suffix);
-            if (direct != label_to_index.end()) {
-                return direct->second;
-            }
-            const auto prefixed = label_to_index.find("ViconSegments_" + root + suffix);
-            if (prefixed != label_to_index.end()) {
-                return prefixed->second;
-            }
-            return std::nullopt;
+        auto get = [&](const std::string& suffix) {
+            return findChannel(label_to_index, root + suffix, "ViconSegments_");
         };
 
         const auto y = get(":Y");

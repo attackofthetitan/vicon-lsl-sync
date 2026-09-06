@@ -94,9 +94,7 @@ struct SegmentPoseRead {
     SegmentRotationRead rotation;
 };
 
-// Frame results carry only the values the outlets convert. The subject, object,
-// and operation that identify a read belong to the diagnostic raised for it, so
-// repeating them per item per frame would only copy strings nobody reads.
+// Values follow layout order. Failed reads are described in diagnostics.
 struct MarkerFrameResult {
     std::vector<MarkerTranslationRead> reads;
     std::vector<ViconDiagnostic> diagnostics;

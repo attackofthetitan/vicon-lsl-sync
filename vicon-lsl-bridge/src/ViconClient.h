@@ -6,8 +6,7 @@
 
 #include <string>
 
-// The one real implementation of the bridge's client interface. It implements
-// that interface directly so no forwarding shim has to restate every method.
+// Reads Vicon SDK data through the same interface used by bridge tests.
 class ViconClient final : public vicon_lsl::bridge_internal::ViconClient {
 public:
     explicit ViconClient(const std::string& server_address);

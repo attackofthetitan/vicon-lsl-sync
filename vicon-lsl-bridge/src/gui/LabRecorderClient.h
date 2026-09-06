@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QTcpSocket>
+#include <optional>
 
 #include "gui/LabRecorderFilenamePolicy.h"
 #include "gui/SessionState.h"
@@ -58,26 +59,16 @@ private slots:
     void onCommandTimeout();
 
 private:
-    enum class CommandKind {
-        Generic,
-        Refresh,
-        Filename,
-        Start,
-        Stop,
-    };
-
     struct CommandBatch {
-        CommandKind kind = CommandKind::Generic;
+        RecorderOperationState state;
         QString operation;
         QStringList commands;
         qsizetype next_command = 0;
-        RecorderRecordingState success_state = RecorderRecordingState::Unknown;
     };
 
-    bool beginBatch(CommandKind kind,
+    bool beginBatch(RecorderOperationState state,
                     QString operation,
-                    QStringList commands,
-                    RecorderRecordingState success_state);
+                    QStringList commands);
     bool requestStop(QString operation);
     void continueShutdown();
     void writeNextCommand();
@@ -86,13 +77,11 @@ private:
     void setConnectionState(RecorderConnectionState state, const QString& message = {});
     void setRecordingState(RecorderRecordingState state);
     void updateOperationState();
-    static RecorderOperationState operationForKind(CommandKind kind);
 
     QTcpSocket socket_;
     QTimer connection_timeout_;
     QTimer command_timeout_;
-    CommandBatch active_batch_;
-    bool have_active_batch_ = false;
+    std::optional<CommandBatch> active_batch_;
     QByteArray pending_payload_;
     QByteArray response_buffer_;
     RecorderConnectionState connection_state_ = RecorderConnectionState::Disconnected;

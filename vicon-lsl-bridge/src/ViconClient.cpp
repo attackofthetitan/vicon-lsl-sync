@@ -25,9 +25,7 @@ namespace SDK = ViconDataStreamSDK::CPP;
 
 namespace {
 
-// How long to spend deciding whether anything is listening. A server on the
-// lab network answers a TCP handshake in a few milliseconds; this only has to
-// be short enough that a stop request is not left waiting on it.
+// Limit each connection probe so an unavailable server does not delay Stop.
 constexpr int kReachabilityTimeoutMs = 500;
 
 // The port the Vicon DataStream server listens on when an address omits one.
@@ -135,12 +133,8 @@ std::pair<std::string, std::string> splitServerAddress(const std::string& addres
     return {address.substr(0, separator), port};
 }
 
-// The SDK's Connect() blocks until the server answers or its own connection
-// timeout expires, and nothing can cancel it in between, so a stop request
-// waits behind it. Shortening that timeout would only abandon an attempt the
-// SDK is still running, so ask a cheaper question first: is anything listening?
-// When the answer is no, which is the case whenever a stop is left waiting,
-// the SDK is never asked to try at all.
+// Skip the SDK's blocking Connect() when a TCP probe cannot reach the server.
+// DNS lookup and Connect() itself can still block; this is not a total timeout.
 bool serverIsListening(const std::string& address) {
 #ifdef _WIN32
     WSADATA winsock_data;
@@ -221,6 +215,36 @@ vicon_lsl::ViconReadStatus readStatus(SDK::Result::Enum result) {
     return result == SDK::Result::NotConnected
                ? vicon_lsl::ViconReadStatus::NotConnected
                : vicon_lsl::ViconReadStatus::SdkError;
+}
+
+// Keep connection and SDK errors consistent across read types.
+template <class Read>
+Read notConnected() {
+    Read read;
+    read.status = vicon_lsl::ViconReadStatus::NotConnected;
+    read.sdk_result = "NotConnected";
+    read.message = "Vicon client is not connected";
+    return read;
+}
+
+template <class Read>
+Read sdkFailed(SDK::Result::Enum result, std::string message) {
+    Read read;
+    read.status = readStatus(result);
+    read.sdk_result = describeSdkResult(result);
+    read.message = std::move(message);
+    return read;
+}
+
+// Hidden items retain their status so the stream can send invalid values.
+template <class Read>
+Read occludedOrOk(Read read, bool occluded, const char* occlusion_message) {
+    read.occluded = occluded;
+    read.status = occluded ? vicon_lsl::ViconReadStatus::Occluded
+                           : vicon_lsl::ViconReadStatus::Ok;
+    read.sdk_result = "Success";
+    read.message = occluded ? occlusion_message : "";
+    return read;
 }
 
 bool checkSetupResult(const char* operation,
@@ -346,54 +370,40 @@ double ViconClient::frameRate() const {
 
 vicon_lsl::CountRead ViconClient::readSubjectCount() const {
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                0,
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<vicon_lsl::CountRead>();
     }
 
     const auto output = client_.GetSubjectCount();
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                0,
-                describeSdkResult(output.Result),
-                "Failed to get subject count"};
+        return sdkFailed<vicon_lsl::CountRead>(output.Result,
+                                               "Failed to get subject count");
     }
     return {vicon_lsl::ViconReadStatus::Ok, output.SubjectCount, "Success", ""};
 }
 
 vicon_lsl::NameRead ViconClient::readSubjectName(unsigned int index) const {
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                "",
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<vicon_lsl::NameRead>();
     }
 
     const auto output = client_.GetSubjectName(index);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                "",
-                describeSdkResult(output.Result),
-                "Failed to get subject name at index " + std::to_string(index)};
+        return sdkFailed<vicon_lsl::NameRead>(
+            output.Result,
+            "Failed to get subject name at index " + std::to_string(index));
     }
     return {vicon_lsl::ViconReadStatus::Ok, output.SubjectName, "Success", ""};
 }
 
 vicon_lsl::CountRead ViconClient::readMarkerCount(const std::string& subject) const {
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                0,
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<vicon_lsl::CountRead>();
     }
 
     const auto output = client_.GetMarkerCount(subject);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                0,
-                describeSdkResult(output.Result),
-                "Failed to get marker count for subject " + subject};
+        return sdkFailed<vicon_lsl::CountRead>(
+            output.Result, "Failed to get marker count for subject " + subject);
     }
     return {vicon_lsl::ViconReadStatus::Ok, output.MarkerCount, "Success", ""};
 }
@@ -401,66 +411,46 @@ vicon_lsl::CountRead ViconClient::readMarkerCount(const std::string& subject) co
 vicon_lsl::NameRead ViconClient::readMarkerName(const std::string& subject,
                                                 unsigned int index) const {
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                "",
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<vicon_lsl::NameRead>();
     }
 
     const auto output = client_.GetMarkerName(subject, index);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                "",
-                describeSdkResult(output.Result),
-                "Failed to get marker name for subject " + subject +
-                    " at index " + std::to_string(index)};
+        return sdkFailed<vicon_lsl::NameRead>(
+            output.Result,
+            "Failed to get marker name for subject " + subject +
+                " at index " + std::to_string(index));
     }
     return {vicon_lsl::ViconReadStatus::Ok, output.MarkerName, "Success", ""};
 }
 
 vicon_lsl::MarkerTranslationRead ViconClient::readMarkerGlobalTranslation(
     const std::string& subject, const std::string& marker) {
+    using Read = vicon_lsl::MarkerTranslationRead;
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                {0.0, 0.0, 0.0},
-                false,
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<Read>();
     }
 
     const auto output = client_.GetMarkerGlobalTranslation(subject, marker);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                {0.0, 0.0, 0.0},
-                false,
-                describeSdkResult(output.Result),
-                "Failed to read marker global translation"};
+        return sdkFailed<Read>(output.Result,
+                               "Failed to read marker global translation");
     }
 
-    vicon_lsl::MarkerTranslationRead read;
+    Read read;
     read.translation = {output.Translation[0], output.Translation[1], output.Translation[2]};
-    read.occluded = output.Occluded;
-    read.status = output.Occluded ? vicon_lsl::ViconReadStatus::Occluded
-                                  : vicon_lsl::ViconReadStatus::Ok;
-    read.sdk_result = "Success";
-    read.message = output.Occluded ? "Marker is occluded" : "";
-    return read;
+    return occludedOrOk(std::move(read), output.Occluded, "Marker is occluded");
 }
 
 vicon_lsl::CountRead ViconClient::readSegmentCount(const std::string& subject) const {
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                0,
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<vicon_lsl::CountRead>();
     }
 
     const auto output = client_.GetSegmentCount(subject);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                0,
-                describeSdkResult(output.Result),
-                "Failed to get segment count for subject " + subject};
+        return sdkFailed<vicon_lsl::CountRead>(
+            output.Result, "Failed to get segment count for subject " + subject);
     }
     return {vicon_lsl::ViconReadStatus::Ok, output.SegmentCount, "Success", ""};
 }
@@ -468,77 +458,52 @@ vicon_lsl::CountRead ViconClient::readSegmentCount(const std::string& subject) c
 vicon_lsl::NameRead ViconClient::readSegmentName(const std::string& subject,
                                                  unsigned int index) const {
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                "",
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<vicon_lsl::NameRead>();
     }
 
     const auto output = client_.GetSegmentName(subject, index);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                "",
-                describeSdkResult(output.Result),
-                "Failed to get segment name for subject " + subject +
-                    " at index " + std::to_string(index)};
+        return sdkFailed<vicon_lsl::NameRead>(
+            output.Result,
+            "Failed to get segment name for subject " + subject +
+                " at index " + std::to_string(index));
     }
     return {vicon_lsl::ViconReadStatus::Ok, output.SegmentName, "Success", ""};
 }
 
 vicon_lsl::SegmentTranslationRead ViconClient::readSegmentGlobalTranslation(
     const std::string& subject, const std::string& segment) {
+    using Read = vicon_lsl::SegmentTranslationRead;
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                {0.0, 0.0, 0.0},
-                false,
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<Read>();
     }
 
     const auto output = client_.GetSegmentGlobalTranslation(subject, segment);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                {0.0, 0.0, 0.0},
-                false,
-                describeSdkResult(output.Result),
-                "Failed to read segment global translation"};
+        return sdkFailed<Read>(output.Result,
+                               "Failed to read segment global translation");
     }
 
-    vicon_lsl::SegmentTranslationRead read;
+    Read read;
     read.translation = {output.Translation[0], output.Translation[1], output.Translation[2]};
-    read.occluded = output.Occluded;
-    read.status = output.Occluded ? vicon_lsl::ViconReadStatus::Occluded
-                                  : vicon_lsl::ViconReadStatus::Ok;
-    read.sdk_result = "Success";
-    read.message = output.Occluded ? "Segment translation is occluded" : "";
-    return read;
+    return occludedOrOk(std::move(read), output.Occluded, "Segment translation is occluded");
 }
 
 vicon_lsl::SegmentRotationRead ViconClient::readSegmentGlobalRotationQuaternion(
     const std::string& subject, const std::string& segment) {
+    using Read = vicon_lsl::SegmentRotationRead;
     if (!connected_) {
-        return {vicon_lsl::ViconReadStatus::NotConnected,
-                {0.0, 0.0, 0.0, 1.0},
-                false,
-                "NotConnected",
-                "Vicon client is not connected"};
+        return notConnected<Read>();
     }
 
     const auto output = client_.GetSegmentGlobalRotationQuaternion(subject, segment);
     if (output.Result != SDK::Result::Success) {
-        return {readStatus(output.Result),
-                {0.0, 0.0, 0.0, 1.0},
-                false,
-                describeSdkResult(output.Result),
-                "Failed to read segment global rotation quaternion"};
+        return sdkFailed<Read>(output.Result,
+                               "Failed to read segment global rotation quaternion");
     }
 
-    vicon_lsl::SegmentRotationRead read;
-    read.quaternion = {output.Rotation[0], output.Rotation[1], output.Rotation[2], output.Rotation[3]};
-    read.occluded = output.Occluded;
-    read.status = output.Occluded ? vicon_lsl::ViconReadStatus::Occluded
-                                  : vicon_lsl::ViconReadStatus::Ok;
-    read.sdk_result = "Success";
-    read.message = output.Occluded ? "Segment rotation is occluded" : "";
-    return read;
+    Read read;
+    read.quaternion = {output.Rotation[0], output.Rotation[1],
+                       output.Rotation[2], output.Rotation[3]};
+    return occludedOrOk(std::move(read), output.Occluded, "Segment rotation is occluded");
 }

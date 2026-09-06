@@ -1,4 +1,4 @@
-#include "ViconFrameMapperCompatibility.h"
+#include "ViconFrameMapper.h"
 #include "TestSupport.h"
 
 #include <cmath>
@@ -147,6 +147,12 @@ struct FakeClient {
     }
 };
 
+// Lets the cases below compare brace-initialized layouts, which `!=` cannot
+// take directly.
+bool differs(const vicon_lsl::ViconLayout& left, const vicon_lsl::ViconLayout& right) {
+    return left != right;
+}
+
 } // namespace
 
 TEST_CASE("Vicon frame timestamp applies valid latency") {
@@ -250,19 +256,19 @@ TEST_CASE("Vicon layout collection handles empty layouts") {
 
 TEST_CASE("Vicon layout comparison detects changes") {
     const vicon_lsl::ViconLayout known{{{"S", "M1"}}, {{"S", "Seg1"}}};
-    REQUIRE(!vicon_lsl::layoutChanged(known, known));
-    REQUIRE(vicon_lsl::layoutChanged({{{"S", "M2"}}, {{"S", "Seg1"}}}, known));
-    REQUIRE(vicon_lsl::layoutChanged({{{"S", "M1"}}, {{"S", "Seg2"}}}, known));
-    REQUIRE(vicon_lsl::layoutChanged({{{"S", "M1"}, {"S", "M2"}}}, known));
-    REQUIRE(vicon_lsl::layoutChanged({{{"S", "M1"}}, {{"S", "Seg1"}, {"S", "Seg2"}}},
+    REQUIRE(known == known);
+    REQUIRE(differs({{{"S", "M2"}}, {{"S", "Seg1"}}}, known));
+    REQUIRE(differs({{{"S", "M1"}}, {{"S", "Seg2"}}}, known));
+    REQUIRE(differs({{{"S", "M1"}, {"S", "M2"}}}, known));
+    REQUIRE(differs({{{"S", "M1"}}, {{"S", "Seg1"}, {"S", "Seg2"}}},
                                      known));
-    REQUIRE(vicon_lsl::layoutChanged({{}, {{"S", "Seg1"}}},
+    REQUIRE(differs({{}, {{"S", "Seg1"}}},
                                      {{{"S", "M1"}}, {{"S", "Seg1"}}}));
-    REQUIRE(vicon_lsl::layoutChanged({{{"S", "M1"}}, {}},
+    REQUIRE(differs({{{"S", "M1"}}, {}},
                                      {{{"S", "M1"}}, {{"S", "Seg1"}}}));
-    REQUIRE(vicon_lsl::layoutChanged({}, known));
-    REQUIRE(vicon_lsl::layoutChanged({{{"S", "M2"}, {"S", "M1"}}}, {{{"S", "M1"}, {"S", "M2"}}}));
-    REQUIRE(vicon_lsl::layoutChanged({{}, {{"S", "Seg2"}, {"S", "Seg1"}}},
+    REQUIRE(differs({}, known));
+    REQUIRE(differs({{{"S", "M2"}, {"S", "M1"}}}, {{{"S", "M1"}, {"S", "M2"}}}));
+    REQUIRE(differs({{}, {{"S", "Seg2"}, {"S", "Seg1"}}},
                                      {{}, {{"S", "Seg1"}, {"S", "Seg2"}}}));
 }
 

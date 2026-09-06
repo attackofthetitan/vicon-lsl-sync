@@ -87,12 +87,18 @@ struct PreviewStreamWorker::StreamState {
     double nominal_rate = 0.0;
     PreviewRateTracker rate_tracker;
     double latest_timestamp = 0.0;
-    bool have_sample = false;
     qint64 last_sample_ms = -1, next_resolve_ms = 0;
     QString last_error;
     gui::StreamIdentity identity;
 
     bool connected() const { return inlet != nullptr; }
+    bool hasSample() const { return last_sample_ms >= 0; }
+
+    void clearSample() {
+        last_sample_ms = -1;
+        latest_timestamp = 0.0;
+        rate_tracker.reset();
+    }
 };
 
 PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* parent)
@@ -222,80 +228,59 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
                                                               : gui::StreamReconnectionMode::SourceIdentity;
         const gui::StreamIdentitySelection selection = gui::selectStreamIdentity(candidates, selection_binding);
         if (selection.index < 0) {
-            {
-                std::lock_guard<std::mutex> lock(inventory_mutex_);
-                inventory_.erase(std::remove_if(inventory_.begin(), inventory_.end(),
-                    [&state](const gui::StreamIdentity& item) { return item.role == roleText(state.role); }),
-                    inventory_.end());
-                for (gui::StreamIdentity cand : candidates) {
-                    cand.warning = selection.explanation;
-                    inventory_.push_back(std::move(cand));
-                }
-            }
-            for (const gui::StreamIdentity& cand : candidates) emit streamIdentityChanged(cand, selection.explanation);
+            replaceInventory(state.role, std::move(candidates), selection.explanation);
             state.last_error = selection.explanation;
             return false;
         }
 
-        const std::size_t selected_index = static_cast<std::size_t>(selection.index);
-        QString selection_warning = selection.should_warn ? selection.explanation : QString();
-
-        auto inlet = std::make_unique<lsl::stream_inlet>(streams[selected_index], 360, 0, true);
-        lsl::stream_info metadata = streams[selected_index];
-        try { metadata = inlet->info(kMetadataTimeoutSeconds); } catch (const std::exception&) {}
-
-        bool metadata_complete = false;
-        state.labels = channelLabels(metadata, state.role, &metadata_complete);
-        state.coordinate_frame = gui::coordinateFrameOf(metadata).toStdString();
-        state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
-        state.nominal_rate = metadata.nominal_srate() > 0.0 && std::isfinite(metadata.nominal_srate()) ? metadata.nominal_srate() : 0.0;
-        state.inlet = std::move(inlet);
-        state.inlet->set_postprocessing(lsl::post_clocksync);
-        state.have_sample = false;
-        state.last_sample_ms = -1;
-        state.latest_timestamp = 0.0;
-        state.rate_tracker.reset();
-        state.last_error.clear();
-        state.identity = gui::identityFromStreamInfo(metadata);
-        state.identity.role = roleText(state.role);
-        state.identity.nominal_rate = state.nominal_rate;
-        const bool coordinate_required = state.role == PreviewStreamRole::HoloLensGaze ||
-                                         state.role == PreviewStreamRole::HoloLensCalibrationTarget;
-        state.identity.metadata_complete = metadata_complete &&
-            gui::identityDescribesItself(state.identity, coordinate_required);
-        if (!state.follow_by_name && !state.identity.source_id.isEmpty()) state.bound_source_id = state.identity.source_id;
-        if (isInterruptionRequested()) return false;
-        if (!state.identity.metadata_complete) {
-            if (!selection_warning.isEmpty()) selection_warning += "; ";
-            selection_warning += "Some stream details were missing, so standard labels are in use";
-        }
-        state.identity.warning = selection_warning;
-        {
-            std::lock_guard<std::mutex> lock(inventory_mutex_);
-            inventory_.erase(std::remove_if(inventory_.begin(), inventory_.end(),
-                [&state](const gui::StreamIdentity& item) { return item.role == roleText(state.role); }),
-                inventory_.end());
-            inventory_.push_back(state.identity);
-        }
-        emit streamIdentityChanged(state.identity, selection_warning);
-        return true;
+        return openStream(state, streams[static_cast<std::size_t>(selection.index)],
+                          selection.should_warn ? selection.explanation : QString());
     } catch (const std::exception& ex) {
         state.inlet.reset();
         state.nominal_rate = 0.0;
-        state.have_sample = false;
-        state.last_sample_ms = -1;
-        state.latest_timestamp = 0.0;
-        state.rate_tracker.reset();
+        state.clearSample();
         state.last_error = QString::fromStdString(ex.what());
         return false;
     }
 }
 
+bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info& stream,
+                                     QString warning) {
+    auto inlet = std::make_unique<lsl::stream_inlet>(stream, 360, 0, true);
+    lsl::stream_info metadata = stream;
+    try { metadata = inlet->info(kMetadataTimeoutSeconds); } catch (const std::exception&) {}
+
+    bool metadata_complete = false;
+    state.labels = channelLabels(metadata, state.role, &metadata_complete);
+    state.coordinate_frame = gui::coordinateFrameOf(metadata).toStdString();
+    state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
+    state.nominal_rate = metadata.nominal_srate() > 0.0 && std::isfinite(metadata.nominal_srate()) ? metadata.nominal_srate() : 0.0;
+    state.inlet = std::move(inlet);
+    state.inlet->set_postprocessing(lsl::post_clocksync);
+    state.clearSample();
+    state.last_error.clear();
+    state.identity = gui::identityFromStreamInfo(metadata);
+    state.identity.role = roleText(state.role);
+    state.identity.nominal_rate = state.nominal_rate;
+    const bool coordinate_required = state.role == PreviewStreamRole::HoloLensGaze ||
+                                     state.role == PreviewStreamRole::HoloLensCalibrationTarget;
+    state.identity.metadata_complete = metadata_complete &&
+        gui::identityDescribesItself(state.identity, coordinate_required);
+    if (!state.follow_by_name && !state.identity.source_id.isEmpty()) state.bound_source_id = state.identity.source_id;
+    if (isInterruptionRequested()) return false;
+    if (!state.identity.metadata_complete) {
+        if (!warning.isEmpty()) warning += "; ";
+        warning += "Some stream details were missing, so standard labels are in use";
+    }
+    state.identity.warning = warning;
+    replaceInventory(state.role, {state.identity}, warning);
+    return true;
+}
+
 bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
     if (!state.inlet) return false;
-    bool updated = false;
+    int samples_in_pass = 0;
     try {
-        int samples_in_pass = 0;
         for (int pulls = 0; pulls < 16; ++pulls) {
             std::vector<double> sample(state.latest_sample.size());
             const double timestamp = state.inlet->pull_sample(sample, 0.0);
@@ -303,13 +288,11 @@ bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
             state.latest_sample = std::move(sample);
             state.latest_timestamp = timestamp;
             state.rate_tracker.addTimestamp(timestamp);
-            state.have_sample = true;
             state.last_sample_ms = now_ms;
-            updated = true;
             ++samples_in_pass;
         }
         if (samples_in_pass > 1) delivery_mailbox_.addCoalescedInputSamples(static_cast<unsigned long long>(samples_in_pass - 1));
-        if (updated) {
+        if (samples_in_pass > 0) {
             state.identity.freshness_ms = 0;
             state.identity.effective_rate = state.rate_tracker.hasFullWindow() ? state.rate_tracker.effectiveRateHz() : 0.0;
             std::lock_guard<std::mutex> lock(inventory_mutex_);
@@ -324,12 +307,26 @@ bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
     } catch (const std::exception& ex) {
         state.last_error = QString::fromStdString(ex.what());
         state.inlet.reset();
-        state.have_sample = false;
-        state.last_sample_ms = -1;
-        state.latest_timestamp = 0.0;
-        state.rate_tracker.reset();
+        state.clearSample();
     }
-    return updated;
+    return samples_in_pass > 0;
+}
+
+void PreviewStreamWorker::replaceInventory(PreviewStreamRole role,
+                                          QVector<gui::StreamIdentity> streams,
+                                          const QString& warning) {
+    {
+        std::lock_guard<std::mutex> lock(inventory_mutex_);
+        inventory_.erase(std::remove_if(inventory_.begin(), inventory_.end(),
+            [role](const gui::StreamIdentity& item) { return item.role == roleText(role); }),
+            inventory_.end());
+        for (gui::StreamIdentity stream : streams) {
+            stream.warning = warning;
+            inventory_.push_back(std::move(stream));
+        }
+    }
+    // Deliver signals after releasing the lock: receivers may read the inventory.
+    for (const auto& stream : streams) emit streamIdentityChanged(stream, warning);
 }
 
 void PreviewStreamWorker::publishLatestFrame(PreviewFrame frame) {
@@ -337,7 +334,7 @@ void PreviewStreamWorker::publishLatestFrame(PreviewFrame frame) {
 }
 
 bool PreviewStreamWorker::streamIsFresh(const StreamState& state, qint64 now_ms) const {
-    return state.have_sample && state.last_sample_ms >= 0 && now_ms - state.last_sample_ms <= kStaleSampleMs;
+    return state.hasSample() && now_ms - state.last_sample_ms <= kStaleSampleMs;
 }
 
 bool PreviewStreamWorker::calibrationFramesCompatible() const {
@@ -356,7 +353,7 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
         for (const StreamState* state : states) {
             for (gui::StreamIdentity& identity : inventory_) {
                 if (identity.stableKey() != state->identity.stableKey()) continue;
-                identity.freshness_ms = state->have_sample && state->last_sample_ms >= 0
+                identity.freshness_ms = state->hasSample()
                     ? (std::max)(qint64{0}, now_ms - state->last_sample_ms) : -1;
                 identity.effective_rate = state->rate_tracker.hasFullWindow() ? state->rate_tracker.effectiveRateHz() : 0.0;
                 identity.warning = state->identity.warning;
@@ -383,7 +380,7 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
 QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 now_ms) const {
     QString status;
     if (!state.connected()) status = state.requested_name + ": resolving";
-    else if (!state.have_sample) status = state.requested_name + ": connected";
+    else if (!state.hasSample()) status = state.requested_name + ": connected";
     else if (!streamIsFresh(state, now_ms)) {
         status = state.requested_name + ": not recently updated (" +
                  QString::number(static_cast<double>(now_ms - state.last_sample_ms) / 1000.0, 'f', 1) + "s)";

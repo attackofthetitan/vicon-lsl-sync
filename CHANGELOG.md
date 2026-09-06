@@ -4,6 +4,33 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+## [1.13.7] - 2026-09-06
+
+### Fixed
+
+- Close a connection that finishes opening after the bridge receives Stop.
+- Wait between repeated first-frame failures while allowing one immediate retry.
+
+### Changed
+
+- Simplified bridge connection and cleanup, shared marker and segment output
+  setup, and removed unused mapping and UI helpers.
+- Shared preview channel lookup and stream schema creation while preserving
+  channel order, units, invalid values, and label selection rules.
+- Replaced overlapping recorder command state with one optional active command.
+- Consolidated live preview sample resets and inventory updates, and separated
+  source selection from stream setup.
+- Added regression coverage for shutdown, partial stream creation, layout
+  changes, parser edge cases, and commands started from completion callbacks.
+
+### Compatibility
+
+- No stream format, saved configuration, or command-line change. Roll back to
+  `v1.13.6`.
+- Local Windows build and all six runtime/GUI suites passed. The standalone
+  logic suite passed all 72 tests; HoloLens checks passed all 19 tests.
+- Physical Vicon, HoloLens, and Vuforia checks were not run.
+
 ## [1.13.6] - 2026-09-06
 
 ### Fixed

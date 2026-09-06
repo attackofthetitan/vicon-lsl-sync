@@ -8,6 +8,45 @@
 
 namespace labrecorder_client_tests {
 
+void testCompletionCanStartNextCommand() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "completion callback server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&] { return client.isConnected() && server.hasPendingConnections(); }),
+           "completion callback client connects");
+    std::unique_ptr<QTcpSocket> socket(server.nextPendingConnection());
+    if (!socket) return;
+
+    QStringList completed;
+    QObject::connect(&client, &LabRecorderClient::commandFinished,
+                     [&](const QString& operation, bool ok, const QString&) {
+        expect(ok, "chained operation succeeds");
+        completed.push_back(operation);
+        if (operation == "refresh streams") {
+            expect(client.stopRecording(), "completion callback can start the next operation");
+        }
+    });
+    expect(client.refreshStreams(), "refresh starts");
+    expect(readCommand(socket.get()) == "update", "refresh command is sent");
+    expect(writeReply(socket.get(), "OK"), "refresh is acknowledged");
+    expect(readCommand(socket.get()) == "stop", "callback queues exactly the next command");
+    expect(client.operationState() == RecorderOperationState::Stopping,
+           "finished refresh does not clear the new stop operation");
+    expect(writeReply(socket.get(), "OK"), "stop is acknowledged");
+    expect(waitUntil([&] { return completed.size() == 2; }), "both operations complete");
+    expect(client.recordingState() == RecorderRecordingState::Stopped &&
+           client.operationState() == RecorderOperationState::Idle,
+           "completed stop leaves no active command");
+
+    expect(client.sendCommand("start"), "generic command remains supported");
+    expect(readCommand(socket.get()) == "start", "generic command is forwarded");
+    expect(writeReply(socket.get(), "OK"), "generic command is acknowledged");
+    expect(waitUntil([&] { return completed.size() == 3; }), "generic command completes");
+    expect(client.recordingState() == RecorderRecordingState::Stopped,
+           "generic command text does not imply a recording state transition");
+}
+
 void testTcpCommandSequence() {
     QTcpServer server;
     expect(server.listen(QHostAddress::LocalHost, 0), "fake LabRecorder server listens");

@@ -200,15 +200,15 @@ void testInitialFrameFailureReconnectsWithoutDelay() {
     auto outlets = std::make_shared<OutletState>();
     auto stop_on_wait = std::make_shared<StopOnWait>();
 
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [stop_on_wait](std::chrono::milliseconds duration) {
+    vicon_lsl::bridge_internal::Dependencies dependencies;
+    dependencies.client = client;
+    dependencies.outlet_factory = outletFactory(outlets);
+    dependencies.clock = [] { return 200.0; };
+    dependencies.wait = [stop_on_wait](std::chrono::milliseconds duration) {
         (*stop_on_wait)(duration);
     };
     auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
+        testConfig(), std::move(dependencies));
     stop_on_wait->bridge = bridge.get();
 
     client->on_get_frame = [client](int call) {
@@ -240,15 +240,15 @@ void testRepeatedInitialFrameFailuresBackOff() {
     auto outlets = std::make_shared<OutletState>();
     auto stop_on_wait = std::make_shared<StopOnWait>();
 
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [stop_on_wait](std::chrono::milliseconds duration) {
+    vicon_lsl::bridge_internal::Dependencies dependencies;
+    dependencies.client = client;
+    dependencies.outlet_factory = outletFactory(outlets);
+    dependencies.clock = [] { return 200.0; };
+    dependencies.wait = [stop_on_wait](std::chrono::milliseconds duration) {
         (*stop_on_wait)(duration);
     };
     auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
+        testConfig(), std::move(dependencies));
     stop_on_wait->bridge = bridge.get();
 
     bridge->run();
@@ -278,15 +278,15 @@ void testOutletFailureResetsAStreamingSession() {
     auto stop_on_wait = std::make_shared<StopOnWait>();
     std::vector<BridgeStatus> statuses;
 
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [stop_on_wait](std::chrono::milliseconds duration) {
+    vicon_lsl::bridge_internal::Dependencies dependencies;
+    dependencies.client = client;
+    dependencies.outlet_factory = outletFactory(outlets);
+    dependencies.clock = [] { return 200.0; };
+    dependencies.wait = [stop_on_wait](std::chrono::milliseconds duration) {
         (*stop_on_wait)(duration);
     };
     auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
+        testConfig(), std::move(dependencies));
     stop_on_wait->bridge = bridge.get();
     bridge->setStatusCallback([&statuses](const BridgeStatus& status) {
         statuses.push_back(status);
@@ -330,13 +330,13 @@ void testStopDuringFrameReadStillCleansUp() {
     client->lifecycle_events = lifecycle_events;
     outlets->lifecycle_events = lifecycle_events;
 
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [](std::chrono::milliseconds) {};
+    vicon_lsl::bridge_internal::Dependencies dependencies;
+    dependencies.client = client;
+    dependencies.outlet_factory = outletFactory(outlets);
+    dependencies.clock = [] { return 200.0; };
+    dependencies.wait = [](std::chrono::milliseconds) {};
     auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
+        testConfig(), std::move(dependencies));
     client->on_get_frame = [raw_bridge = bridge.get()](int call) {
         if (call == 2) {
             raw_bridge->stop();
@@ -361,13 +361,13 @@ void testStopDuringConnectionSkipsRetryAndFrameWork() {
     auto outlets = std::make_shared<OutletState>();
     int waits = 0;
 
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [&waits](std::chrono::milliseconds) { ++waits; };
+    vicon_lsl::bridge_internal::Dependencies dependencies;
+    dependencies.client = client;
+    dependencies.outlet_factory = outletFactory(outlets);
+    dependencies.clock = [] { return 200.0; };
+    dependencies.wait = [&waits](std::chrono::milliseconds) { ++waits; };
     auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
+        testConfig(), std::move(dependencies));
     client->on_connect = [raw_bridge = bridge.get()]() { raw_bridge->stop(); };
     bridge->run();
 
@@ -377,6 +377,72 @@ void testStopDuringConnectionSkipsRetryAndFrameWork() {
            "stop during connection prevents a new reconnect wait");
     expect(outlets->created == 0,
            "stop during connection creates no LSL outlets");
+}
+
+void testStopDuringSuccessfulConnectionDisconnects() {
+    auto client = std::make_shared<FakeViconClient>();
+    auto outlets = std::make_shared<OutletState>();
+    int waits = 0;
+    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
+        testConfig(), {client, outletFactory(outlets), [] { return 200.0; },
+                       [&waits](std::chrono::milliseconds) { ++waits; }});
+    client->on_connect = [&bridge] { bridge->stop(); };
+
+    bridge->run();
+
+    expect(client->disconnect_calls == 1 && !client->isConnected(),
+           "a connection completed during stop is closed before run returns");
+    expect(client->get_frame_calls == 0 && outlets->created == 0 && waits == 0,
+           "stop during a successful connection skips frames, outlets, and retries");
+}
+
+void testInitializationFailureClosesPartialStreams() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 1;
+    client->expose_marker = true;
+    client->expose_segment = true;
+    auto events = std::make_shared<std::vector<std::string>>();
+    client->lifecycle_events = events;
+    auto outlets = std::make_shared<OutletState>();
+    outlets->lifecycle_events = events;
+    StreamOutletFactory factory = [outlets](const lsl::stream_info& info) {
+        if (++outlets->created == 2) throw std::runtime_error("initialization failed");
+        return std::make_unique<FakeOutlet>(outlets, info.name());
+    };
+    ViconLSLBridge* running_bridge = nullptr;
+    int waits = 0;
+    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
+        testConfig(), {client, factory, [] { return 200.0; },
+                       [&](std::chrono::milliseconds) { ++waits; running_bridge->stop(); }});
+    running_bridge = bridge.get();
+
+    bridge->run();
+
+    expect(*events == std::vector<std::string>({"markers-outlet-destroyed", "client-disconnected"}),
+           "failed segment initialization closes the marker outlet before disconnecting");
+    expect(waits == 1 && outlets->pushed == 0,
+           "initialization failure waits before retrying and sends no samples");
+}
+
+void testLayoutChangeReplacesStreams() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 102;
+    client->expose_marker = true;
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
+        testConfig(), {client, outletFactory(outlets), [] { return 200.0; },
+                       [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 101) client->expose_segment = true;
+        if (call == 102) bridge->stop();
+    };
+
+    bridge->run();
+
+    expect(outlets->created == 3 && outlets->pushed == 102,
+           "layout change replaces the marker stream and adds a working segment stream");
+    expect(client->connect_calls == 1 && client->disconnect_calls == 1,
+           "layout replacement keeps the Vicon connection until stop");
 }
 
 void testStopDuringNonCancellableSdkDelayKeepsCallerResponsive() {
@@ -394,13 +460,13 @@ void testStopDuringNonCancellableSdkDelayKeepsCallerResponsive() {
         condition.wait(lock, [&release]() { return release; });
     };
 
-    vicon_lsl::bridge_internal::Collaborators collaborators;
-    collaborators.client = client;
-    collaborators.outlet_factory = outletFactory(outlets);
-    collaborators.clock = [] { return 200.0; };
-    collaborators.wait = [](std::chrono::milliseconds) {};
+    vicon_lsl::bridge_internal::Dependencies dependencies;
+    dependencies.client = client;
+    dependencies.outlet_factory = outletFactory(outlets);
+    dependencies.clock = [] { return 200.0; };
+    dependencies.wait = [](std::chrono::milliseconds) {};
     auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
-        testConfig(), std::move(collaborators));
+        testConfig(), std::move(dependencies));
     std::thread worker([&bridge]() { bridge->run(); });
     {
         std::unique_lock<std::mutex> lock(mutex);
@@ -430,6 +496,9 @@ int main() {
     testOutletFailureResetsAStreamingSession();
     testStopDuringFrameReadStillCleansUp();
     testStopDuringConnectionSkipsRetryAndFrameWork();
+    testStopDuringSuccessfulConnectionDisconnects();
+    testInitializationFailureClosesPartialStreams();
+    testLayoutChangeReplacesStreams();
     testStopDuringNonCancellableSdkDelayKeepsCallerResponsive();
     if (failures != 0) {
         std::cerr << failures << " test failure(s)" << std::endl;

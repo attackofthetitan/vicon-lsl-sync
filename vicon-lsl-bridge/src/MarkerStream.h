@@ -1,10 +1,9 @@
 #pragma once
 
 #include "ViconFrameTypes.h"
-#include "detail/ViconNumericOutlet.h"
+#include "detail/ViconOutlet.h"
 
 #include <lsl_cpp.h>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,11 +18,11 @@ public:
                     double nominal_rate = lsl::IRREGULAR_RATE);
     void destroy();
 
-    // Converts status-bearing reads to fixed-shape LSL samples at the outlet boundary.
+    // Sends X, Y, Z and validity for each marker; unavailable positions become NaN.
     StreamPushResult pushSample(const std::vector<vicon_lsl::MarkerTranslationRead>& markers,
                                 double timestamp);
     bool isInitialized() const;
 
 private:
-    vicon_lsl::detail::ViconNumericOutlet outlet_;
+    vicon_lsl::detail::ViconOutlet outlet_;
 };
