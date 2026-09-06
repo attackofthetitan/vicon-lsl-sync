@@ -137,6 +137,7 @@ jobs:
           key: vcpkg-root-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-v1
           restore-keys: |
             vcpkg-root-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-
+            vcpkg-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-
 
       - name: Bootstrap pinned vcpkg (Windows)
         if: runner.os == 'Windows'
