@@ -4,6 +4,105 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+### Fixed
+
+- HoloLens gaze reached LSL again, and the app stopped crashing a few seconds
+  after start. `TryGetReadingAfterSystemRelativeTime` is how each publishing step
+  drains readings forward, and it is called once more than there are readings, to
+  learn that there are none left. This device's projection of the SDK marshals
+  that empty result without checking it, so the ordinary end of a drain arrived as
+  a `NullReferenceException` thrown inside the SDK and left an object whose
+  finalizer threw again on the GC thread. At the publishing rate that was about
+  a hundred of each per second.
+- That exception was thrown from acquisition, which runs at the top of
+  `TryGetNextSample` before any queued sample is dequeued, so it also stranded
+  every gaze sample that had already been captured and converted. The stream
+  advertised itself and published nothing. Acquisition failures no longer withhold
+  a sample that is ready; the failure is reported once the queue is empty, so
+  persistent failures still re-enumerate the tracker.
+
+### Fixed
+
+- A reading's age is judged again on the SDK's own wall-clock timestamp against
+  the clock read to fetch it, rather than by comparing its `SystemRelativeTime`
+  tick count with `Stopwatch.GetTimestamp()`. The tick rate behind that value is
+  not established for this runtime, and on the device the comparison rejected
+  every reading the tracker offered: 2077 asked for, 2077 returned, 2077 refused
+  as too old, and so no reading ever entered the pipeline.
+
+- Draining is suspended for ten seconds after three failures in a row rather than
+  given up for the tracker session. Those failures happen while the tracker has
+  nothing newer to give, which is while it is not publishing, so a tracker that
+  started publishing later spent the rest of the session on the fallback: the
+  device measured 43 Hz against a nominal 90.
+
+### Added
+
+- The Unity log now counts every stage between the SDK and a sample waiting to be
+  published, and prints them beside any gaze delivery state other than publishing
+  valid gaze. A stream that publishes nothing looks the same from outside whether
+  acquisition, main-thread conversion, or delivery is the stage losing the
+  reading, and the counters say which.
+
+### Changed
+
+- The drain no longer asks for a reading that should not exist yet. It waits until
+  a frame period has passed since the last accepted capture, and stops after any
+  reading that is itself that current, so the empty result is not requested in the
+  ordinary case. The failure is still caught where it is raised, and three of them
+  in one tracker session abandon the drain: acquisition falls back to reading at
+  the current time, which takes at most one reading per step. A clean `null` is
+  ordinary and is not counted, so a correct runtime keeps the drain.
+- Gaze stream metadata in the behavior contract and the time semantics guide now
+  matches what the outlet emits, and the timestamp formula recorded there is the
+  one production uses. The documented conversion divided SDK ticks by
+  `Stopwatch.Frequency`; the code has taken the capture time from the query clock
+  pair less the age the SDK reports for the reading since before the drain landed.
+
+### Fixed
+
+- The gaze drain stopped asking the SDK, once per publishing step, for a reading
+  that could not exist yet. It waited a frame period after the last capture before
+  asking again, but a reading does not become available when it is captured: on
+  this device it arrives about 20 ms later, against an 11 ms frame period. So a
+  reading the drain had just taken was already older than a frame period, and
+  every step made one further ask that could only fail. Over one session that was
+  2428 failures against 2184 readings, each failure a thrown and leaked SDK object
+  whose finalizer throws again on the GC thread. The drain now waits out the
+  publication delay as well, measured as the freshest age any reading has been
+  offered at rather than assumed.
+- The drain's failure budget runs to the next suspension rather than to the next
+  reading. A drain that reads one reading and then fails never accumulates two
+  failures in a row, so forgiving the count on every reading kept a drain that was
+  failing on every step alive for a whole session: the counters above show eleven
+  suspensions against those 2428 failures, where the budget intends three per
+  suspension.
+- No duration on the gaze path is measured from `SystemRelativeTime` ticks any
+  more. The queue span budget and the delivered-rate estimate divided those ticks
+  by `Stopwatch.Frequency`, and the device has now shown that is not their rate:
+  in one session a reading read 0.020 s old on the SDK's own clock and -231.332 s
+  against `Stopwatch`, then 0.021 s and -233.588 s two seconds of wall time later.
+  An epoch offset would have held still. Across two sessions the gap is about
+  0.92 s of "future" per second the device had been up. The 500 ms queue budget
+  was therefore some other duration, and could fall below the 355 ms a full
+  32-reading batch spans -- collapsing the queue part-way through a batch the
+  drain had just recovered.
+
+### Changed
+
+- `SystemRelativeTime.Ticks` is now used only to order readings and to locate the
+  tracker pose, where the SDK defines the unit on both sides. Every duration is
+  taken on the LSL clock, which each reading already carries as its capture time.
+  `GazeTiming` no longer exposes a tick rate or a tick-to-seconds conversion.
+- A queue span a hair below zero no longer clears the queue. Capture times come
+  from two wall clocks read a moment apart, so consecutive batches can land
+  slightly out of order; a tracker session that could restart the clock outright
+  already clears both queues itself. A span that cannot be judged at all is still
+  treated as over budget.
+- The acquisition counter line drops the device-timer age and its frequency, which
+  compared clocks now known to be unrelated, and reports the measured publication
+  delay instead.
+
 ## [1.13.7] - 2026-09-06
 
 ### Fixed

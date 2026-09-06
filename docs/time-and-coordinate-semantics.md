@@ -13,8 +13,8 @@ Changing a formula or metadata value here is a behavior change. Review it separa
 | LSL local clock | The steady timer returned by `lsl::local_clock()` or `LSL.LSL.local_clock()` on the computer or device that sends the stream |
 | Vicon receipt time | The desktop LSL clock read just after a successful `GetFrame()` |
 | Vicon pipeline delay | `GetLatencyTotal().Total`; Vicon's estimate of processing delay, not network delay or an exact hardware capture time |
-| HoloLens system-relative time | `SystemRelativeTime.Ticks` from the gaze reading, treated here as the device's high-resolution Windows timer count, called QPC |
-| Device QPC rate | `System.Diagnostics.Stopwatch.Frequency` on the HoloLens |
+| HoloLens system-relative time | `SystemRelativeTime.Ticks` from the gaze reading, treated here as an opaque monotonic count whose rate is not established for this runtime |
+| Gaze publication delay | How long after capturing a reading the eye-tracking SDK will part with it, measured as the freshest age any reading has been offered at |
 | Corrected live time | A live input timestamp after LSL corrects the clock difference between computers |
 | XDF stream time | The time written by the source before the recorder's saved clock correction |
 | XDF recorder time | Stream time plus the fitted clock correction saved in XDF |
@@ -77,15 +77,28 @@ Keep the code, emitted LSL metadata, and documentation in agreement.
 
 ### Convert the device time
 
-This project treats `EyeGazeTrackerReading.SystemRelativeTime.Ticks` as the raw count from the Windows high-resolution timer, QPC, even though the SDK exposes it through a `TimeSpan` value.
+`EyeGazeTrackerReading.SystemRelativeTime.Ticks` is an opaque monotonic count.
+Its rate is not established for this runtime, so it is never converted to a
+duration. It has exactly two uses:
 
-The conversion is:
+- ordering readings against each other, and standing as the drain cursor;
+- the argument `SpatialGraphNode.TryLocate` expects, where the SDK defines the
+  unit on both sides.
 
-`lsl_timestamp_seconds = system_relative_ticks / Stopwatch.Frequency`
+Every duration on the gaze path -- the queue span budget, the delivered-rate
+estimate, the publication delay, a reading's age -- is taken in the LSL clock
+domain instead, which every reading already carries as `GazeSample.Timestamp`.
+Do not divide those ticks by `Stopwatch.Frequency`, and do not use
+`TimeSpan.TicksPerSecond`.
 
-Do not use `TimeSpan.TicksPerSecond`. Do not replace the capture time with Unity frame time, wall-clock time, or `LSL.local_clock()` at the time of retrieval.
+The published capture time is not derived from them. Each acquisition reads
+`DateTime.Now` and `LSL.local_clock()` once as a pair, and every reading it takes
+keeps its own time from the age the SDK reports for it:
 
-The production code and device-independent checks both read the SDK count directly in the device's `Stopwatch.Frequency` time base. There is no second rate conversion.
+`lsl_timestamp_seconds = query_lsl_clock - (query_time - reading.Timestamp)`
+
+Do not replace that with Unity frame time, or with `LSL.local_clock()` read at the
+moment the sample is published.
 
 ### Ask for a current reading
 
@@ -99,16 +112,82 @@ Instead each step drains forward from the last accepted capture time:
 
 `TryGetReadingAfterSystemRelativeTime(TimeSpan.FromTicks(last_accepted_ticks))`
 
-The step repeats until the SDK returns no newer reading, or until it has taken 32
+The step repeats until the SDK has no newer reading, or until it has taken 32
 readings. Capture rate is then independent of how punctually the step runs.
 
-The first step of a tracker session has no cursor, so it seeds one from
-`TryGetReadingAtTimestamp(now)`. That seed reading is the only one judged on age:
+On this device the SDK cannot report "no newer reading". Its projection marshals
+that empty result without checking it, so the ordinary end of a drain arrives as a
+`NullReferenceException` thrown inside the SDK, and leaves behind an object whose
+finalizer throws again on the GC thread. One of those per publishing step crashes
+the app within seconds. So the drain never asks for a reading that should not
+exist yet:
 
-- `capture_ticks > 0`.
-- `query_ticks > 0`.
-- It is no more than 50 ms old.
-- If its time is slightly ahead, it is no more than 1 ms ahead.
+- It does not ask at all until a frame period **plus the publication delay** has
+  passed since the last accepted capture time.
+- It stops after any reading that brings the cursor back to the newest reading the
+  tracker has published, because the step has then caught up.
+
+Both tests are made on capture times in LSL seconds. The publication delay is the
+term the frame period alone got wrong. A reading does not become available at the
+instant it is captured: on this device it arrives about 20 ms later, against an
+11 ms frame period. So a reading the drain had just taken was always older than a
+frame period already, and the test permitted one further ask on every step -- the
+ask that cannot be answered. Measured over a session, that was 2428 failures
+against 2184 readings: one thrown, leaked SDK object per drain step.
+
+The delay is measured, not assumed: it is the freshest age any reading has been
+offered at in this tracker session. A minimum, because a reading recovered by a
+drain that is catching up is arbitrarily old and says nothing about how quickly
+the tracker parts with a new one. Until a reading has been seen it is zero, which
+only makes the drain ask as eagerly as it did before the delay was measured.
+
+The tests remove the request in the ordinary case but cannot remove it while the
+tracker is publishing slower than its nominal rate, so the failure is also caught
+where it is raised and counted. Three since the drain last resumed suspend it for
+ten seconds, and acquisition reads at the current time meanwhile, taking at most
+one reading per step.
+
+The suspension is not permanent, and that matters. Empty results happen exactly
+while the tracker has nothing newer to give, which is while it is not publishing;
+a tracker that starts publishing a minute later would otherwise spend the whole
+session on a fallback that cannot keep up with it.
+
+The budget runs to the next suspension, not to the next reading. A drain that
+reads one reading and then fails never accumulates two failures in a row, so
+counting consecutively kept a drain that was failing on every step alive for a
+whole session: thousands of leaked objects against eleven suspensions. A clean
+`null` return is ordinary and never counted, so a runtime whose projection is
+correct keeps the drain throughout.
+
+The first step of a tracker session has no cursor, so it seeds one from
+`TryGetReadingAtTimestamp(now)`. That reading is the only one judged on age, and
+the age is `query_time - reading.Timestamp`: both wall-clock values the SDK
+reports, so no assumption about the device timer enters into it.
+
+- The age is finite.
+- Its size is no more than 50 ms, in either direction. The tolerance is symmetric
+  because the reading returned for "now" can be captured a frame either side of
+  the query.
+
+Do not take that age by comparing `SystemRelativeTime.Ticks` against
+`Stopwatch.GetTimestamp()`. The two do not share an epoch, and the device has now
+shown they do not share a rate either:
+
+- A reading whose own timestamp said it was 0.022 s old measured -7862.129 s
+  against the device timer, about 2.2 hours in the future. A build that made that
+  comparison rejected every reading the tracker offered, on a device that was
+  offering one to every single call.
+- In a later session the same reading pair read 0.020 s and -231.332 s, and two
+  seconds of wall time later, 0.021 s and -233.588 s. A fixed epoch offset would
+  have held still.
+- Across both sessions the offset is about 0.92 s of "future" per second the
+  device had been up, which is what a rate mismatch produces and an epoch offset
+  does not.
+
+Differences between two `SystemRelativeTime` values still order readings
+correctly. They are not durations, because turning one into seconds needs the
+rate. So the queue span budget and the delivered-rate estimate are measured on
+LSL capture times instead.
 
 Once a cursor exists, a reading being old means the step is catching up, not that
 the tracker has stalled, so age is not a reason to drop it.
@@ -122,12 +201,15 @@ The raw queue and the world-space queue each allow at most 360 items and at most
 A drained batch is several readings wide, so the span budget has to stay above a
 full batch or the queue policy would discard exactly the readings draining
 recovers. At 90 Hz a full 32-reading batch already spans 355 ms; the budget
-exists only to bound staleness after a real stall.
+exists only to bound staleness after a real stall. Both numbers are in seconds on
+the LSL clock, so the comparison means what it reads as -- a budget derived from
+`Stopwatch.Frequency` and compared against SDK ticks was some other duration
+entirely, and could fall below one batch.
 
 When adding an item:
 
 1. Remove oldest items while the queue already has 360 items.
-2. If the new item makes the time span negative or greater than 500 ms, clear the queue.
+2. If the new item makes the time span greater than 500 ms, or leaves it unusable, clear the queue. A span a hair below zero is ordinary jitter between the two wall clocks behind a capture time and is within budget; a tracker session that could restart the clock outright clears both queues itself.
 3. Add the new item.
 
 Before sending a world-space sample, reduce an over-limit queue to its newest item.
@@ -154,16 +236,17 @@ paces the worker only and does not change the rate declared on the stream.
 
 The gaze stream uses:
 
-- `timestamp = sdk_system_relative_time`
+- `timestamp = eye_gaze_tracker_timestamp`
 - `timestamp_units = seconds`
-- `timestamp_conversion = system_relative_qpc_ticks_divided_by_runtime_qpc_frequency`
-- `timestamp_tick_frequency_hz = Stopwatch.Frequency`, written without locale-specific formatting
-- `capture_clock_domain = windows_qpc_system_relative`
+- `timestamp_conversion = lsl_query_time_minus_sdk_timestamp_age`
+- `capture_clock_domain = eye_gaze_tracker_datetime`
 - `clock_domain = lsl_local_clock`
-- `synchronization/timestamp_origin = eye_gaze_tracker_system_relative_time`
-- `timestamp_mapping = direct_qpc_ticks_to_lsl_local_clock_seconds`
+- `reading_retrieval = sequential_drain_after_last_capture`
+- `synchronization/timestamp_origin = eye_gaze_tracker_reading_timestamp`
+- `timestamp_mapping = query_lsl_clock_minus_query_to_capture_age`
+- `backlog_policy = drop_when_capture_span_exceeds_500ms_retain_latest`
 
-This assumes that the Windows steady timer used by liblsl is backed by the same QPC time base. Repeat the hardware checks after changing Windows runtime, Unity, OpenXR, or liblsl versions.
+This assumes the SDK's reading timestamp and `LSL.local_clock()` on the device stay in step across the pairing. Repeat the hardware checks after changing Windows runtime, Unity, OpenXR, or liblsl versions.
 
 ## HoloLens target timestamps
 

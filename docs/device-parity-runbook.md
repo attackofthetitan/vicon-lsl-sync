@@ -62,7 +62,8 @@ Create one record for each run. Fill every field.
 | Desktop liblsl revision | |
 | LabRecorder revision and liblsl revision | |
 | Vicon server, software, and SDK version | |
-| `Stopwatch.Frequency` shown on the device | |
+| Gaze publication delay shown on the device | |
+| Gaze delivery state, counters, and any drain-fallback warning from the device log | |
 | Gaze stream name, type, and source ID | |
 | Target stream name, type, and source ID | |
 | Vicon marker and segment stream names | |
@@ -158,7 +159,7 @@ Save the full LSL description for every available stream and compare it with
 - [ ] There are exactly 21 values in generated-file order.
 - [ ] Labels and units exactly match `stream-contracts/hololens-gaze.json`.
 - [ ] `coordinate_frame` is `hololens_stationary_shared_with_gaze`.
-- [ ] Capture time, device timer rate, clock, and queue-limit details match the guide.
+- [ ] Capture time, clock domain, publication delay, and queue-limit details match the guide.
 
 ### Target
 
@@ -217,7 +218,7 @@ treating a fallback as complete.
   source is deliberately allowed to become stale.
 - Skipped older input, display replacements, and maximum displayed preview
   latency during the same interval.
-- Device `Stopwatch.Frequency` and examples that divide raw reading counts by that value, when logging is available.
+- The gaze publication delay reported in the acquisition counters, and the drain's failed-inside-the-SDK count beside its reading count. A failure count close to the reading count means the drain is asking once per step for a reading that cannot exist yet.
 
 Do not invent a new allowed drop rate during code cleanup. Compare with the known-good build under the same conditions and report any clear difference.
 
@@ -523,7 +524,21 @@ Stop the review when one of these items is missing or disputed:
 - The real Unity scene, prefab wiring, or saved-asset owner. This repository does not store the whole scene.
 - An approved measured Vicon pose for the stair target. The current value is the best fixed estimate, not a universal measurement.
 - An approved device drop-rate limit beyond the current preview warning below 80% of the expected rate. This repository does not define a release-grade maximum drop rate.
-- Proof that `SystemRelativeTime.Ticks` is still a raw QPC count for the exact device runtime and SDK version.
+- What `SystemRelativeTime.Ticks` may be compared against, and at what rate those
+  ticks run. Device evidence now says the rate is not `Stopwatch.Frequency`, which
+  the earlier reading of this item had assumed:
+  - A reading whose own timestamp said it was 0.022 s old measured -7862.129 s
+    against `Stopwatch.GetTimestamp()`, about 2.2 hours in the future.
+  - In a later session the pair read 0.020 s and -231.332 s, and two seconds of
+    wall time later, 0.021 s and -233.588 s. An epoch offset would have held still.
+  - Across both sessions the gap is about 0.92 s of "future" per second the device
+    had been up: a rate mismatch, not an epoch offset.
+
+  The code no longer depends on the answer. Those ticks now only order readings
+  and locate the tracker pose, and every duration on the gaze path is taken on the
+  LSL clock. So this item is no longer blocking, but it is still open: the actual
+  rate is unmeasured, and nothing should start assuming one. Record it, do not
+  quietly rewrite the rule.
 - Expected LabRecorder behavior when a HoloLens or Vicon stream returns with the same source ID in the included LabRecorder revision.
 - A saved `eye_tracker_space` file for old-data checks.
 

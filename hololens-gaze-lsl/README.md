@@ -48,9 +48,9 @@ This keeps the gaze ray in the same stationary world as the optional Vuforia mod
 
 ## How timestamps are handled
 
-Each eye-tracking reading includes `SystemRelativeTime`. On this device path, that value is a count from the Windows high-resolution timer, also called QPC. The app divides the count by `Stopwatch.Frequency` to convert it to seconds.
+Each eye-tracking reading includes `SystemRelativeTime`. The app treats that value as an opaque monotonic count: it orders readings against each other and locates the device pose at the moment of capture, and it is never turned into a duration. The rate behind it is not the fixed .NET `TimeSpan` rate, and it is not `Stopwatch.Frequency` either -- on this device the same reading read 0.020 s old on the SDK's own clock and 231 s in the future against `Stopwatch`, with the gap widening as the session ran.
 
-It does not use the fixed .NET `TimeSpan` rate. It also does not replace capture time with the time when Unity happened to read the sample.
+So every duration on the gaze path is measured on the LSL clock, which each reading already carries as its capture time. The app does not replace capture time with the time when Unity happened to read the sample.
 
 Each step walks forward from the last accepted capture time, taking up to 32 readings, rather than asking for the reading at the current time. Asking for the reading at "now" returns one reading per call, so a poll that lands late loses every frame in between.
 
@@ -60,9 +60,13 @@ The app drops a reading when its timestamp is:
 - A duplicate of the last reading.
 - Earlier than the last reading.
 
-Age is judged only on the reading that seeds the cursor at the start of a tracker session, which must be no more than 50 ms old. Once a cursor exists, an old reading means the step is catching up rather than that the tracker stalled.
+Age is judged only on a reading fetched for the current time, which must be no more than 50 ms old. Once a cursor exists, an old reading means the step is catching up rather than that the tracker stalled.
 
-The raw and converted queues may hold a normal small batch. If either queue spans more than 500 ms, the app drops the older queued readings and keeps only the newest sample. This creates a time gap instead of sending delayed gaze after the matching Vicon motion. The budget stays above one full drained batch, which spans 355 ms at 90 Hz, so the queue does not discard the readings draining just recovered.
+The SDK on this device cannot report that it has no newer reading: its projection of that empty result throws inside the SDK instead of returning nothing, and leaves an object whose finalizer throws again, which crashes the app within seconds if it happens on every step. So the app asks for a newer reading only when one can exist, which is once a frame period has passed since the last capture *and* the tracker has had time to part with it, and stops draining as soon as the cursor reaches the newest published reading. That second term matters: readings arrive about 20 ms after capture against an 11 ms frame period, so without it every step made one further ask that could not be answered. The delay is measured as the freshest age any reading has been offered at, not assumed. If the SDK still fails that way three times since the drain last resumed, the app suspends draining for ten seconds and reads at the current time meanwhile, which takes at most one reading per step and may not keep up with the tracker. The suspension is temporary on purpose: empty results happen while the tracker has nothing newer to give, which is while it is not publishing, and a tracker that starts publishing later would otherwise spend the rest of the session on a fallback that cannot keep up. The first suspension is logged; the count is in the acquisition counters.
+
+A read that fails inside the SDK never withholds gaze that is already converted and waiting. The queued sample is published, and the failure is reported once the queue is empty.
+
+The raw and converted queues may hold a normal small batch. If either queue spans more than 500 ms, the app drops the older queued readings and keeps only the newest sample. This creates a time gap instead of sending delayed gaze after the matching Vicon motion. Both numbers are seconds on the LSL clock, so the budget stays above one full drained batch, which spans 355 ms at 90 Hz, and the queue does not discard the readings draining just recovered.
 
 LSL and LabRecorder still handle clock differences between the HoloLens and the recording computer.
 
