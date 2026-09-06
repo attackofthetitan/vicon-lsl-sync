@@ -60,7 +60,7 @@ jobs:
         run: ${{ runner.os == 'macOS' && 'python3' || 'python' }} tools/generate_stream_contracts.py --check
 
       - name: Configure dependency-light tests
-        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON ${{ runner.os == 'Windows' && '-DCMAKE_CXX_FLAGS="/MP" -DCMAKE_C_FLAGS="/MP"' || '' }}
+        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
 
       - name: Build dependency-light tests
         run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests --parallel
@@ -165,7 +165,7 @@ jobs:
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF -DCMAKE_CXX_FLAGS="/MP" -DCMAKE_C_FLAGS="/MP"
+        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
         shell: cmd
 
@@ -179,7 +179,7 @@ jobs:
 
       # Build LabRecorder
       - name: Configure LabRecorder
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a ${{ runner.os == 'Windows' && '-DCMAKE_CXX_FLAGS="/MP" -DCMAKE_C_FLAGS="/MP"' || '' }}
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a
 
 
       - name: Build LabRecorder
