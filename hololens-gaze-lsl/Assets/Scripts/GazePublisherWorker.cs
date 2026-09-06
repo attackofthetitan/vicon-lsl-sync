@@ -75,6 +75,7 @@ namespace GazeLSL
         private Exception providerFailure;
         private Exception lastProviderException;
         private int running;
+        private int deliveryState = (int)GazeDeliveryState.WaitingForProviderSample;
         private int pushedSampleCount;
         private int pushedValidGazeSampleCount;
         private int rejectedTimestampCount;
@@ -99,29 +100,13 @@ namespace GazeLSL
         public Exception ProviderFailure => Volatile.Read(ref providerFailure);
         public Exception Failure => Volatile.Read(ref failure);
 
-        public GazeDeliverySnapshot DeliverySnapshot
-        {
-            get
-            {
-                int pushed = Volatile.Read(ref pushedSampleCount);
-                int pushedValid = Volatile.Read(ref pushedValidGazeSampleCount);
-                int rejected = Volatile.Read(ref rejectedTimestampCount);
-                GazeDeliveryState state = pushedValid > 0
-                    ? GazeDeliveryState.PublishingValidGaze
-                    : pushed > 0
-                        ? GazeDeliveryState.PublishingSamplesWithoutValidRays
-                        : rejected > 0
-                            ? GazeDeliveryState.RejectingInvalidTimestamp
-                            : GazeDeliveryState.WaitingForProviderSample;
-                return new GazeDeliverySnapshot(
-                    state,
-                    Volatile.Read(ref providerCallCount),
-                    Volatile.Read(ref providerEmptyCount),
-                    rejected,
-                    pushed,
-                    pushedValid);
-            }
-        }
+        public GazeDeliverySnapshot DeliverySnapshot => new GazeDeliverySnapshot(
+            (GazeDeliveryState)Volatile.Read(ref deliveryState),
+            Volatile.Read(ref providerCallCount),
+            Volatile.Read(ref providerEmptyCount),
+            Volatile.Read(ref rejectedTimestampCount),
+            Volatile.Read(ref pushedSampleCount),
+            Volatile.Read(ref pushedValidGazeSampleCount));
 
         public void Start()
         {
@@ -220,6 +205,7 @@ namespace GazeLSL
 
                     GazeSample sample;
                     bool hasSample;
+                    bool providerThrew = false;
                     try
                     {
                         Interlocked.Increment(ref providerCallCount);
@@ -228,6 +214,7 @@ namespace GazeLSL
                     }
                     catch (Exception e)
                     {
+                        providerThrew = true;
                         Volatile.Write(ref lastProviderException, e);
                         Interlocked.Increment(ref providerExceptionCount);
                         consecutiveProviderFailures++;
@@ -256,15 +243,30 @@ namespace GazeLSL
                             if (sample.CombinedValid || sample.LeftEyeValid || sample.RightEyeValid)
                             {
                                 Interlocked.Increment(ref pushedValidGazeSampleCount);
+                                Volatile.Write(
+                                    ref deliveryState,
+                                    (int)GazeDeliveryState.PublishingValidGaze);
+                            }
+                            else
+                            {
+                                Volatile.Write(
+                                    ref deliveryState,
+                                    (int)GazeDeliveryState.PublishingSamplesWithoutValidRays);
                             }
                         }
                         else
                         {
                             Interlocked.Increment(ref rejectedTimestampCount);
+                            Volatile.Write(
+                                ref deliveryState,
+                                (int)GazeDeliveryState.RejectingInvalidTimestamp);
                         }
                     }
-                    else
+                    else if (!providerThrew)
                     {
+                        // Oversampling intentionally produces empty polls between tracker
+                        // frames. Count them, but do not overwrite the last real delivery
+                        // classification once a provider sample has been observed.
                         Interlocked.Increment(ref providerEmptyCount);
                     }
 
