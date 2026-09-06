@@ -165,9 +165,9 @@ namespace GazeLSL
                 $"{acquisition.LocateFailures} locate failures, " +
                 $"{acquisition.ReadingsDroppedByGeneration} dropped as stale session, " +
                 $"{acquisition.PendingSamples} waiting to publish. Last reading " +
-                $"offered was {acquisition.LastReadingAgeSeconds:F3} s old on the " +
-                $"SDK clock and {acquisition.LastReadingTimerAgeSeconds:F3} s old " +
-                $"on the device timer at {acquisition.TimerFrequencyHz} Hz.");
+                $"offered was {acquisition.LastReadingAgeSeconds:F3} s old, and the " +
+                $"tracker parts with a reading {acquisition.PublicationLatencySeconds:F3} s " +
+                $"after capturing it.");
         }
 
         // Never restarts the outlet: the declared rate is fixed in the stream header,

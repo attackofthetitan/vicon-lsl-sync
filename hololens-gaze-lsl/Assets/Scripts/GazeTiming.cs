@@ -1,22 +1,26 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 
 namespace GazeLSL
 {
-    // The Extended Eye Tracking SDK exposes SystemRelativeTime as a TimeSpan,
-    // but its Ticks value is the system-relative QPC count used to locate the
-    // tracker pose. QPC frequency is device-dependent, so never assume the
-    // TimeSpan 10 MHz tick rate when converting these values to seconds.
+    // The Extended Eye Tracking SDK exposes SystemRelativeTime as a TimeSpan, but
+    // its Ticks value is a system-relative count whose rate this runtime does not
+    // publish. Measured on a HoloLens 2, it runs at neither the TimeSpan 10 MHz
+    // tick rate nor the rate of any timer available here: a reading offered 0.020 s
+    // ago on the SDK's own clock read 231 s in the future against Stopwatch, and
+    // the gap grew by seconds over seconds of wall time, so the two domains differ
+    // in rate as well as epoch.
+    //
+    // So those ticks are never converted to a duration. They are an opaque cursor
+    // for ordering readings and the argument SpatialGraphNode.TryLocate expects,
+    // and nothing else. Every duration here is taken in the LSL clock domain,
+    // which every reading already carries as GazeSample.Timestamp.
     internal static class GazeTiming
     {
-        public static readonly long SystemRelativeTicksPerSecond = Stopwatch.Frequency;
-
         // Must stay above a full drain batch: 32 readings at 90 Hz span 355 ms, and
         // a tighter budget would collapse the queue part-way through a batch,
         // discarding the readings the drain just recovered.
-        public static readonly long MaxBacklogSpanTicks =
-            (long)Math.Round(Stopwatch.Frequency * 0.500, MidpointRounding.AwayFromZero);
+        public const double MaxBacklogSpanSeconds = 0.500;
 
         // Only a reading fetched for "now" is judged on age; later ones are reached
         // by walking the cursor forward rather than by asking for the current time.
@@ -24,16 +28,6 @@ namespace GazeLSL
 
         // Ceiling on work done under the tracker lock in one acquisition call.
         public const int MaxReadingsPerAcquire = 32;
-
-        public static long CurrentSystemRelativeTimeTicks()
-        {
-            return Stopwatch.GetTimestamp();
-        }
-
-        public static double SystemRelativeTicksToLslTimestamp(long systemRelativeTimeTicks)
-        {
-            return systemRelativeTimeTicks / (double)Stopwatch.Frequency;
-        }
 
         // Judged as the SDK's own reading timestamp against the wall clock read to
         // fetch it: one domain, and the only one here whose unit is established.
@@ -85,19 +79,23 @@ namespace GazeLSL
 
     // The rate that arrived, measured from capture timestamps. A throttled tracker
     // keeps reporting its configured rate, so only this shows a short recording.
+    //
+    // Fed the LSL capture time rather than the SDK tick count: a rate is a duration,
+    // and dividing those ticks by a frequency this runtime never agreed to scaled
+    // every measurement here by an unknown factor.
     internal sealed class GazeRateEstimator
     {
         // One second at 90 Hz.
         public const int WindowSize = 90;
         private const int MinimumSamples = 16;
 
-        private readonly long[] captureTicks = new long[WindowSize];
+        private readonly double[] captureTimes = new double[WindowSize];
         private int count;
         private int next;
 
-        public void Add(long systemRelativeTimeTicks)
+        public void Add(double captureLslTime)
         {
-            captureTicks[next] = systemRelativeTimeTicks;
+            captureTimes[next] = captureLslTime;
             next = (next + 1) % WindowSize;
             if (count < WindowSize)
             {
@@ -113,16 +111,15 @@ namespace GazeLSL
                 return false;
             }
 
-            long newest = captureTicks[(next - 1 + WindowSize) % WindowSize];
-            long oldest = captureTicks[(next - count + WindowSize) % WindowSize];
-            long spanTicks = newest - oldest;
-            if (spanTicks <= 0L)
+            double newest = captureTimes[(next - 1 + WindowSize) % WindowSize];
+            double oldest = captureTimes[(next - count + WindowSize) % WindowSize];
+            double spanSeconds = newest - oldest;
+            if (!(spanSeconds > 0.0))
             {
                 return false;
             }
 
-            samplesPerSecond =
-                (count - 1) * (double)GazeTiming.SystemRelativeTicksPerSecond / spanTicks;
+            samplesPerSecond = (count - 1) / spanSeconds;
             return true;
         }
 
@@ -137,20 +134,19 @@ namespace GazeLSL
                 return false;
             }
 
-            long minTicks = long.MaxValue;
-            long maxTicks = long.MinValue;
+            double minSeconds = double.MaxValue;
+            double maxSeconds = double.MinValue;
             int start = (next - count + WindowSize) % WindowSize;
             for (int i = 1; i < count; i++)
             {
-                long delta = captureTicks[(start + i) % WindowSize] -
-                             captureTicks[(start + i - 1) % WindowSize];
-                if (delta < minTicks) minTicks = delta;
-                if (delta > maxTicks) maxTicks = delta;
+                double delta = captureTimes[(start + i) % WindowSize] -
+                               captureTimes[(start + i - 1) % WindowSize];
+                if (delta < minSeconds) minSeconds = delta;
+                if (delta > maxSeconds) maxSeconds = delta;
             }
 
-            double ticksPerMillisecond = GazeTiming.SystemRelativeTicksPerSecond / 1000.0;
-            minMilliseconds = minTicks / ticksPerMillisecond;
-            maxMilliseconds = maxTicks / ticksPerMillisecond;
+            minMilliseconds = minSeconds * 1000.0;
+            maxMilliseconds = maxSeconds * 1000.0;
             return true;
         }
 
@@ -167,8 +163,8 @@ namespace GazeLSL
     // but a NullReferenceException thrown inside the SDK's own projection, which
     // also leaves behind an object whose finalizer throws again. A few of those
     // in a session are survivable; one per publishing step is not. So this decides
-    // when asking is worth anything, and when the drain has to be given up for the
-    // session in favour of reading at the current time.
+    // when asking is worth anything, and when the drain has to be put down for a
+    // while in favour of reading at the current time.
     internal sealed class GazeDrainPolicy
     {
         // Deliberately small. Each failure leaks a broken SDK object, so the drain
@@ -181,12 +177,21 @@ namespace GazeLSL
         // the fallback.
         public const double SuspensionSeconds = 10.0;
 
-        private int consecutiveFailedEmptyResults;
+        private int failedEmptyResultsSinceResume;
         private int suspensions;
         private double resumeTimeSeconds;
         private bool suspended;
+        private double minimumReadingAgeSeconds = double.PositiveInfinity;
 
         public int Suspensions => suspensions;
+
+        // How long after a capture the SDK will part with the reading. Zero until
+        // a reading has been seen, which only makes the drain ask as eagerly as it
+        // did before this was measured.
+        public double PublicationLatencySeconds =>
+            double.IsPositiveInfinity(minimumReadingAgeSeconds)
+                ? 0.0
+                : minimumReadingAgeSeconds;
 
         // Empty results are expected while the tracker has nothing newer to give,
         // which is exactly when it is not publishing. Suspending for that is right,
@@ -202,26 +207,50 @@ namespace GazeLSL
             if (double.IsNaN(nowSeconds) || nowSeconds >= resumeTimeSeconds)
             {
                 suspended = false;
-                consecutiveFailedEmptyResults = 0;
+                failedEmptyResultsSinceResume = 0;
                 return false;
             }
 
             return true;
         }
 
-        public void NoteReading()
+        // The freshest a reading has ever been offered is the floor of the delay
+        // between capture and availability. Taken as a minimum because a reading
+        // recovered by a drain that is catching up is arbitrarily old, and that
+        // says nothing about how quickly the tracker parts with a new one.
+        public void NoteReadingAge(double ageSeconds)
         {
-            consecutiveFailedEmptyResults = 0;
+            if (double.IsNaN(ageSeconds) || double.IsInfinity(ageSeconds))
+            {
+                return;
+            }
+
+            // A reading can be offered a hair ahead of the query; that is clock
+            // jitter between the two wall clocks, not a negative delay.
+            double age = ageSeconds > 0.0 ? ageSeconds : 0.0;
+            if (age < minimumReadingAgeSeconds)
+            {
+                minimumReadingAgeSeconds = age;
+            }
         }
 
-        // No reading can exist until a frame period has passed since the last one
-        // was captured, so asking before then only buys an empty result. This is
-        // also the drain's stop rule: once the newest accepted reading is current,
-        // the step has caught up and must not ask for one more.
+        // No reading can be had until a frame period has passed since the last one
+        // was captured AND the tracker has parted with it, so asking before then
+        // only buys an empty result. This is also the drain's stop rule: once the
+        // newest accepted reading is the current one, the step has caught up and
+        // must not ask for one more.
+        //
+        // The publication delay is what the frame period alone got wrong. Readings
+        // arrive about 20 ms after capture on this device against an 11 ms frame
+        // period, so a reading the drain has just taken always looked old enough to
+        // justify one more ask -- the ask that cannot be answered, and that on this
+        // runtime throws and leaks rather than returning null. Counted over a
+        // session that was one failure per drain step.
         public static bool CouldHaveNewerReading(
             double queryTimeSeconds,
             double lastCaptureTimeSeconds,
-            double framePeriodSeconds)
+            double framePeriodSeconds,
+            double publicationLatencySeconds)
         {
             if (!(framePeriodSeconds > 0.0))
             {
@@ -236,11 +265,25 @@ namespace GazeLSL
                 return true;
             }
 
-            return elapsedSeconds >= framePeriodSeconds;
+            // An unusable delay leaves the frame period on its own, which asks too
+            // eagerly rather than not at all.
+            double latencySeconds =
+                publicationLatencySeconds > 0.0 &&
+                !double.IsPositiveInfinity(publicationLatencySeconds)
+                    ? publicationLatencySeconds
+                    : 0.0;
+
+            return elapsedSeconds >= framePeriodSeconds + latencySeconds;
         }
 
         // Only the failing kind of empty result is counted; a clean null return is
         // ordinary and costs nothing. Returns true on the failure that suspends.
+        //
+        // Counted since the drain last resumed rather than consecutively. A run
+        // that reads one reading and then fails never accumulates two failures in
+        // a row, so forgiving the count on every reading kept a drain failing once
+        // per step alive for a whole session -- thousands of leaked objects, where
+        // this budget costs three per suspension.
         public bool NoteFailedEmptyResult(double nowSeconds)
         {
             if (suspended)
@@ -248,8 +291,8 @@ namespace GazeLSL
                 return false;
             }
 
-            consecutiveFailedEmptyResults++;
-            if (consecutiveFailedEmptyResults < FailedEmptyResultsBeforeSuspend)
+            failedEmptyResultsSinceResume++;
+            if (failedEmptyResultsSinceResume < FailedEmptyResultsBeforeSuspend)
             {
                 return false;
             }
@@ -264,10 +307,11 @@ namespace GazeLSL
 
         public void Reset()
         {
-            consecutiveFailedEmptyResults = 0;
+            failedEmptyResultsSinceResume = 0;
             suspensions = 0;
             resumeTimeSeconds = 0.0;
             suspended = false;
+            minimumReadingAgeSeconds = double.PositiveInfinity;
         }
     }
 
@@ -279,9 +323,9 @@ namespace GazeLSL
         public static void Enqueue<T>(
             Queue<T> queue,
             T item,
-            Func<T, long> timestampSelector,
+            Func<T, double> timestampSelector,
             int maximumCount,
-            long maximumSpanTicks)
+            double maximumSpanSeconds)
         {
             if (queue == null) throw new ArgumentNullException(nameof(queue));
             if (timestampSelector == null)
@@ -289,9 +333,9 @@ namespace GazeLSL
                 throw new ArgumentNullException(nameof(timestampSelector));
             }
             if (maximumCount <= 0) throw new ArgumentOutOfRangeException(nameof(maximumCount));
-            if (maximumSpanTicks < 0L)
+            if (!(maximumSpanSeconds >= 0.0))
             {
-                throw new ArgumentOutOfRangeException(nameof(maximumSpanTicks));
+                throw new ArgumentOutOfRangeException(nameof(maximumSpanSeconds));
             }
 
             while (queue.Count >= maximumCount)
@@ -300,7 +344,7 @@ namespace GazeLSL
             }
 
             if (queue.Count > 0 &&
-                SpanExceedsLimit(queue, item, timestampSelector, maximumSpanTicks))
+                SpanExceedsLimit(queue, item, timestampSelector, maximumSpanSeconds))
             {
                 queue.Clear();
             }
@@ -310,17 +354,17 @@ namespace GazeLSL
 
         public static bool CollapseIfOverSpan<T>(
             Queue<T> queue,
-            Func<T, long> timestampSelector,
-            long maximumSpanTicks)
+            Func<T, double> timestampSelector,
+            double maximumSpanSeconds)
         {
             if (queue == null) throw new ArgumentNullException(nameof(queue));
             if (timestampSelector == null)
             {
                 throw new ArgumentNullException(nameof(timestampSelector));
             }
-            if (maximumSpanTicks < 0L)
+            if (!(maximumSpanSeconds >= 0.0))
             {
-                throw new ArgumentOutOfRangeException(nameof(maximumSpanTicks));
+                throw new ArgumentOutOfRangeException(nameof(maximumSpanSeconds));
             }
             if (queue.Count < 2)
             {
@@ -333,7 +377,7 @@ namespace GazeLSL
                 newest = item;
             }
 
-            if (!SpanExceedsLimit(queue, newest, timestampSelector, maximumSpanTicks))
+            if (!SpanExceedsLimit(queue, newest, timestampSelector, maximumSpanSeconds))
             {
                 return false;
             }
@@ -343,16 +387,21 @@ namespace GazeLSL
             return true;
         }
 
+        // Written as a rejected "within budget" so an unusable span collapses the
+        // queue: one stale batch is the cost of dropping it, an unbounded backlog
+        // the cost of keeping it. A span a hair below zero is ordinary jitter
+        // between the two wall clocks behind a capture time and is within budget;
+        // a tracker session that could restart the clock outright clears both
+        // queues itself.
         private static bool SpanExceedsLimit<T>(
             Queue<T> queue,
             T newest,
-            Func<T, long> timestampSelector,
-            long maximumSpanTicks)
+            Func<T, double> timestampSelector,
+            double maximumSpanSeconds)
         {
-            long oldestTicks = timestampSelector(queue.Peek());
-            long newestTicks = timestampSelector(newest);
-            long span = newestTicks - oldestTicks;
-            return span < 0L || span > maximumSpanTicks;
+            double oldestSeconds = timestampSelector(queue.Peek());
+            double newestSeconds = timestampSelector(newest);
+            return !(newestSeconds - oldestSeconds <= maximumSpanSeconds);
         }
     }
 }

@@ -25,18 +25,24 @@ So every report of a state other than `PublishingValidGaze` is followed by a
 second line counting all three:
 
 - Reading at the current time: asked, empty, too old. This is how a session starts
-  and how it acquires once the drain has been abandoned.
+  and how it acquires while the drain is suspended.
 - Drain: asked, read, empty, failed inside the SDK, skipped as too soon, whether
   it is currently suspended, and how many times it has been.
 - Accepted, not newer than the last accepted reading, and waiting to convert.
 - Conversion: passes, converted, locate failures, dropped as a stale tracker
   session, and waiting to publish.
-- The age of the last reading the SDK offered, measured twice: on the SDK's own
-  wall clock, and on the device timer against the reading's tick count, with that
-  timer's frequency. Only the first decides anything. The second is there because
-  a reading captured moments ago and one captured minutes ago are the same
-  rejection from outside, and the two ages disagreeing says the device timer is
-  not the clock behind `SystemRelativeTime`.
+- The age of the last reading the SDK offered, on the SDK's own wall clock. A
+  reading captured moments ago and one captured minutes ago are the same rejection
+  from outside.
+- The publication delay: how long after capturing a reading the tracker parts with
+  it, as the freshest age any reading has been offered at this session. The drain
+  waits this out on top of a frame period before asking again, so a delay that
+  reads as zero for a long time is why a drain would be failing on every step.
+
+The device timer no longer appears in this line. It was there to test whether
+`Stopwatch` is the clock behind `SystemRelativeTime`; it is not, in rate as well
+as epoch, and nothing on the gaze path measures a duration from those ticks any
+more.
 
 Read them as a chain. Nothing accepted means the SDK is not handing over readings.
 Readings accepted with nothing converted means the Unity main thread is not

@@ -59,6 +59,50 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
   `Stopwatch.Frequency`; the code has taken the capture time from the query clock
   pair less the age the SDK reports for the reading since before the drain landed.
 
+### Fixed
+
+- The gaze drain stopped asking the SDK, once per publishing step, for a reading
+  that could not exist yet. It waited a frame period after the last capture before
+  asking again, but a reading does not become available when it is captured: on
+  this device it arrives about 20 ms later, against an 11 ms frame period. So a
+  reading the drain had just taken was already older than a frame period, and
+  every step made one further ask that could only fail. Over one session that was
+  2428 failures against 2184 readings, each failure a thrown and leaked SDK object
+  whose finalizer throws again on the GC thread. The drain now waits out the
+  publication delay as well, measured as the freshest age any reading has been
+  offered at rather than assumed.
+- The drain's failure budget runs to the next suspension rather than to the next
+  reading. A drain that reads one reading and then fails never accumulates two
+  failures in a row, so forgiving the count on every reading kept a drain that was
+  failing on every step alive for a whole session: the counters above show eleven
+  suspensions against those 2428 failures, where the budget intends three per
+  suspension.
+- No duration on the gaze path is measured from `SystemRelativeTime` ticks any
+  more. The queue span budget and the delivered-rate estimate divided those ticks
+  by `Stopwatch.Frequency`, and the device has now shown that is not their rate:
+  in one session a reading read 0.020 s old on the SDK's own clock and -231.332 s
+  against `Stopwatch`, then 0.021 s and -233.588 s two seconds of wall time later.
+  An epoch offset would have held still. Across two sessions the gap is about
+  0.92 s of "future" per second the device had been up. The 500 ms queue budget
+  was therefore some other duration, and could fall below the 355 ms a full
+  32-reading batch spans -- collapsing the queue part-way through a batch the
+  drain had just recovered.
+
+### Changed
+
+- `SystemRelativeTime.Ticks` is now used only to order readings and to locate the
+  tracker pose, where the SDK defines the unit on both sides. Every duration is
+  taken on the LSL clock, which each reading already carries as its capture time.
+  `GazeTiming` no longer exposes a tick rate or a tick-to-seconds conversion.
+- A queue span a hair below zero no longer clears the queue. Capture times come
+  from two wall clocks read a moment apart, so consecutive batches can land
+  slightly out of order; a tracker session that could restart the clock outright
+  already clears both queues itself. A span that cannot be judged at all is still
+  treated as over budget.
+- The acquisition counter line drops the device-timer age and its frequency, which
+  compared clocks now known to be unrelated, and reports the measured publication
+  delay instead.
+
 ## [1.13.7] - 2026-09-06
 
 ### Fixed

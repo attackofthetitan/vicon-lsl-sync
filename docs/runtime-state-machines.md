@@ -578,9 +578,9 @@ Four counters and guards keep old work out of a new session:
 
 At each publishing step:
 
-1. `TryGetNextSample` drains every reading published since the last accepted capture time, up to 32 per step, while holding the tracker guard. It does not ask before a frame period has passed since that capture, and stops once a reading is itself that current. With no cursor yet, or once the drain has been abandoned, it takes the reading at the current time instead.
+1. `TryGetNextSample` drains every reading published since the last accepted capture time, up to 32 per step, while holding the tracker guard. It does not ask before a frame period plus the measured publication delay has passed since that capture, and stops once a reading brings the cursor back to the newest one the tracker has published. With no cursor yet, or while the drain is suspended, it takes the reading at the current time instead.
 2. Reject a missing, duplicate, out-of-order, or invalid capture time. Reject a reading fetched for the current time if it is old; a drained reading being old only means the step is catching up.
-3. A read that fails inside the SDK does not withhold samples already converted and waiting. Deliver the queued sample and report the failure only once the queue is empty, so recovery still counts persistent failures. Three failures of the SDK's empty result in one tracker session abandon the drain for that session.
+3. A read that fails inside the SDK does not withhold samples already converted and waiting. Deliver the queued sample and report the failure only once the queue is empty, so recovery still counts persistent failures. Three failures of the SDK's empty result since the drain last resumed suspend it for ten seconds; a reading does not forgive them.
 4. Copy the combined ray and any available left and right rays in tracker space.
 5. Add the raw reading under the 500 ms time-span and 360-item limits.
 6. Unity `Update` handles at most 32 raw readings. For each one, find the device pose at the original time, convert the rays, and add a `GazeSample` to the next queue.
