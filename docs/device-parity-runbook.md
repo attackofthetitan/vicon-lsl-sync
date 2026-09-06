@@ -63,6 +63,7 @@ Create one record for each run. Fill every field.
 | LabRecorder revision and liblsl revision | |
 | Vicon server, software, and SDK version | |
 | `Stopwatch.Frequency` shown on the device | |
+| Gaze delivery state, counters, and any drain-fallback warning from the device log | |
 | Gaze stream name, type, and source ID | |
 | Target stream name, type, and source ID | |
 | Vicon marker and segment stream names | |

@@ -4,6 +4,38 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 
 ## [Unreleased]
 
+### Fixed
+
+- HoloLens gaze reached LSL again, and the app stopped crashing a few seconds
+  after start. `TryGetReadingAfterSystemRelativeTime` is how each publishing step
+  drains readings forward, and it is called once more than there are readings, to
+  learn that there are none left. This device's projection of the SDK marshals
+  that empty result without checking it, so the ordinary end of a drain arrived as
+  a `NullReferenceException` thrown inside the SDK and left an object whose
+  finalizer threw again on the GC thread. At the publishing rate that was about
+  a hundred of each per second.
+- That exception was thrown from acquisition, which runs at the top of
+  `TryGetNextSample` before any queued sample is dequeued, so it also stranded
+  every gaze sample that had already been captured and converted. The stream
+  advertised itself and published nothing. Acquisition failures no longer withhold
+  a sample that is ready; the failure is reported once the queue is empty, so
+  persistent failures still re-enumerate the tracker.
+
+### Changed
+
+- The drain no longer asks for a reading that should not exist yet. It waits until
+  a frame period has passed since the last accepted capture, and stops after any
+  reading that is itself that current, so the empty result is not requested in the
+  ordinary case. The failure is still caught where it is raised, and three of them
+  in one tracker session abandon the drain: acquisition falls back to reading at
+  the current time, which takes at most one reading per step. A clean `null` is
+  ordinary and is not counted, so a correct runtime keeps the drain.
+- Gaze stream metadata in the behavior contract and the time semantics guide now
+  matches what the outlet emits, and the timestamp formula recorded there is the
+  one production uses. The documented conversion divided SDK ticks by
+  `Stopwatch.Frequency`; the code has taken the capture time from the query clock
+  pair less the age the SDK reports for the reading since before the drain landed.
+
 ## [1.13.7] - 2026-09-06
 
 ### Fixed

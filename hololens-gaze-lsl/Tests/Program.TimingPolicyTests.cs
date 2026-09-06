@@ -80,6 +80,67 @@ internal static partial class Program
         Equal(0L, gate.LastTimestampTicks);
     }
 
+    private static void GazeDrainAsksOnlyWhenAReadingCouldExist()
+    {
+        double framePeriod = 1.0 / 90.0;
+
+        // A punctual step lands between tracker frames. Asking then costs a failed
+        // SDK read on the device and returns nothing, so it must not ask at all.
+        False(
+            GazeDrainPolicy.CouldHaveNewerReading(1000.005, 1000.0, framePeriod),
+            "A step inside one frame of the last capture should not ask.");
+        // Not tested exactly at the boundary: capture times are LSL clock values
+        // large enough that adding a frame period and subtracting it again lands a
+        // hair either side. A step that misses by that much simply asks on the
+        // next one, about 9 ms later.
+        True(
+            GazeDrainPolicy.CouldHaveNewerReading(
+                1000.0 + framePeriod * 1.01, 1000.0, framePeriod),
+            "A step a full frame after the last capture should ask.");
+        True(
+            GazeDrainPolicy.CouldHaveNewerReading(1000.5, 1000.0, framePeriod),
+            "A late step should ask, and keep asking while it catches up.");
+
+        // Nothing usable to reason from must not stall acquisition.
+        True(
+            GazeDrainPolicy.CouldHaveNewerReading(1000.005, 1000.0, 0.0),
+            "An unknown frame period should not block the drain.");
+        True(
+            GazeDrainPolicy.CouldHaveNewerReading(double.NaN, 1000.0, framePeriod),
+            "An unusable query time should not block the drain.");
+    }
+
+    private static void GazeDrainIsAbandonedAfterTheSdkFailsToReportEmpty()
+    {
+        var policy = new GazeDrainPolicy();
+        False(policy.HasAbandonedDrain, "A fresh policy should still use the drain.");
+
+        for (int i = 1; i < GazeDrainPolicy.FailedEmptyResultsBeforeFallback; i++)
+        {
+            False(
+                policy.NoteFailedEmptyResult(),
+                "The drain should survive the first few SDK failures.");
+            False(policy.HasAbandonedDrain, "The drain should not be abandoned yet.");
+        }
+
+        True(
+            policy.NoteFailedEmptyResult(),
+            "The failure that reaches the limit should abandon the drain.");
+        True(policy.HasAbandonedDrain, "The drain should be abandoned.");
+        Equal(GazeDrainPolicy.FailedEmptyResultsBeforeFallback, policy.FailedEmptyResults);
+
+        // Each failure leaks a broken SDK object, so the count must not be
+        // forgiven and the decision must be announced only once.
+        False(
+            policy.NoteFailedEmptyResult(),
+            "An abandoned drain should not report itself abandoned again.");
+        Equal(GazeDrainPolicy.FailedEmptyResultsBeforeFallback, policy.FailedEmptyResults);
+
+        policy.Reset();
+        False(policy.HasAbandonedDrain, "A new tracker session should try the drain again.");
+        Equal(0, policy.FailedEmptyResults);
+    }
+
     private static void GazeRateEstimatorMeasuresDeliveredRate()
     {
         long frequency = GazeTiming.SystemRelativeTicksPerSecond;

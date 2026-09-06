@@ -60,7 +60,11 @@ The app drops a reading when its timestamp is:
 - A duplicate of the last reading.
 - Earlier than the last reading.
 
-Age is judged only on the reading that seeds the cursor at the start of a tracker session, which must be no more than 50 ms old. Once a cursor exists, an old reading means the step is catching up rather than that the tracker stalled.
+Age is judged only on a reading fetched for the current time, which must be no more than 50 ms old. Once a cursor exists, an old reading means the step is catching up rather than that the tracker stalled.
+
+The SDK on this device cannot report that it has no newer reading: its projection of that empty result throws inside the SDK instead of returning nothing, and leaves an object whose finalizer throws again, which crashes the app within seconds if it happens on every step. So the app asks for a newer reading only when one should exist, which is once a frame period has passed since the last capture, and stops draining as soon as a reading is that current. If the SDK still fails that way three times in one tracker session, the app gives up draining for that session and reads at the current time instead, which takes at most one reading per step and may not keep up with the tracker. A warning names that when it happens.
+
+A read that fails inside the SDK never withholds gaze that is already converted and waiting. The queued sample is published, and the failure is reported once the queue is empty.
 
 The raw and converted queues may hold a normal small batch. If either queue spans more than 500 ms, the app drops the older queued readings and keeps only the newest sample. This creates a time gap instead of sending delayed gaze after the matching Vicon motion. The budget stays above one full drained batch, which spans 355 ms at 90 Hz, so the queue does not discard the readings draining just recovered.
 

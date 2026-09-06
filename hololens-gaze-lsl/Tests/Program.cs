@@ -13,6 +13,8 @@ internal static partial class Program
             GazeTimingRejectsStaleAndInvalidCaptures,
             GazeReadingGateRejectsDuplicateAndRegression,
             GazeReadingGateExposesDrainCursor,
+            GazeDrainAsksOnlyWhenAReadingCouldExist,
+            GazeDrainIsAbandonedAfterTheSdkFailsToReportEmpty,
             GazeRateEstimatorMeasuresDeliveredRate,
             GazeRateEstimatorSeparatesSlowTrackerFromLostReadings,
             GazeBacklogDropsStaleSamples,

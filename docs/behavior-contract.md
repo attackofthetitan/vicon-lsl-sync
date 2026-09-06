@@ -167,9 +167,10 @@ The gaze stream includes these values:
 - `sdk = Microsoft.MixedReality.EyeTracking`
 - `acquisition_mode = extended_eye_tracking_<selected>hz`, from the frame rate the tracker reported for the mode it accepted
 - `reading_retrieval = sequential_drain_after_last_capture`
-- `timestamp = sdk_system_relative_time`
+- `timestamp = eye_gaze_tracker_timestamp`
 - `timestamp_units = seconds`
-- `capture_clock_domain = windows_qpc_system_relative`
+- `timestamp_conversion = lsl_query_time_minus_sdk_timestamp_age`
+- `capture_clock_domain = eye_gaze_tracker_datetime`
 - `clock_domain = lsl_local_clock`
 - `coordinate_frame = hololens_stationary_shared_with_gaze`
 - `coordinate_units = meters`

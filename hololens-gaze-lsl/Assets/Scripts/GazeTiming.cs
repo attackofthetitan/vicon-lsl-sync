@@ -168,6 +168,80 @@ namespace GazeLSL
         }
     }
 
+    // The SDK call that walks the reading cursor forward offers no cheap way to
+    // ask whether another reading exists: a drain finds out by reaching an empty
+    // result. On this HoloLens 2 runtime that empty result is not a null return
+    // but a NullReferenceException thrown inside the SDK's own projection, which
+    // also leaves behind an object whose finalizer throws again. A few of those
+    // in a session are survivable; one per publishing step is not. So this decides
+    // when asking is worth anything, and when the drain has to be given up for the
+    // session in favour of reading at the current time.
+    internal sealed class GazeDrainPolicy
+    {
+        // Deliberately small. Each failure leaks a broken SDK object, so the drain
+        // must be judged unusable well before those accumulate.
+        public const int FailedEmptyResultsBeforeFallback = 3;
+
+        private int failedEmptyResults;
+        private bool abandoned;
+
+        public bool HasAbandonedDrain => abandoned;
+
+        public int FailedEmptyResults => failedEmptyResults;
+
+        // No reading can exist until a frame period has passed since the last one
+        // was captured, so asking before then only buys an empty result. This is
+        // also the drain's stop rule: once the newest accepted reading is current,
+        // the step has caught up and must not ask for one more.
+        public static bool CouldHaveNewerReading(
+            double queryTimeSeconds,
+            double lastCaptureTimeSeconds,
+            double framePeriodSeconds)
+        {
+            if (!(framePeriodSeconds > 0.0))
+            {
+                return true;
+            }
+
+            double elapsedSeconds = queryTimeSeconds - lastCaptureTimeSeconds;
+            if (double.IsNaN(elapsedSeconds))
+            {
+                // An unusable capture time says nothing either way, so ask rather
+                // than stall acquisition on it.
+                return true;
+            }
+
+            return elapsedSeconds >= framePeriodSeconds;
+        }
+
+        // Only the failing kind of empty result is counted; a clean null return is
+        // ordinary and costs nothing. A later success does not forgive one either,
+        // because the cost is carried by each failure and not by a run of them.
+        // Returns true on the failure that abandons the drain.
+        public bool NoteFailedEmptyResult()
+        {
+            if (abandoned)
+            {
+                return false;
+            }
+
+            failedEmptyResults++;
+            if (failedEmptyResults < FailedEmptyResultsBeforeFallback)
+            {
+                return false;
+            }
+
+            abandoned = true;
+            return true;
+        }
+
+        public void Reset()
+        {
+            failedEmptyResults = 0;
+            abandoned = false;
+        }
+    }
+
     // A queue may contain a normal small batch, but it must never retain a
     // batch whose capture-time span exceeds the freshness budget.  The newest
     // item is retained so a delayed consumer resumes at the current pose.

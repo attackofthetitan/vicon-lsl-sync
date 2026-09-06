@@ -79,13 +79,18 @@ Keep the code, emitted LSL metadata, and documentation in agreement.
 
 This project treats `EyeGazeTrackerReading.SystemRelativeTime.Ticks` as the raw count from the Windows high-resolution timer, QPC, even though the SDK exposes it through a `TimeSpan` value.
 
-The conversion is:
+Those ticks locate the tracker pose, order readings against each other, judge the
+age of a reading fetched for "now", and measure the delivered rate. Read them in
+the device's `Stopwatch.Frequency` time base. Do not use `TimeSpan.TicksPerSecond`.
 
-`lsl_timestamp_seconds = system_relative_ticks / Stopwatch.Frequency`
+The published capture time is not derived from them. Each acquisition reads
+`DateTime.Now` and `LSL.local_clock()` once as a pair, and every reading it takes
+keeps its own time from the age the SDK reports for it:
 
-Do not use `TimeSpan.TicksPerSecond`. Do not replace the capture time with Unity frame time, wall-clock time, or `LSL.local_clock()` at the time of retrieval.
+`lsl_timestamp_seconds = query_lsl_clock - (query_time - reading.Timestamp)`
 
-The production code and device-independent checks both read the SDK count directly in the device's `Stopwatch.Frequency` time base. There is no second rate conversion.
+Do not replace that with Unity frame time, or with `LSL.local_clock()` read at the
+moment the sample is published.
 
 ### Ask for a current reading
 
@@ -99,8 +104,28 @@ Instead each step drains forward from the last accepted capture time:
 
 `TryGetReadingAfterSystemRelativeTime(TimeSpan.FromTicks(last_accepted_ticks))`
 
-The step repeats until the SDK returns no newer reading, or until it has taken 32
+The step repeats until the SDK has no newer reading, or until it has taken 32
 readings. Capture rate is then independent of how punctually the step runs.
+
+On this device the SDK cannot report "no newer reading". Its projection marshals
+that empty result without checking it, so the ordinary end of a drain arrives as a
+`NullReferenceException` thrown inside the SDK, and leaves behind an object whose
+finalizer throws again on the GC thread. One of those per publishing step crashes
+the app within seconds. So the drain never asks for a reading that should not
+exist yet:
+
+- It does not ask at all until a frame period has passed since the last accepted
+  capture time.
+- It stops after any reading that is itself within a frame period of the query,
+  because the step has then caught up.
+
+Both tests are made on capture times in LSL seconds. They remove the request in
+the ordinary case but cannot remove it while the tracker is publishing slower than
+its nominal rate, so the failure is also caught where it is raised, counted, and
+after three of them in one tracker session the drain is abandoned: acquisition
+falls back to `TryGetReadingAtTimestamp(now)` for the rest of that session and
+takes at most one reading per step. A clean `null` return is ordinary and is not
+counted, so a runtime whose projection is correct keeps the drain.
 
 The first step of a tracker session has no cursor, so it seeds one from
 `TryGetReadingAtTimestamp(now)`. That seed reading is the only one judged on age:
@@ -154,16 +179,17 @@ paces the worker only and does not change the rate declared on the stream.
 
 The gaze stream uses:
 
-- `timestamp = sdk_system_relative_time`
+- `timestamp = eye_gaze_tracker_timestamp`
 - `timestamp_units = seconds`
-- `timestamp_conversion = system_relative_qpc_ticks_divided_by_runtime_qpc_frequency`
-- `timestamp_tick_frequency_hz = Stopwatch.Frequency`, written without locale-specific formatting
-- `capture_clock_domain = windows_qpc_system_relative`
+- `timestamp_conversion = lsl_query_time_minus_sdk_timestamp_age`
+- `capture_clock_domain = eye_gaze_tracker_datetime`
 - `clock_domain = lsl_local_clock`
-- `synchronization/timestamp_origin = eye_gaze_tracker_system_relative_time`
-- `timestamp_mapping = direct_qpc_ticks_to_lsl_local_clock_seconds`
+- `reading_retrieval = sequential_drain_after_last_capture`
+- `synchronization/timestamp_origin = eye_gaze_tracker_reading_timestamp`
+- `timestamp_mapping = query_lsl_clock_minus_query_to_capture_age`
+- `backlog_policy = drop_when_capture_span_exceeds_500ms_retain_latest`
 
-This assumes that the Windows steady timer used by liblsl is backed by the same QPC time base. Repeat the hardware checks after changing Windows runtime, Unity, OpenXR, or liblsl versions.
+This assumes the SDK's reading timestamp and `LSL.local_clock()` on the device stay in step across the pairing. Repeat the hardware checks after changing Windows runtime, Unity, OpenXR, or liblsl versions.
 
 ## HoloLens target timestamps
 

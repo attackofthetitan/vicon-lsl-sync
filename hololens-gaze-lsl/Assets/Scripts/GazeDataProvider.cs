@@ -45,6 +45,7 @@ namespace GazeLSL
         private SpatialGraphNode trackerNode;
         private Transform mixedRealityPlayspace;
         private readonly GazeReadingGate readingGate = new GazeReadingGate();
+        private readonly GazeDrainPolicy drainPolicy = new GazeDrainPolicy();
         private readonly GazeRateEstimator rateEstimator = new GazeRateEstimator();
         private uint selectedFrameRate;
         private bool calibrationValid;
@@ -56,6 +57,7 @@ namespace GazeLSL
         private bool includeIndividualEyes;
         private bool restartInProgress;
         private int consecutiveLocateFailures;
+        private double lastAcceptedCaptureLslTime;
         private volatile bool destroyed;
 #endif
 
@@ -189,11 +191,25 @@ namespace GazeLSL
             sample = default(GazeSample);
 
 #if ENABLE_WINMD_SUPPORT
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo acquireFailure = null;
             lock (trackerGate)
             {
                 if (tracker != null && trackerNode != null)
                 {
-                    AcquireRawReadingLocked();
+                    try
+                    {
+                        AcquireRawReadingLocked();
+                    }
+                    catch (Exception e)
+                    {
+                        // Samples already converted on the main thread are still
+                        // good. Letting a failed read out from here would strand
+                        // them behind it, which is how a tracker that was capturing
+                        // normally ended up publishing nothing at all.
+                        acquireFailure =
+                            System.Runtime.ExceptionServices.ExceptionDispatchInfo
+                                .Capture(e);
+                    }
                 }
 
                 GazeBacklogPolicy.CollapseIfOverSpan(
@@ -201,13 +217,21 @@ namespace GazeLSL
                     GetSampleTimestampTicks,
                     GazeTiming.MaxBacklogSpanTicks);
 
-                if (pendingSamples.Count == 0)
+                if (pendingSamples.Count > 0)
                 {
-                    return false;
+                    sample = pendingSamples.Dequeue().Sample;
+                    return true;
                 }
-                sample = pendingSamples.Dequeue().Sample;
-                return true;
             }
+
+            if (acquireFailure != null)
+            {
+                // Nothing was left to deliver, so the caller still has to see the
+                // failure and count it towards re-enumerating the tracker.
+                acquireFailure.Throw();
+            }
+
+            return false;
 #else
             return false;
 #endif
@@ -250,17 +274,44 @@ namespace GazeLSL
             DateTime queryTime = DateTime.Now;
             double queryLslTime = LSL.LSL.local_clock();
 
-            if (!readingGate.HasReading)
+            if (!readingGate.HasReading || drainPolicy.HasAbandonedDrain)
             {
-                SeedReadingCursorLocked(queryTime, queryLslTime);
+                AcquireReadingAtTimestampLocked(queryTime, queryLslTime);
                 return;
             }
 
             for (int index = 0; index < GazeTiming.MaxReadingsPerAcquire; index++)
             {
-                EyeGazeTrackerReading reading =
-                    tracker.TryGetReadingAfterSystemRelativeTime(
+                // Stops the step before it starts when the tracker cannot have
+                // published since the last accepted capture, and again after each
+                // reading that brings it back to the current one. Either way the
+                // SDK is not asked for a reading that should not exist yet, which
+                // is the request this runtime cannot answer without failing.
+                if (!GazeDrainPolicy.CouldHaveNewerReading(
+                        queryLslTime,
+                        lastAcceptedCaptureLslTime,
+                        NominalFramePeriodSecondsLocked()))
+                {
+                    return;
+                }
+
+                EyeGazeTrackerReading reading;
+                try
+                {
+                    reading = tracker.TryGetReadingAfterSystemRelativeTime(
                         TimeSpan.FromTicks(readingGate.LastTimestampTicks));
+                }
+                catch (NullReferenceException)
+                {
+                    // This runtime's projection of the SDK marshals the "no newer
+                    // reading" result without checking it, so an ordinary empty
+                    // result arrives as a NullReferenceException and leaves an
+                    // object whose finalizer then throws as well. It ends the step,
+                    // and a few of them end the drain for this tracker session.
+                    NoteFailedDrainEmptyResultLocked();
+                    return;
+                }
+
                 if (reading == null)
                 {
                     return;
@@ -274,9 +325,33 @@ namespace GazeLSL
             }
         }
 
-        // Once a cursor exists an old reading means this poll is catching up, not
-        // that the tracker stalled, so only the seed is judged on age.
-        private void SeedReadingCursorLocked(DateTime queryTime, double queryLslTime)
+        // Each failure leaks a broken SDK object whose finalizer throws on the GC
+        // thread, so the drain is abandoned quickly rather than repeated.
+        private void NoteFailedDrainEmptyResultLocked()
+        {
+            if (!drainPolicy.NoteFailedEmptyResult())
+            {
+                return;
+            }
+
+            Debug.LogWarning(
+                "This device's eye tracking SDK cannot report that it has no newer " +
+                $"reading: {drainPolicy.FailedEmptyResults} attempts to drain " +
+                "readings forward failed inside the SDK itself. Falling back to " +
+                "reading at the current time, which takes at most one reading per " +
+                "step and so may not keep up with the tracker.");
+        }
+
+        private double NominalFramePeriodSecondsLocked()
+        {
+            uint rate = selectedFrameRate != 0u ? selectedFrameRate : RequiredFrameRate;
+            return 1.0 / rate;
+        }
+
+        // Seeds the drain cursor, and is the whole of acquisition once the drain
+        // has been abandoned. Only a reading fetched for "now" is judged on age; a
+        // drained reading being old means the step is catching up instead.
+        private void AcquireReadingAtTimestampLocked(DateTime queryTime, double queryLslTime)
         {
             EyeGazeTrackerReading reading =
                 tracker.TryGetReadingAtTimestamp(queryTime);
@@ -334,6 +409,7 @@ namespace GazeLSL
                 GazeTiming.MaxBacklogSpanTicks);
 
             rateEstimator.Add(systemRelativeTimeTicks);
+            lastAcceptedCaptureLslTime = raw.Timestamp;
 
             bool readingCalibrationValid = reading.IsCalibrationValid;
             if (!hasCalibrationState || readingCalibrationValid != calibrationValid)
@@ -744,6 +820,7 @@ namespace GazeLSL
         private void ResetReadingPipelineLocked()
         {
             readingGate.Reset();
+            drainPolicy.Reset();
             rateEstimator.Reset();
             calibrationValid = false;
             hasCalibrationState = false;
@@ -751,6 +828,7 @@ namespace GazeLSL
             pendingRawReadings.Clear();
             pendingSamples.Clear();
             consecutiveLocateFailures = 0;
+            lastAcceptedCaptureLslTime = 0.0;
         }
 
         // The caller must hold trackerGate. Generation counters are deliberately
