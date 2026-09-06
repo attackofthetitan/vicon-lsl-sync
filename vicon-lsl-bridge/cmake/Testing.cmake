@@ -52,7 +52,8 @@ endif()
 
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     set(VICON_LSL_QT_TEST_ENV
-        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
     if(WIN32)
         list(APPEND VICON_LSL_QT_TEST_ENV "QT_QPA_PLATFORM=set:windows")
     else()
