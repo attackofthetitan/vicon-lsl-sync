@@ -5,7 +5,7 @@
 - Version: `1.14.0`
 - Previous release: `v1.13.7`
 - Target date: 2026-09-07
-- Pull requests: `#TBD` (preview gaze basis)
+- Pull requests: `#36` (preview gaze basis)
 - Status: in progress
 - Scope: preview gaze from a manually registered stair is drawn in the stair
   model's basis instead of the Vuforia model target's
@@ -37,8 +37,21 @@ without removing anything, so it carries a minor bump rather than a patch.
 - [ ] Generated stream contracts are unchanged; `tools/generate_stream_contracts.py`
   needs Python 3.10 for `write_text(newline=...)` and was not run on this
   machine, which has 3.9.6. No stream contract was edited in this release.
-- [ ] The hosted Linux, Windows, macOS, and HoloLens matrix is green on the pull
-  request and on the merge commit.
+- [x] The Vuforia path is confirmed against real recordings, not only by test.
+  Three `sub-06` runs were replayed through the shipped transform and the gaze
+  origin was compared with the participant's own pelvis markers, which Vicon
+  measures independently. The origin sits 0.55 m to 0.59 m above the pelvis
+  centroid and within 0.18 m to 0.20 m horizontally, across 71 to 148 matched
+  samples per run, with the target calibration solving at 0.7 mm to 1.7 mm
+  position error. That is where a standing adult's eyes belong.
+- [x] The two bases differ by a mirror about the stair model's own lateral
+  centre, which is why the wrong basis moves a gaze direction while leaving a
+  walker near the centreline in place. A ray-hit test cannot separate them: the
+  stair solid is symmetric across that centre, so both bases return identical
+  hit counts and distances on the same recordings.
+- [x] The hosted Linux, Windows, macOS, and HoloLens matrix is green on `#36`:
+  builds on all three platforms, logic tests on all three, and
+  `hololens-core-tests`.
 
 ## Merge
 
@@ -48,11 +61,14 @@ without removing anything, so it carries a minor bump rather than a patch.
 
 ## Qualification and limitations
 
-- [ ] Known limitation: the corrected basis has not been confirmed against the
-  physical Vicon, stair, and headset setup. It is derived from the mesh
-  comparison above and from the device-side checks that showed the VIVE gaze
-  stream to be physically correct, not from a recorded session drawn in the
-  preview.
+- [ ] Known limitation: the manual basis is not confirmed against a recorded
+  session. It rests on the mesh comparison above, on the device-side checks that
+  showed the VIVE gaze stream to be physically correct, and on the symptom
+  matching the difference between the bases exactly: a mirror about the stair's
+  lateral centre moves gaze while leaving a walker on that centreline in place,
+  which is what was reported. No VIVE recording with a solved calibration has
+  been replayed through it. The archived HoloLens recordings cannot stand in,
+  because the stair solid is symmetric across the mirror plane.
 - [x] The macOS signing disposition is unchanged: CI applies ad-hoc signatures
   for package integrity, but no Developer ID certificate or notarization
   credential is configured.
