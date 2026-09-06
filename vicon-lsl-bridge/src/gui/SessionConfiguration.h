@@ -32,6 +32,7 @@ struct StreamIdentity {
     double nominal_rate = 0.0;
     double effective_rate = 0.0;
     QString coordinate_frame;
+    QString publisher_sdk;
     bool metadata_complete = false;
     bool schema_compatible = true;
     bool present = true;

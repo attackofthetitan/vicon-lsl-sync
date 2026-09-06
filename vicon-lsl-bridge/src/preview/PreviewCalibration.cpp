@@ -30,6 +30,14 @@ PreviewQuaternion reflectZBasis(const PreviewQuaternion& value) {
     return {-value.x, -value.y, value.z, value.w};
 }
 
+PreviewVec3 reflectX(const PreviewVec3& value) {
+    return {-value.x, value.y, value.z};
+}
+
+PreviewQuaternion reflectXBasis(const PreviewQuaternion& value) {
+    return {value.x, -value.y, -value.z, value.w};
+}
+
 std::string lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
@@ -242,14 +250,38 @@ PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& t
     return profile;
 }
 
+GazeTargetBasis gazeTargetBasisFromPublisherSdk(const std::string& sdk) {
+    return lower(sdk) == "unity.xr.manual_stair_registration"
+        ? GazeTargetBasis::ManualStairRegistration
+        : GazeTargetBasis::VuforiaModelTarget;
+}
+
 PreviewTransformProfile gazeTransformFromTargetCalibration(
     const CalibrationProfile& profile,
-    const PreviewRigidTransform& holo_from_target) {
+    const PreviewRigidTransform& holo_from_target,
+    GazeTargetBasis basis) {
     const PreviewQuaternion target_from_holo_rotation =
         inverseQuaternion(holo_from_target.rotation);
     const PreviewVec3 target_from_holo_translation = rotateByQuaternion(
         holo_from_target.translation * -1.0,
         target_from_holo_rotation);
+
+    PreviewTransformProfile transform;
+    transform.name = "HoloLens";
+    transform.use_quaternion_rotation = true;
+
+    if (basis == GazeTargetBasis::ManualStairRegistration) {
+        transform.rotation = normalizeQuaternion(multiplyQuaternions(
+            profile.vicon_from_target.rotation,
+            reflectXBasis(reflectZBasis(target_from_holo_rotation))));
+        transform.translation = applyRigidTransformPoint(
+            profile.vicon_from_target,
+            reflectX(reflectZ(target_from_holo_translation)));
+        transform.input_axis_sign.x = -1.0;
+        transform.input_axis_sign.z = -1.0;
+        return transform;
+    }
+
     // The fixed stair OBJ ascends from +X toward -X, while the Vuforia target's
     // Unity-local forward basis is reversed. Reface gaze around the target
     // origin without changing the already Vicon-aligned stair transform.
@@ -261,9 +293,6 @@ PreviewTransformProfile gazeTransformFromTargetCalibration(
         profile.vicon_from_target,
         stair_model_from_target_basis);
 
-    PreviewTransformProfile transform;
-    transform.name = "HoloLens";
-    transform.use_quaternion_rotation = true;
     transform.rotation = normalizeQuaternion(multiplyQuaternions(
         vicon_from_gaze_target.rotation,
         reflectZBasis(target_from_holo_rotation)));

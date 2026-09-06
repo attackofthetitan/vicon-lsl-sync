@@ -604,7 +604,10 @@ void PreviewPanel::startPreview() {
         QString gaze_frame, target_frame;
         for (const gui::StreamIdentity& s : latest_stream_inventory_) {
             if (s.role == "gaze") gaze_frame = s.coordinate_frame;
-            if (s.role == "calibration") target_frame = s.coordinate_frame;
+            if (s.role == "calibration") {
+                target_frame = s.coordinate_frame;
+                calibration_publisher_sdk_ = s.publisher_sdk;
+            }
         }
         calibration_metadata_compatible_ = !gaze_frame.isEmpty() && !target_frame.isEmpty() &&
             calibrationCoordinateFramesCompatible(gaze_frame.toStdString(), target_frame.toStdString());
@@ -753,7 +756,10 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         return;
     }
 
-    automatic_gaze_transform_ = gazeTransformFromTargetCalibration(profile, solution->holo_from_target);
+    automatic_gaze_transform_ = gazeTransformFromTargetCalibration(
+        profile,
+        solution->holo_from_target,
+        gazeTargetBasisFromPublisherSdk(calibration_publisher_sdk_.toStdString()));
     calibration_state_ = gui::SessionCalibrationState::AutomaticSession;
     calibration_quality_ = solution->quality;
     if (worker_) worker_->setGazeTransform(gazeTransform());

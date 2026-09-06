@@ -200,6 +200,7 @@ private:
     QVector<gui::ManagedCalibrationProfile> calibration_profiles_;
     CalibrationQuality calibration_quality_;
     QString calibration_rejection_reason_;
+    QString calibration_publisher_sdk_;
     bool calibration_metadata_compatible_ = true;
     QElapsedTimer calibration_progress_throttle_;
     std::shared_ptr<QSettings> settings_;
