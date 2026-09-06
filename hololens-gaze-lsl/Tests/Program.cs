@@ -21,6 +21,7 @@ internal static partial class Program
             GazePublisherReportsRejectedTimestamp,
             GazePublisherReportsPublishedSamplesWithoutValidRays,
             GazePublisherReportsPublishedValidGaze,
+            GazePublisherLatestSampleCanReportValidityLoss,
             GazePublisherPreservesExplicitTimestamp,
             GazePublisherRejectsInvalidCaptureTimestamp,
             GazePublisherInvalidTimestampKeepsCadence,
