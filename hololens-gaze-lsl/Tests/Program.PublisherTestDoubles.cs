@@ -18,6 +18,20 @@ internal static partial class Program
         }
     }
 
+    private sealed class ValidGazeProvider : IGazeSampleProvider
+    {
+        public bool TryGetNextSample(out GazeSample sample)
+        {
+            sample = new GazeSample
+            {
+                Timestamp = 1.0,
+                CombinedValid = true,
+                CombinedDirectionZ = 1.0
+            };
+            return true;
+        }
+    }
+
     private sealed class ThrowingProvider : IGazeSampleProvider
     {
         private readonly Exception failure;
