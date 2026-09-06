@@ -41,6 +41,10 @@ if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
 endif()
 
+if(MSVC)
+    add_compile_options(/MP)
+endif()
+
 add_library(vicon-lsl-bridge-logic STATIC
     src/HoloLensGazeSchema.cpp
     src/HoloLensModelTargetSchema.cpp
