@@ -14,6 +14,8 @@ namespace GazeLSL
         private const int StopTimeoutMilliseconds = 500;
         private const float RateCheckIntervalSeconds = 2f;
         private const float LowRateWarningIntervalSeconds = 10f;
+        private const float DeliveryStateReportIntervalSeconds = 5f;
+        private const float FirstDeliveryStateReportDelaySeconds = 1f;
 
         // Matches the low-rate line the preview and the runbook already use.
         private const double LowRateFraction = 0.8;
@@ -35,6 +37,9 @@ namespace GazeLSL
         private float nextRateCheckTime;
         private float nextLowRateWarningTime;
         private int reportedProviderExceptionCount;
+        private bool deliveryStateReported;
+        private GazeDeliveryState reportedDeliveryState;
+        private float nextDeliveryStateReportTime;
 
         private void Start()
         {
@@ -65,6 +70,63 @@ namespace GazeLSL
             }
 
             return true;
+        }
+
+        private void ReportDeliveryState()
+        {
+            if (worker == null)
+            {
+                return;
+            }
+
+            GazeDeliverySnapshot snapshot = worker.DeliverySnapshot;
+            float now = Time.realtimeSinceStartup;
+            bool changed = !deliveryStateReported || snapshot.State != reportedDeliveryState;
+            bool reminderDue = now >= nextDeliveryStateReportTime &&
+                               snapshot.State != GazeDeliveryState.PublishingValidGaze;
+
+            // Give a healthy tracker a short chance to deliver its first reading before
+            // reporting the normal startup state. Any stronger state is reported at once.
+            if (!deliveryStateReported &&
+                snapshot.State == GazeDeliveryState.WaitingForProviderSample &&
+                now < nextDeliveryStateReportTime)
+            {
+                return;
+            }
+            if (!changed && !reminderDue)
+            {
+                return;
+            }
+
+            deliveryStateReported = true;
+            reportedDeliveryState = snapshot.State;
+            nextDeliveryStateReportTime = now + DeliveryStateReportIntervalSeconds;
+
+            switch (snapshot.State)
+            {
+                case GazeDeliveryState.WaitingForProviderSample:
+                    Debug.LogWarning(
+                        $"Gaze delivery: waiting for the first provider sample. " +
+                        $"Provider calls {snapshot.ProviderCallCount}, empty returns " +
+                        $"{snapshot.ProviderEmptyCount}; the LSL outlet exists but has pushed 0 samples.");
+                    break;
+                case GazeDeliveryState.RejectingInvalidTimestamp:
+                    Debug.LogWarning(
+                        $"Gaze delivery: provider samples are arriving, but " +
+                        $"{snapshot.RejectedTimestampCount} sample(s) were rejected for an invalid " +
+                        "capture timestamp; the LSL outlet has pushed 0 samples.");
+                    break;
+                case GazeDeliveryState.PublishingSamplesWithoutValidRays:
+                    Debug.LogWarning(
+                        $"Gaze delivery: LSL is publishing ({snapshot.PushedSampleCount} sample(s) pushed), " +
+                        "but no published sample has contained a valid combined, left-eye, or right-eye ray yet.");
+                    break;
+                case GazeDeliveryState.PublishingValidGaze:
+                    Debug.Log(
+                        $"Gaze delivery: publishing valid gaze. {snapshot.PushedSampleCount} LSL sample(s) " +
+                        $"pushed; {snapshot.PushedValidGazeSampleCount} contained at least one valid ray.");
+                    break;
+            }
         }
 
         // Never restarts the outlet: the declared rate is fixed in the stream header,
@@ -207,6 +269,7 @@ namespace GazeLSL
         {
             if (worker != null)
             {
+                ReportDeliveryState();
                 ReportMeasuredRate();
 
                 int providerExceptionCount = worker.ProviderExceptionCount;
@@ -298,6 +361,9 @@ namespace GazeLSL
                 lowRateReported = false;
                 calibrationReported = false;
                 reportedCalibrationChangeCount = 0;
+                deliveryStateReported = false;
+                nextDeliveryStateReportTime =
+                    Time.realtimeSinceStartup + FirstDeliveryStateReportDelaySeconds;
                 nextLowRateWarningTime = 0f;
                 // Give the estimator a window to fill before judging the rate.
                 nextRateCheckTime =
@@ -336,6 +402,8 @@ namespace GazeLSL
             providerRecoveryReported = false;
             stopWarningReported = false;
             reportedProviderExceptionCount = 0;
+            deliveryStateReported = false;
+            nextDeliveryStateReportTime = 0f;
 
             if (currentWorker != null)
             {
