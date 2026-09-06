@@ -11,6 +11,7 @@
     <Compile Include="Program.EncodingTests.cs" />
     <Compile Include="Program.TimingPolicyTests.cs" />
     <Compile Include="Program.PublisherWorkerTests.cs" />
+    <Compile Include="Program.DeliveryStateTransitionTests.cs" />
     <Compile Include="Program.Assertions.cs" />
     <Compile Include="Program.PublisherTestDoubles.cs" />
     <Compile Include="..\Assets\Scripts\GazePublisherWorker.cs" Link="GazePublisherWorker.cs" />

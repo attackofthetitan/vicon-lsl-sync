@@ -4,6 +4,64 @@ using GazeLSL;
 
 internal static partial class Program
 {
+    private static void GazePublisherReportsWaitingForProviderSample()
+    {
+        var worker = new GazePublisherWorker(new EmptyProvider(), new CountingOutlet(), 1000);
+        worker.Start();
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        GazeDeliverySnapshot snapshot = worker.DeliverySnapshot;
+        while (snapshot.ProviderCallCount == 0 && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(1);
+            snapshot = worker.DeliverySnapshot;
+        }
+
+        True(snapshot.ProviderCallCount > 0, "Empty provider was never queried.");
+        True(snapshot.ProviderEmptyCount > 0, "Empty provider returns were not counted.");
+        True(snapshot.State == GazeDeliveryState.WaitingForProviderSample,
+            "An empty provider should report waiting for its first sample.");
+        Equal(0.0, snapshot.PushedSampleCount);
+        True(worker.Stop(1000), "Waiting-state worker did not stop.");
+    }
+
+    private static void GazePublisherReportsRejectedTimestamp()
+    {
+        var worker = new GazePublisherWorker(
+            new InvalidTimestampProvider(), new CountingOutlet(), 1000);
+        worker.Start();
+        GazeDeliverySnapshot snapshot = WaitForDeliveryState(
+            worker, GazeDeliveryState.RejectingInvalidTimestamp);
+        True(snapshot.RejectedTimestampCount > 0,
+            "Invalid capture timestamps were not counted.");
+        Equal(0.0, snapshot.PushedSampleCount);
+        True(worker.Stop(1000), "Invalid-timestamp state worker did not stop.");
+    }
+
+    private static void GazePublisherReportsPublishedSamplesWithoutValidRays()
+    {
+        var worker = new GazePublisherWorker(
+            new OneSampleProvider(), new CountingOutlet(), 1000);
+        worker.Start();
+        GazeDeliverySnapshot snapshot = WaitForDeliveryState(
+            worker, GazeDeliveryState.PublishingSamplesWithoutValidRays);
+        True(snapshot.PushedSampleCount > 0, "Sample was not published.");
+        Equal(0.0, snapshot.PushedValidGazeSampleCount);
+        True(worker.Stop(1000), "Invalid-ray state worker did not stop.");
+    }
+
+    private static void GazePublisherReportsPublishedValidGaze()
+    {
+        var worker = new GazePublisherWorker(
+            new ValidGazeProvider(), new CountingOutlet(), 1000);
+        worker.Start();
+        GazeDeliverySnapshot snapshot = WaitForDeliveryState(
+            worker, GazeDeliveryState.PublishingValidGaze);
+        True(snapshot.PushedSampleCount > 0, "Valid gaze sample was not published.");
+        True(snapshot.PushedValidGazeSampleCount > 0,
+            "Published valid gaze was not counted.");
+        True(worker.Stop(1000), "Valid-gaze state worker did not stop.");
+    }
+
     private static void GazePublisherPreservesExplicitTimestamp()
     {
         var outlet = new CountingOutlet();
@@ -118,6 +176,22 @@ internal static partial class Program
         provider.Release.Set();
         True(worker.Stop(1000), "Worker did not remain joinable after a timed-out stop.");
         False(worker.IsRunning, "Worker still reports running after its retained thread exited.");
+    }
+
+    private static GazeDeliverySnapshot WaitForDeliveryState(
+        GazePublisherWorker worker,
+        GazeDeliveryState expected)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        GazeDeliverySnapshot snapshot = worker.DeliverySnapshot;
+        while (snapshot.State != expected && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(1);
+            snapshot = worker.DeliverySnapshot;
+        }
+        True(snapshot.State == expected,
+            $"Expected gaze delivery state {expected}, got {snapshot.State}.");
+        return snapshot;
     }
 
     private static void WaitUntilStopped(GazePublisherWorker worker)
