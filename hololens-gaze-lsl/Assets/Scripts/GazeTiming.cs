@@ -172,15 +172,47 @@ namespace GazeLSL
     internal sealed class GazeDrainPolicy
     {
         // Deliberately small. Each failure leaks a broken SDK object, so the drain
-        // must be judged unusable well before those accumulate.
-        public const int FailedEmptyResultsBeforeFallback = 3;
+        // has to be put down well before those accumulate.
+        public const int FailedEmptyResultsBeforeSuspend = 3;
 
-        private int failedEmptyResults;
-        private bool abandoned;
+        // Long enough that a drain which cannot work costs about a third of a
+        // failure per second instead of one per publishing step, and short enough
+        // that a session recovers the full rate rather than spending its life on
+        // the fallback.
+        public const double SuspensionSeconds = 10.0;
 
-        public bool HasAbandonedDrain => abandoned;
+        private int consecutiveFailedEmptyResults;
+        private int suspensions;
+        private double resumeTimeSeconds;
+        private bool suspended;
 
-        public int FailedEmptyResults => failedEmptyResults;
+        public int Suspensions => suspensions;
+
+        // Empty results are expected while the tracker has nothing newer to give,
+        // which is exactly when it is not publishing. Suspending for that is right,
+        // but abandoning the drain for the whole session is not: the tracker starts
+        // publishing later and the fallback cannot keep up with it.
+        public bool IsSuspended(double nowSeconds)
+        {
+            if (!suspended)
+            {
+                return false;
+            }
+
+            if (double.IsNaN(nowSeconds) || nowSeconds >= resumeTimeSeconds)
+            {
+                suspended = false;
+                consecutiveFailedEmptyResults = 0;
+                return false;
+            }
+
+            return true;
+        }
+
+        public void NoteReading()
+        {
+            consecutiveFailedEmptyResults = 0;
+        }
 
         // No reading can exist until a frame period has passed since the last one
         // was captured, so asking before then only buys an empty result. This is
@@ -208,30 +240,34 @@ namespace GazeLSL
         }
 
         // Only the failing kind of empty result is counted; a clean null return is
-        // ordinary and costs nothing. A later success does not forgive one either,
-        // because the cost is carried by each failure and not by a run of them.
-        // Returns true on the failure that abandons the drain.
-        public bool NoteFailedEmptyResult()
+        // ordinary and costs nothing. Returns true on the failure that suspends.
+        public bool NoteFailedEmptyResult(double nowSeconds)
         {
-            if (abandoned)
+            if (suspended)
             {
                 return false;
             }
 
-            failedEmptyResults++;
-            if (failedEmptyResults < FailedEmptyResultsBeforeFallback)
+            consecutiveFailedEmptyResults++;
+            if (consecutiveFailedEmptyResults < FailedEmptyResultsBeforeSuspend)
             {
                 return false;
             }
 
-            abandoned = true;
+            suspended = true;
+            suspensions++;
+            resumeTimeSeconds = double.IsNaN(nowSeconds)
+                ? double.NegativeInfinity
+                : nowSeconds + SuspensionSeconds;
             return true;
         }
 
         public void Reset()
         {
-            failedEmptyResults = 0;
-            abandoned = false;
+            consecutiveFailedEmptyResults = 0;
+            suspensions = 0;
+            resumeTimeSeconds = 0.0;
+            suspended = false;
         }
     }
 

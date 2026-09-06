@@ -121,11 +121,16 @@ exist yet:
 
 Both tests are made on capture times in LSL seconds. They remove the request in
 the ordinary case but cannot remove it while the tracker is publishing slower than
-its nominal rate, so the failure is also caught where it is raised, counted, and
-after three of them in one tracker session the drain is abandoned: acquisition
-falls back to `TryGetReadingAtTimestamp(now)` for the rest of that session and
-takes at most one reading per step. A clean `null` return is ordinary and is not
-counted, so a runtime whose projection is correct keeps the drain.
+its nominal rate, so the failure is also caught where it is raised and counted.
+Three in a row suspend the drain for ten seconds, and acquisition reads at the
+current time meanwhile, taking at most one reading per step.
+
+The suspension is not permanent, and that matters. Empty results happen exactly
+while the tracker has nothing newer to give, which is while it is not publishing;
+a tracker that starts publishing a minute later would otherwise spend the whole
+session on a fallback that cannot keep up with it. A reading clears the failures
+counted before it, and a clean `null` return is ordinary and never counted, so a
+runtime whose projection is correct keeps the drain throughout.
 
 The first step of a tracker session has no cursor, so it seeds one from
 `TryGetReadingAtTimestamp(now)`. That reading is the only one judged on age, and
@@ -138,10 +143,15 @@ reports, so no assumption about the device timer enters into it.
   the query.
 
 Do not take that age by comparing `SystemRelativeTime.Ticks` against
-`Stopwatch.GetTimestamp()`. The tick rate behind `SystemRelativeTime` is not
-established for this runtime, and a build that made that comparison rejected
-every reading the tracker offered, on a device that was offering one to every
-single call.
+`Stopwatch.GetTimestamp()`. Those two counts share a rate on this device but not
+an epoch: a reading whose own timestamp said it was 0.022 s old measured
+-7862.129 s against the device timer, about 2.2 hours in the future. A build that
+made that comparison rejected every reading the tracker offered, on a device that
+was offering one to every single call.
+
+Differences between two `SystemRelativeTime` values are sound, which is why the
+queue span budget and the delivered-rate estimate are measured that way. Only the
+absolute comparison against another clock is not.
 
 Once a cursor exists, a reading being old means the step is catching up, not that
 the tracker has stalled, so age is not a reason to drop it.

@@ -155,7 +155,8 @@ namespace GazeLSL
                 $"{acquisition.DrainEmptyResults} empty, " +
                 $"{acquisition.DrainFailedEmptyResults} failed inside the SDK, " +
                 $"{acquisition.DrainStepsSkippedAsTooSoon} skipped as too soon, " +
-                $"abandoned {acquisition.HasAbandonedDrain}. Accepted " +
+                $"suspended {acquisition.DrainSuspended} after " +
+                $"{acquisition.DrainSuspensions} suspension(s). Accepted " +
                 $"{acquisition.ReadingsAccepted}, not newer " +
                 $"{acquisition.ReadingsRejectedAsNotNewer}, " +
                 $"{acquisition.PendingRawReadings} waiting to convert. Conversion " +

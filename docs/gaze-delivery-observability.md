@@ -26,8 +26,8 @@ second line counting all three:
 
 - Reading at the current time: asked, empty, too old. This is how a session starts
   and how it acquires once the drain has been abandoned.
-- Drain: asked, read, empty, failed inside the SDK, skipped as too soon, and
-  whether it has been abandoned.
+- Drain: asked, read, empty, failed inside the SDK, skipped as too soon, whether
+  it is currently suspended, and how many times it has been.
 - Accepted, not newer than the last accepted reading, and waiting to convert.
 - Conversion: passes, converted, locate failures, dropped as a stale tracker
   session, and waiting to publish.

@@ -125,35 +125,59 @@ internal static partial class Program
             "An unusable query time should not block the drain.");
     }
 
-    private static void GazeDrainIsAbandonedAfterTheSdkFailsToReportEmpty()
+    private static void GazeDrainIsSuspendedAndRecoversAfterTheSdkFailsToReportEmpty()
     {
         var policy = new GazeDrainPolicy();
-        False(policy.HasAbandonedDrain, "A fresh policy should still use the drain.");
+        double now = 1000.0;
+        False(policy.IsSuspended(now), "A fresh policy should use the drain.");
 
-        for (int i = 1; i < GazeDrainPolicy.FailedEmptyResultsBeforeFallback; i++)
+        for (int i = 1; i < GazeDrainPolicy.FailedEmptyResultsBeforeSuspend; i++)
         {
             False(
-                policy.NoteFailedEmptyResult(),
+                policy.NoteFailedEmptyResult(now),
                 "The drain should survive the first few SDK failures.");
-            False(policy.HasAbandonedDrain, "The drain should not be abandoned yet.");
+            False(policy.IsSuspended(now), "The drain should not be suspended yet.");
         }
 
         True(
-            policy.NoteFailedEmptyResult(),
-            "The failure that reaches the limit should abandon the drain.");
-        True(policy.HasAbandonedDrain, "The drain should be abandoned.");
-        Equal(GazeDrainPolicy.FailedEmptyResultsBeforeFallback, policy.FailedEmptyResults);
+            policy.NoteFailedEmptyResult(now),
+            "The failure that reaches the limit should suspend the drain.");
+        True(policy.IsSuspended(now), "The drain should be suspended.");
+        Equal(1, policy.Suspensions);
 
-        // Each failure leaks a broken SDK object, so the count must not be
-        // forgiven and the decision must be announced only once.
+        // Announced once, not on every failure while it stays down.
         False(
-            policy.NoteFailedEmptyResult(),
-            "An abandoned drain should not report itself abandoned again.");
-        Equal(GazeDrainPolicy.FailedEmptyResultsBeforeFallback, policy.FailedEmptyResults);
+            policy.NoteFailedEmptyResult(now),
+            "A suspended drain should not report itself suspended again.");
+        Equal(1, policy.Suspensions);
+
+        True(
+            policy.IsSuspended(now + GazeDrainPolicy.SuspensionSeconds - 0.001),
+            "The drain should stay down for the whole suspension.");
+
+        // The tracker publishing nothing yet is exactly when empty results happen,
+        // and it starts publishing later. Giving the drain up for the session would
+        // leave the run on a fallback that cannot keep up.
+        False(
+            policy.IsSuspended(now + GazeDrainPolicy.SuspensionSeconds),
+            "The drain should be tried again once the suspension is over.");
+
+        // The count starts over, so one failure after recovery does not re-suspend.
+        False(
+            policy.NoteFailedEmptyResult(now + 20.0),
+            "A single failure after recovery should not suspend the drain.");
+
+        // A reading forgives the run of failures leading up to it.
+        policy.NoteFailedEmptyResult(now + 21.0);
+        policy.NoteReading();
+        False(
+            policy.NoteFailedEmptyResult(now + 22.0),
+            "A reading should clear the failures counted before it.");
+        False(policy.IsSuspended(now + 22.0), "The drain should still be in use.");
 
         policy.Reset();
-        False(policy.HasAbandonedDrain, "A new tracker session should try the drain again.");
-        Equal(0, policy.FailedEmptyResults);
+        False(policy.IsSuspended(now), "A new tracker session should use the drain.");
+        Equal(0, policy.Suspensions);
     }
 
     private static void GazeRateEstimatorMeasuresDeliveredRate()

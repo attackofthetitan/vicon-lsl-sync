@@ -25,7 +25,8 @@ namespace GazeLSL
         public int DrainReadings;
         public int DrainEmptyResults;
         public int DrainFailedEmptyResults;
-        public bool HasAbandonedDrain;
+        public bool DrainSuspended;
+        public int DrainSuspensions;
         public int ReadingsAccepted;
         public int ReadingsRejectedAsNotNewer;
         public int PendingRawReadings;
@@ -216,7 +217,8 @@ namespace GazeLSL
             {
                 snapshot = counters;
                 snapshot.TimerFrequencyHz = GazeTiming.SystemRelativeTicksPerSecond;
-                snapshot.HasAbandonedDrain = drainPolicy.HasAbandonedDrain;
+                snapshot.DrainSuspended = drainPolicy.IsSuspended(LSL.LSL.local_clock());
+                snapshot.DrainSuspensions = drainPolicy.Suspensions;
                 snapshot.PendingRawReadings = pendingRawReadings.Count;
                 snapshot.PendingSamples = pendingSamples.Count;
                 return true;
@@ -322,7 +324,7 @@ namespace GazeLSL
             DateTime queryTime = DateTime.Now;
             double queryLslTime = LSL.LSL.local_clock();
 
-            if (!readingGate.HasReading || drainPolicy.HasAbandonedDrain)
+            if (!readingGate.HasReading || drainPolicy.IsSuspended(queryLslTime))
             {
                 AcquireReadingAtTimestampLocked(queryTime, queryLslTime);
                 return;
@@ -359,7 +361,7 @@ namespace GazeLSL
                     // object whose finalizer then throws as well. It ends the step,
                     // and a few of them end the drain for this tracker session.
                     counters.DrainFailedEmptyResults++;
-                    NoteFailedDrainEmptyResultLocked();
+                    NoteFailedDrainEmptyResultLocked(queryLslTime);
                     return;
                 }
 
@@ -370,6 +372,7 @@ namespace GazeLSL
                 }
 
                 counters.DrainReadings++;
+                drainPolicy.NoteReading();
 
                 if (!EnqueueReadingLocked(reading, queryTime, queryLslTime))
                 {
@@ -380,20 +383,24 @@ namespace GazeLSL
         }
 
         // Each failure leaks a broken SDK object whose finalizer throws on the GC
-        // thread, so the drain is abandoned quickly rather than repeated.
-        private void NoteFailedDrainEmptyResultLocked()
+        // thread, so the drain is put down quickly rather than repeated. Only the
+        // first suspension is announced; the count is in the acquisition counters,
+        // and a warning every ten seconds would say nothing the first did not.
+        private void NoteFailedDrainEmptyResultLocked(double queryLslTime)
         {
-            if (!drainPolicy.NoteFailedEmptyResult())
+            if (!drainPolicy.NoteFailedEmptyResult(queryLslTime) ||
+                drainPolicy.Suspensions > 1)
             {
                 return;
             }
 
             Debug.LogWarning(
                 "This device's eye tracking SDK cannot report that it has no newer " +
-                $"reading: {drainPolicy.FailedEmptyResults} attempts to drain " +
-                "readings forward failed inside the SDK itself. Falling back to " +
-                "reading at the current time, which takes at most one reading per " +
-                "step and so may not keep up with the tracker.");
+                $"reading: {GazeDrainPolicy.FailedEmptyResultsBeforeSuspend} attempts " +
+                "to drain readings forward failed inside the SDK itself. Suspending " +
+                $"the drain for {GazeDrainPolicy.SuspensionSeconds:F0} s at a time " +
+                "and reading at the current time meanwhile, which takes at most one " +
+                "reading per step and so may not keep up with the tracker.");
         }
 
         private double NominalFramePeriodSecondsLocked()

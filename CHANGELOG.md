@@ -30,6 +30,12 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
   every reading the tracker offered: 2077 asked for, 2077 returned, 2077 refused
   as too old, and so no reading ever entered the pipeline.
 
+- Draining is suspended for ten seconds after three failures in a row rather than
+  given up for the tracker session. Those failures happen while the tracker has
+  nothing newer to give, which is while it is not publishing, so a tracker that
+  started publishing later spent the rest of the session on the fallback: the
+  device measured 43 Hz against a nominal 90.
+
 ### Added
 
 - The Unity log now counts every stage between the SDK and a sample waiting to be

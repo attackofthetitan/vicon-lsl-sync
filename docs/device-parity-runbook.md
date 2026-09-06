@@ -524,7 +524,15 @@ Stop the review when one of these items is missing or disputed:
 - The real Unity scene, prefab wiring, or saved-asset owner. This repository does not store the whole scene.
 - An approved measured Vicon pose for the stair target. The current value is the best fixed estimate, not a universal measurement.
 - An approved device drop-rate limit beyond the current preview warning below 80% of the expected rate. This repository does not define a release-grade maximum drop rate.
-- Proof that `SystemRelativeTime.Ticks` is still a raw QPC count for the exact device runtime and SDK version.
+- What `SystemRelativeTime.Ticks` may be compared against. Device evidence now
+  exists and settles half of it: on this HoloLens 2, `Stopwatch.Frequency` is
+  10 MHz and tick differences convert to seconds correctly, so the rate matches
+  and every duration measured from those differences is sound. The epochs do not
+  match. A reading whose own timestamp said it was 0.022 s old measured
+  -7862.129 s against `Stopwatch.GetTimestamp()`, about 2.2 hours in the future,
+  so absolute comparisons between the two are invalid and rejected every reading
+  the tracker offered. Whether to close this item on that evidence is still a
+  decision to take, not a cleanup: record it, do not quietly rewrite the rule.
 - Expected LabRecorder behavior when a HoloLens or Vicon stream returns with the same source ID in the included LabRecorder revision.
 - A saved `eye_tracker_space` file for old-data checks.
 
