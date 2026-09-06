@@ -61,9 +61,16 @@ std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
     const std::vector<CalibrationTargetPose>& poses);
 PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& transform,
                                                   const std::string& name = "HoloLens");
+enum class GazeTargetBasis {
+    VuforiaModelTarget,
+    ManualStairRegistration,
+};
+
+GazeTargetBasis gazeTargetBasisFromPublisherSdk(const std::string& sdk);
 PreviewTransformProfile gazeTransformFromTargetCalibration(
     const CalibrationProfile& profile,
-    const PreviewRigidTransform& holo_from_target);
+    const PreviewRigidTransform& holo_from_target,
+    GazeTargetBasis basis = GazeTargetBasis::VuforiaModelTarget);
 PreviewTransformProfile gazeTransformForCoordinateFrame(
     PreviewTransformProfile transform,
     const std::string& coordinate_frame);

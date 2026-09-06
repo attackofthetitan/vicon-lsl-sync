@@ -485,7 +485,12 @@ The stair OBJ file uses millimetres. Scale it by `0.001`, then apply the fixed r
 
 ### Build the gaze-to-Vicon transform
 
-The current calculation:
+Which basis the published target pose uses decides the calculation. The target
+stream's `acquisition/sdk` value selects it: `Unity.XR.manual_stair_registration`
+means a manual three-point registration of the Unity CAD root, and every other
+value, including a missing one, means the Vuforia model target.
+
+For the Vuforia model target the calculation is:
 
 1. Inverts the averaged `holo_from_target` pose.
 2. Combines the fixed `vicon_from_target` pose with a 180-degree rotation around target Z, stored as quaternion `(0, 0, 1, 0)`.
@@ -494,6 +499,23 @@ The current calculation:
 5. Sets the gaze input Z sign to `-1` to keep the stair model's current target-local direction rule.
 
 The fixed pose, extra Z rotation, reflection, and input Z sign work as one set. Removing only one can mirror or reverse gaze relative to the stairs.
+
+For a manual stair registration the target-basis rotation does not apply, and the
+mirror it used to carry has to be stated outright. The preview draws the stair
+OBJ in the file's own coordinates, while Unity's model import negates X, so the
+registration root publishes a pose in a basis mirrored from the drawn model. The
+calculation is:
+
+1. Inverts the averaged `holo_from_target` pose.
+2. Reflects the target-to-HoloLens position and rotation across Z, as above, reaching the registration root's Unity basis.
+3. Reflects that position and rotation across X, reaching the drawn stair model's basis.
+4. Applies the fixed `vicon_from_target` pose, with no extra target-basis rotation.
+5. Sets the gaze input signs to `(-1, 1, -1)`, which is the X mirror composed with the Z reflection of step 2.
+
+Both calculations are orientation-reversing overall, because the published
+right-handed gaze frame and the drawn stair model have opposite handedness. Only
+the preview applies either one: a recording holds the published stream, so a
+change here never alters recorded data.
 
 Automatic alignment lasts only for the current preview session. It is not saved.
 There is no fallback transform: clearing a calibration, or a solve that fails its

@@ -2,7 +2,23 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
-## [Unreleased]
+## [1.14.0] - 2026-09-07
+
+### Fixed
+
+- Preview gaze from a manually registered stair no longer lands mirrored across
+  the staircase. The preview draws the stair OBJ in the file's own coordinates,
+  while Unity's model import negates X: the Unity mesh matches the OBJ on every
+  extent and carries the opposite X centre, so a pose published from the Unity
+  CAD root reaches the preview in a mirrored basis. The gaze transform for the
+  Vuforia model target absorbed that mirror in its fixed target-basis rotation;
+  a manual three-point registration publishes the CAD root instead, and the
+  mirror was left uncorrected. The preview now applies the mirror to gaze from a
+  manually registered target, selected by the target stream's `acquisition/sdk`
+  value, so `Vuforia.ModelTarget` keeps the transform it has always had and
+  `Unity.XR.manual_stair_registration` gets the basis its publisher actually
+  uses. Recordings are unaffected either way: this transform runs only in the
+  preview, and XDF holds the published stream.
 
 ### Fixed
 

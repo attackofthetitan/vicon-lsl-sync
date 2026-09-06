@@ -92,6 +92,69 @@ TEST_CASE("Preview refaces calibrated gaze without changing the stair model") {
     REQUIRE(near(direction.z, expected_direction.z));
 }
 
+TEST_CASE("Preview maps manually registered gaze into the mirrored stair model basis") {
+    const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
+    const double half_sqrt_two = std::sqrt(0.5);
+    const vicon_lsl::PreviewRigidTransform holo_from_target{
+        {1.0, 2.0, 3.0}, {0.0, half_sqrt_two, 0.0, half_sqrt_two}};
+    const vicon_lsl::PreviewVec3 root_local_point{0.25, 0.5, 1.0};
+    const vicon_lsl::PreviewVec3 root_local_direction{0.0, 0.0, 1.0};
+    const vicon_lsl::PreviewVec3 target_rh_point{0.25, 0.5, -1.0};
+    const vicon_lsl::PreviewVec3 target_rh_direction{0.0, 0.0, -1.0};
+    const auto holo_point =
+        vicon_lsl::applyRigidTransformPoint(holo_from_target, target_rh_point);
+    const auto holo_direction = vicon_lsl::rotateByQuaternion(
+        target_rh_direction,
+        holo_from_target.rotation);
+
+    const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(
+        calibration,
+        holo_from_target,
+        vicon_lsl::GazeTargetBasis::ManualStairRegistration);
+    const auto point = vicon_lsl::applyTransformPoint(transform, holo_point);
+    const auto direction = vicon_lsl::applyTransformDirection(transform, holo_direction);
+
+    const vicon_lsl::PreviewVec3 mirrored_point{
+        -root_local_point.x, root_local_point.y, root_local_point.z};
+    const vicon_lsl::PreviewVec3 mirrored_direction{
+        -root_local_direction.x, root_local_direction.y, root_local_direction.z};
+    const auto expected_point = vicon_lsl::applyRigidTransformPoint(
+        calibration.vicon_from_target, mirrored_point);
+    const auto expected_direction = vicon_lsl::rotateByQuaternion(
+        mirrored_direction, calibration.vicon_from_target.rotation);
+
+    REQUIRE(near(transform.input_axis_sign.x, -1.0));
+    REQUIRE(near(transform.input_axis_sign.y, 1.0));
+    REQUIRE(near(transform.input_axis_sign.z, -1.0));
+    REQUIRE(near(point.x, expected_point.x));
+    REQUIRE(near(point.y, expected_point.y));
+    REQUIRE(near(point.z, expected_point.z));
+    REQUIRE(near(direction.x, expected_direction.x));
+    REQUIRE(near(direction.y, expected_direction.y));
+    REQUIRE(near(direction.z, expected_direction.z));
+}
+
+TEST_CASE("Preview selects the gaze target basis from the publisher sdk") {
+    REQUIRE(vicon_lsl::gazeTargetBasisFromPublisherSdk("Unity.XR.manual_stair_registration") ==
+            vicon_lsl::GazeTargetBasis::ManualStairRegistration);
+    REQUIRE(vicon_lsl::gazeTargetBasisFromPublisherSdk("unity.xr.manual_stair_registration") ==
+            vicon_lsl::GazeTargetBasis::ManualStairRegistration);
+    REQUIRE(vicon_lsl::gazeTargetBasisFromPublisherSdk("Vuforia.ModelTarget") ==
+            vicon_lsl::GazeTargetBasis::VuforiaModelTarget);
+    REQUIRE(vicon_lsl::gazeTargetBasisFromPublisherSdk("") ==
+            vicon_lsl::GazeTargetBasis::VuforiaModelTarget);
+
+    const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
+    const vicon_lsl::PreviewRigidTransform identity{{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}};
+    const auto legacy = vicon_lsl::gazeTransformFromTargetCalibration(calibration, identity);
+    const auto vuforia = vicon_lsl::gazeTransformFromTargetCalibration(
+        calibration, identity, vicon_lsl::GazeTargetBasis::VuforiaModelTarget);
+    REQUIRE(near(legacy.input_axis_sign.x, vuforia.input_axis_sign.x));
+    REQUIRE(near(legacy.input_axis_sign.z, vuforia.input_axis_sign.z));
+    REQUIRE(near(legacy.rotation.x, vuforia.rotation.x));
+    REQUIRE(near(legacy.rotation.w, vuforia.rotation.w));
+}
+
 TEST_CASE("Preview calibrated gaze follows the fixed stair ascent direction") {
     const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
     const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(

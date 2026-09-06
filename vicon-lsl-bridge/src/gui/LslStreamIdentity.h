@@ -16,6 +16,11 @@ inline QString coordinateFrameOf(lsl::stream_info& info) {
     return frame ? QString::fromUtf8(frame) : QString();
 }
 
+inline QString publisherSdkOf(lsl::stream_info& info) {
+    const char* sdk = info.desc().child("acquisition").child_value("sdk");
+    return sdk ? QString::fromUtf8(sdk) : QString();
+}
+
 inline StreamIdentity identityFromStreamInfo(lsl::stream_info& info) {
     const double rate = info.nominal_srate();
     StreamIdentity identity;
@@ -29,6 +34,7 @@ inline StreamIdentity identityFromStreamInfo(lsl::stream_info& info) {
     identity.channel_count = info.channel_count();
     identity.nominal_rate = std::isfinite(rate) && rate > 0.0 ? rate : 0.0;
     identity.coordinate_frame = coordinateFrameOf(info);
+    identity.publisher_sdk = publisherSdkOf(info);
     identity.discovered_at = QDateTime::currentDateTimeUtc();
     return identity;
 }
