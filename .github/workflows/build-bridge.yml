@@ -90,7 +90,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout required build submodules
-        run: git submodule update --init --depth 1 labrecorder vicon-lsl-bridge/external/vicon-datastream-sdk
+        run: git submodule update --init --depth 1 --jobs 2 labrecorder vicon-lsl-bridge/external/vicon-datastream-sdk
 
       - name: Setup MSVC
         if: runner.os == 'Windows'
@@ -188,6 +188,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $boostVersionHeader = Join-Path $env:VCPKG_ROOT "installed\${{ matrix.triplet }}\include\boost\version.hpp"
+          if (Test-Path -LiteralPath $boostVersionHeader) {
+            Write-Host "Boost ${{ matrix.triplet }} is already installed from cache."
+            exit 0
+          }
           & "$env:VCPKG_ROOT\vcpkg.exe" install --clean-after-build boost-thread:${{ matrix.triplet }} boost-chrono:${{ matrix.triplet }} boost-asio:${{ matrix.triplet }} boost-filesystem:${{ matrix.triplet }} boost-format:${{ matrix.triplet }} boost-algorithm:${{ matrix.triplet }} boost-date-time:${{ matrix.triplet }} boost-math:${{ matrix.triplet }} boost-range:${{ matrix.triplet }} boost-lexical-cast:${{ matrix.triplet }}
           if ($LASTEXITCODE -ne 0) { throw "Pinned vcpkg dependency install failed with exit code $LASTEXITCODE" }
           Remove-Item -Path "$env:VCPKG_ROOT\buildtrees", "$env:VCPKG_ROOT\packages", "$env:VCPKG_ROOT\downloads" -Recurse -Force -ErrorAction SilentlyContinue
