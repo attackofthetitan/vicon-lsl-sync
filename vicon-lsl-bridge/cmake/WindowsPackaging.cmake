@@ -70,6 +70,12 @@ function(vicon_lsl_configure_windows_gui_packaging bridge_source_dir lsl_target)
        EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
         list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
             -BoostRootDir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+    elseif(DEFINED BOOST_ROOT AND EXISTS "${BOOST_ROOT}")
+        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
+            -BoostRootDir "${BOOST_ROOT}")
+    elseif(DEFINED ENV{BOOST_ROOT} AND EXISTS "$ENV{BOOST_ROOT}")
+        list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
+            -BoostRootDir "$ENV{BOOST_ROOT}")
     endif()
     if(VICON_LSL_LABRECORDER_DEPLOY_DIR)
         list(APPEND VICON_LSL_PORTABLE_PACKAGE_ARGS
