@@ -264,6 +264,7 @@ jobs:
           "BOOST_ROOT=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "BOOST_INCLUDEDIR=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "BOOST_LIBRARYDIR=$libPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LIB=$libPath;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "VCPKG_INSTALLATION_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -280,12 +281,12 @@ jobs:
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -G "Ninja Multi-Config" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DBOOST_ROOT=%BOOST_ROOT%" "-DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR%" "-DBOOST_LIBRARYDIR=%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS=ON -DCMAKE_CXX_FLAGS_RELEASE="/MD /O2 /Ob1 /DNDEBUG /d2ReducedOptimizeHugeFunctions" -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -G "Ninja Multi-Config" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DBOOST_ROOT=%BOOST_ROOT%" "-DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR%" "-DBOOST_LIBRARYDIR=%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS=ON -DCMAKE_CXX_FLAGS_RELEASE="/MD /O1 /Ob1 /DNDEBUG /Zc:inline /d2ReducedOptimizeHugeFunctions" "-DCMAKE_EXE_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
         shell: cmd
 
       - name: Build bridge
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
         working-directory: vicon-lsl-bridge
 
       - name: Test bridge
@@ -299,11 +300,11 @@ jobs:
 
       - name: Configure LabRecorder (Windows)
         if: runner.os == 'Windows'
-        run: cmake -S labrecorder -B build-labrecorder -G "Ninja Multi-Config" -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "-DBOOST_ROOT=%BOOST_ROOT%" "-DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR%" "-DBOOST_LIBRARYDIR=%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS=ON -DCMAKE_CXX_FLAGS_RELEASE="/MD /O2 /Ob1 /DNDEBUG /d2ReducedOptimizeHugeFunctions" -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+        run: cmake -S labrecorder -B build-labrecorder -G "Ninja Multi-Config" -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "-DBOOST_ROOT=%BOOST_ROOT%" "-DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR%" "-DBOOST_LIBRARYDIR=%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS=ON -DCMAKE_CXX_FLAGS_RELEASE="/MD /O1 /Ob1 /DNDEBUG /Zc:inline /d2ReducedOptimizeHugeFunctions" "-DCMAKE_EXE_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
         shell: cmd
 
       - name: Build LabRecorder
-        run: cmake --build build-labrecorder --config Release --target LabRecorder LabRecorderCLI --parallel
+        run: cmake --build build-labrecorder --config Release --target LabRecorder LabRecorderCLI --parallel 4
 
       - name: Install and deploy LabRecorder (Windows)
         if: runner.os == 'Windows'

@@ -39,6 +39,11 @@ set(VICON_LSL_QT_LICENSE_ROOT "" CACHE PATH
 
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
+    if(DEFINED BOOST_LIBRARYDIR AND EXISTS "${BOOST_LIBRARYDIR}")
+        link_directories("${BOOST_LIBRARYDIR}")
+    elseif(DEFINED ENV{BOOST_LIBRARYDIR} AND EXISTS "$ENV{BOOST_LIBRARYDIR}")
+        link_directories("$ENV{BOOST_LIBRARYDIR}")
+    endif()
 endif()
 
 if(MSVC AND NOT CMAKE_GENERATOR MATCHES "Ninja")
