@@ -161,4 +161,4 @@ done
 
 test -d "$dmg_root/vicon-lsl-bridge-gui.app"
 test -L "$dmg_root/Applications"
-hdiutil create -volname "Vicon LSL Bridge" -srcfolder "$dmg_root" -ov -format UDZO "${artifact_name}.dmg"
+hdiutil create -volname "Vicon LSL Bridge" -srcfolder "$dmg_root" -ov -format UDZO -imagekey zlib-level=1 "${artifact_name}.dmg"

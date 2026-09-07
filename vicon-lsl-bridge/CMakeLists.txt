@@ -41,7 +41,7 @@ if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
 endif()
 
-if(MSVC)
+if(MSVC AND NOT CMAKE_GENERATOR MATCHES "Ninja")
     add_compile_options(/MP)
 endif()
 

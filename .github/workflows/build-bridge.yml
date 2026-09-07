@@ -7,8 +7,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CL: /MP
 
 on:
   workflow_dispatch:
@@ -94,8 +92,13 @@ jobs:
       - name: Checkout required build submodules
         run: git submodule update --init --depth 1 labrecorder vicon-lsl-bridge/external/vicon-datastream-sdk
 
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
       - name: Setup ccache
-        if: runner.os != 'Windows'
         uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
           key: ${{ runner.os }}-ccache-${{ github.ref_name }}
@@ -202,7 +205,7 @@ jobs:
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -G "Ninja Multi-Config" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
         shell: cmd
 
@@ -215,8 +218,14 @@ jobs:
         working-directory: vicon-lsl-bridge
 
       # Build LabRecorder
-      - name: Configure LabRecorder
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release ${{ runner.os != 'Windows' && '-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }} -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+      - name: Configure LabRecorder (POSIX)
+        if: runner.os != 'Windows'
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+
+      - name: Configure LabRecorder (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S labrecorder -B build-labrecorder -G "Ninja Multi-Config" -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+        shell: cmd
 
       - name: Build LabRecorder
         run: cmake --build build-labrecorder --config Release --target LabRecorder LabRecorderCLI --parallel
