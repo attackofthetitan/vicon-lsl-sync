@@ -41,15 +41,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            fetch_catch2: ON
-          - os: ubuntu-latest
-            fetch_catch2: OFF
-          - os: windows-latest
-            fetch_catch2: ON
-          - os: macos-latest
-            fetch_catch2: ON
-    runs-on: ${{ matrix.os }}
+          - fetch_catch2: ON
+          - fetch_catch2: OFF
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -57,10 +51,20 @@ jobs:
           persist-credentials: false
 
       - name: Verify generated stream contracts
-        run: ${{ runner.os == 'macOS' && 'python3' || 'python' }} tools/generate_stream_contracts.py --check
+        if: matrix.fetch_catch2 == 'ON'
+        run: python3 tools/generate_stream_contracts.py --check
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          key: ubuntu-logic-ccache-${{ matrix.fetch_catch2 }}-${{ github.ref_name }}
+          restore-keys: |
+            ubuntu-logic-ccache-${{ matrix.fetch_catch2 }}-
+            ubuntu-logic-ccache-
+          max-size: 500M
 
       - name: Configure dependency-light tests
-        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
+        run: cmake -S vicon-lsl-bridge -B build-logic -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
 
       - name: Build dependency-light tests
         run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests --parallel
@@ -89,6 +93,16 @@ jobs:
 
       - name: Checkout required build submodules
         run: git submodule update --init --depth 1 labrecorder vicon-lsl-bridge/external/vicon-datastream-sdk
+
+      - name: Setup ccache
+        if: runner.os != 'Windows'
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          key: ${{ runner.os }}-ccache-${{ github.ref_name }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-main
+            ${{ runner.os }}-ccache-
+          max-size: 2G
 
       - name: Test packaging safety helpers (Windows)
         if: runner.os == 'Windows'
@@ -121,12 +135,31 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libboost-thread-dev libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-system-dev libboost-atomic-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
 
+      - name: Cache Boost (macOS)
+        if: runner.os == 'macOS'
+        id: cache-macos-boost
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/Library/Caches/Homebrew
+            /opt/homebrew/Cellar/boost
+            /opt/homebrew/opt/boost
+          key: macos-homebrew-boost-v1
+          restore-keys: |
+            macos-homebrew-boost-
+
       - name: Install Boost (macOS)
         if: runner.os == 'macOS'
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
-        run: brew install boost
+          HOMEBREW_NO_ANALYTICS: 1
+        run: |
+          if brew list boost &>/dev/null; then
+            brew link --overwrite boost || true
+          else
+            brew install boost
+          fi
 
       - name: Cache vcpkg (Windows)
         if: runner.os == 'Windows'
@@ -159,12 +192,12 @@ jobs:
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (macOS)
         if: runner.os == 'macOS'
-        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (Windows)
@@ -183,7 +216,7 @@ jobs:
 
       # Build LabRecorder
       - name: Configure LabRecorder
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release ${{ runner.os != 'Windows' && '-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache' || '' }} -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
 
       - name: Build LabRecorder
         run: cmake --build build-labrecorder --config Release --target LabRecorder LabRecorderCLI --parallel
@@ -274,7 +307,7 @@ jobs:
             ${{ matrix.artifact }}-gui-portable.exe
 
   hololens-core-tests:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -282,7 +315,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify generated stream contracts
-        run: python tools/generate_stream_contracts.py --check
+        run: python3 tools/generate_stream_contracts.py --check
 
       - name: Run platform-neutral HoloLens tests
         run: dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release

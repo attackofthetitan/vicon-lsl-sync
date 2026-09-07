@@ -105,10 +105,12 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         endif()
     else()
         include(FetchContent)
+        set(LSL_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(LSL_BUILD_TESTING OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(liblsl
             GIT_REPOSITORY https://github.com/sccn/liblsl.git
             GIT_TAG        6ca188c266c21f7228dc67077303fa6abaf2e8be
-            GIT_SHALLOW    FALSE
+            GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(liblsl)
         set(VICON_LSL_LIB_TARGET lsl)
