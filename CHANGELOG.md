@@ -2,6 +2,28 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.1] - 2026-09-08
+
+### Changed
+
+- Build and packaging optimizations for CI and local builds:
+  - Switched Windows CI builds to Ninja Multi-Config with ccache, enabled `/MP` parallel compilation for MSVC, and tuned compilation flags.
+  - Accelerated Windows CI cold builds to under 4 minutes by using prebuilt static Boost binaries and linking with explicit Boost library search paths.
+  - Added caching for Qt licenses and vcpkg binary artifacts with fallback restore keys.
+  - Switched `liblsl` FetchContent dependency to shallow clone and disabled unused example and test targets.
+  - Parallelized git submodule checkouts in CI.
+  - Refactored `vicon-lsl-labrecorder-tests` to link against `vicon-lsl-bridge-gui-components` directly, eliminating redundant duplicate object compilation.
+  - Added `BOOST_ROOT` detection support to Windows packaging scripts.
+  - Accelerated macOS DMG disk image creation in packaging.
+
+### Fixed
+
+- Included `liblsl` target directory in `VICON_LSL_QT_TEST_ENV` `PATH` for Windows Qt test execution.
+
+### Compatibility
+
+- No changes to stream schemas, wire formats, saved session profiles, or CLI options.
+
 ## [1.14.0] - 2026-09-07
 
 ### Fixed
