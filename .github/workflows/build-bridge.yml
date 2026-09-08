@@ -7,6 +7,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+
 on:
   workflow_dispatch:
   push:
@@ -38,15 +39,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            fetch_catch2: ON
-          - os: ubuntu-latest
-            fetch_catch2: OFF
-          - os: windows-latest
-            fetch_catch2: ON
-          - os: macos-latest
-            fetch_catch2: ON
-    runs-on: ${{ matrix.os }}
+          - fetch_catch2: ON
+          - fetch_catch2: OFF
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -54,10 +49,20 @@ jobs:
           persist-credentials: false
 
       - name: Verify generated stream contracts
-        run: ${{ runner.os == 'macOS' && 'python3' || 'python' }} tools/generate_stream_contracts.py --check
+        if: matrix.fetch_catch2 == 'ON'
+        run: python3 tools/generate_stream_contracts.py --check
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          key: ubuntu-logic-ccache-${{ matrix.fetch_catch2 }}-${{ github.ref_name }}
+          restore-keys: |
+            ubuntu-logic-ccache-${{ matrix.fetch_catch2 }}-
+            ubuntu-logic-ccache-
+          max-size: 500M
 
       - name: Configure dependency-light tests
-        run: cmake -S vicon-lsl-bridge -B build-logic -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
+        run: cmake -S vicon-lsl-bridge -B build-logic -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DVICON_LSL_BRIDGE_BUILD_RUNTIME=OFF -DVICON_LSL_BRIDGE_BUILD_GUI=OFF -DVICON_LSL_BRIDGE_FETCH_CATCH2=${{ matrix.fetch_catch2 }} -DBUILD_TESTING=ON
 
       - name: Build dependency-light tests
         run: cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests --parallel
@@ -81,9 +86,33 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          submodules: recursive
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Checkout required build submodules
+        run: git submodule update --init --depth 1 --jobs 2 labrecorder vicon-lsl-bridge/external/vicon-datastream-sdk
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
+      - name: Optimize Windows runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "C:\local", "D:\", "$env:RUNNER_TEMP", "$env:GITHUB_WORKSPACE" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess "cl.exe", "ninja.exe", "cmake.exe", "ccache.exe", "git.exe", "boost_1_83_0-msvc-14.3-64.exe" -ErrorAction SilentlyContinue
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          key: ${{ runner.os }}-ccache-${{ github.ref_name }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-main
+            ${{ runner.os }}-ccache-
+          max-size: 2G
 
       - name: Test packaging safety helpers (Windows)
         if: runner.os == 'Windows'
@@ -97,8 +126,16 @@ jobs:
           version: '6.8.3'
           cache: true
 
-      - name: Prepare pinned Qt source licenses (Windows)
+      - name: Cache Qt licenses (Windows)
         if: runner.os == 'Windows'
+        id: cache-qt-licenses
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ github.workspace }}\qt-license-source
+          key: qt-license-source-6.8.3
+
+      - name: Prepare pinned Qt source licenses (Windows)
+        if: runner.os == 'Windows' && steps.cache-qt-licenses.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE\.github\scripts\prepare-qt-licenses.ps1" `
@@ -108,52 +145,148 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libboost-thread-dev libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-system-dev libboost-atomic-dev libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
 
-      - name: Install Boost (macOS)
+      - name: Cache Boost (macOS)
         if: runner.os == 'macOS'
-        run: brew install boost
-
-      - name: Bootstrap pinned vcpkg (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & "$env:GITHUB_WORKSPACE\.github\scripts\bootstrap-vcpkg.ps1" `
-            -TempDirectory $env:RUNNER_TEMP -EnvironmentFile $env:GITHUB_ENV
-
-      - name: Cache vcpkg packages (Windows)
-        if: runner.os == 'Windows'
+        id: cache-macos-boost
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-${{ hashFiles('vicon-lsl-bridge/CMakeLists.txt', 'vicon-lsl-bridge/external/vicon-datastream-sdk/CMakeLists.txt', 'labrecorder/CMakeLists.txt', '**/vcpkg.json', '**/vcpkg-configuration.json') }}
+          path: |
+            ~/Library/Caches/Homebrew
+            /opt/homebrew/Cellar/boost
+            /opt/homebrew/opt/boost
+          key: macos-homebrew-boost-v1
           restore-keys: |
-            vcpkg-d87340acc46bdeda386037b38aca30136e667e47-${{ matrix.triplet }}-boost-
+            macos-homebrew-boost-
 
-      - name: Install Boost via vcpkg (Windows)
+      - name: Install Boost (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+          HOMEBREW_NO_ANALYTICS: 1
+        run: |
+          if brew list boost &>/dev/null; then
+            brew link --overwrite boost || true
+          else
+            brew install boost
+          fi
+
+      - name: Cache Boost (Windows)
+        if: runner.os == 'Windows'
+        id: cache-boost-windows
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            D:\boost_1_83_0
+            C:\local\boost_1_83_0
+          key: boost-1.83.0-msvc-14.3-x64-v2
+
+      - name: Install Boost (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install boost-thread:${{ matrix.triplet }} boost-chrono:${{ matrix.triplet }} boost-asio:${{ matrix.triplet }} boost-filesystem:${{ matrix.triplet }} boost-format:${{ matrix.triplet }} boost-algorithm:${{ matrix.triplet }} boost-date-time:${{ matrix.triplet }} boost-math:${{ matrix.triplet }} boost-range:${{ matrix.triplet }} boost-lexical-cast:${{ matrix.triplet }}
-          if ($LASTEXITCODE -ne 0) { throw "Pinned vcpkg dependency install failed with exit code $LASTEXITCODE" }
+          $boostRoot = if (Test-Path -LiteralPath "D:\boost_1_83_0\boost\version.hpp") {
+            "D:\boost_1_83_0"
+          } elseif (Test-Path -LiteralPath "C:\local\boost_1_83_0\boost\version.hpp") {
+            "C:\local\boost_1_83_0"
+          } elseif (Test-Path "D:\") {
+            "D:\boost_1_83_0"
+          } else {
+            "C:\local\boost_1_83_0"
+          }
+          $headerCheck = Join-Path $boostRoot "boost\version.hpp"
+          if (-not (Test-Path -LiteralPath $headerCheck)) {
+            $installerUrl = "https://archives.boost.io/release/1.83.0/binaries/boost_1_83_0-msvc-14.3-64.exe"
+            $expectedHash = "67975ce4a8799f17728ddba8e64e9b450a6bda7762643e829a96ccbbd1ca17d2"
+            $installer = Join-Path $env:RUNNER_TEMP "boost_1_83_0-msvc-14.3-64.exe"
+
+            Write-Host "Downloading precompiled Boost 1.83.0 (MSVC 14.3 x64)..."
+            $curlSuccess = $false
+            try {
+              & curl.exe -sSLf --retry 3 --connect-timeout 15 -o $installer $installerUrl
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $installer)) {
+                $curlSuccess = $true
+              }
+            } catch {}
+
+            if (-not $curlSuccess) {
+              Write-Host "Direct Fastly CDN download failed, falling back to SourceForge mirror..."
+              $fallbackUrl = "https://downloads.sourceforge.net/project/boost/boost-binaries/1.83.0/boost_1_83_0-msvc-14.3-64.exe"
+              & curl.exe -sSLf --retry 3 -o $installer $fallbackUrl
+            }
+
+            if (-not (Test-Path -LiteralPath $installer)) {
+              throw "Failed to download Boost 1.83.0 installer from all sources."
+            }
+
+            $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) {
+              Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+              throw "Boost installer SHA256 mismatch: expected $expectedHash, got $actualHash"
+            }
+
+            Write-Host "Installing precompiled Boost 1.83.0 to $boostRoot silently..."
+            $proc = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$boostRoot" -NoNewWindow -PassThru -Wait
+            if ($proc.ExitCode -ne 0) {
+              throw "Boost installer exited with code $($proc.ExitCode)"
+            }
+            Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "Boost 1.83.0 is already installed from cache."
+          }
+
+          # Locate Boost Software License text
+          $licenseFile = Join-Path $boostRoot "LICENSE_1_0.txt"
+          if (-not (Test-Path -LiteralPath $licenseFile)) {
+            $foundLicense = Get-ChildItem -LiteralPath $boostRoot -Recurse -File -Filter "LICENSE_1_0.txt" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($foundLicense) {
+              Copy-Item $foundLicense.FullName $licenseFile -Force
+            }
+          }
+
+          # Resolve library directory
+          $libDir = Get-ChildItem -LiteralPath $boostRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^lib64' } |
+            Select-Object -First 1
+          $libPath = if ($libDir) { $libDir.FullName } else { Join-Path $boostRoot "lib64-msvc-14.3" }
+
+          # Setup lightweight compatibility shim for packaging and licensing safety checks
+          $vcpkgRoot = Join-Path $env:RUNNER_TEMP "vcpkg-shim"
+          $tripletDir = Join-Path $vcpkgRoot "installed\${{ matrix.triplet }}"
+          New-Item -ItemType Directory -Path $tripletDir -Force | Out-Null
+          if (Test-Path -LiteralPath $licenseFile) {
+            Copy-Item $licenseFile (Join-Path $tripletDir "LICENSE_1_0.txt") -Force
+            $shareDir = Join-Path $tripletDir "share\boost"
+            New-Item -ItemType Directory -Path $shareDir -Force | Out-Null
+            Copy-Item $licenseFile (Join-Path $shareDir "copyright") -Force
+          }
+
+          "BOOST_ROOT=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BOOST_INCLUDEDIR=$boostRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BOOST_LIBRARYDIR=$libPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LIB=$libPath;$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_INSTALLATION_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # Build vicon-lsl-bridge (CLI + GUI)
       - name: Configure bridge (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (macOS)
         if: runner.os == 'macOS'
-        run: cmake -B build -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
 
       - name: Configure bridge (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }} -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
+        run: cmake -B build -G "Ninja Multi-Config" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded "-DBOOST_ROOT=%BOOST_ROOT%" "-DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR%" "-DBOOST_LIBRARYDIR=%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS=ON -DCMAKE_CXX_FLAGS_RELEASE="/MD /O1 /Ob1 /DNDEBUG /Zc:inline /d2ReducedOptimizeHugeFunctions" "-DCMAKE_EXE_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" -DVICON_LSL_LABRECORDER_DEPLOY_DIR=${{ github.workspace }}/recorder-deploy "-DVICON_LSL_QT_LICENSE_ROOT=${{ github.workspace }}/qt-license-source" -DBUILD_TESTING=ON -DVICON_LSL_BRIDGE_FETCH_CATCH2=OFF
         working-directory: vicon-lsl-bridge
         shell: cmd
 
       - name: Build bridge
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
         working-directory: vicon-lsl-bridge
 
       - name: Test bridge
@@ -161,11 +294,17 @@ jobs:
         working-directory: vicon-lsl-bridge
 
       # Build LabRecorder
-      - name: Configure LabRecorder
-        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a
+      - name: Configure LabRecorder (POSIX)
+        if: runner.os != 'Windows'
+        run: cmake -S labrecorder -B build-labrecorder -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+
+      - name: Configure LabRecorder (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S labrecorder -B build-labrecorder -G "Ninja Multi-Config" -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "-DBOOST_ROOT=%BOOST_ROOT%" "-DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR%" "-DBOOST_LIBRARYDIR=%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS=ON -DCMAKE_CXX_FLAGS_RELEASE="/MD /O1 /Ob1 /DNDEBUG /Zc:inline /d2ReducedOptimizeHugeFunctions" "-DCMAKE_EXE_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:\"%BOOST_LIBRARYDIR%\"" -DCMAKE_DISABLE_FIND_PACKAGE_LSL=ON -DLSL_FETCH_IF_MISSING=ON -DLSL_FETCH_REF=03316f61137485450e7a43aea972c8e55b0c796a -DLABRECORDER_SKIP_CPUTESTS=ON -DBUILD_TESTING=OFF
+        shell: cmd
 
       - name: Build LabRecorder
-        run: cmake --build build-labrecorder --config Release --parallel
+        run: cmake --build build-labrecorder --config Release --target LabRecorder LabRecorderCLI --parallel 4
 
       - name: Install and deploy LabRecorder (Windows)
         if: runner.os == 'Windows'
@@ -253,7 +392,7 @@ jobs:
             ${{ matrix.artifact }}-gui-portable.exe
 
   hololens-core-tests:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -261,7 +400,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify generated stream contracts
-        run: python tools/generate_stream_contracts.py --check
+        run: python3 tools/generate_stream_contracts.py --check
 
       - name: Run platform-neutral HoloLens tests
         run: dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release

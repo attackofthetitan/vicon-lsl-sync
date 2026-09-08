@@ -446,22 +446,23 @@ function Validate-LicenseBundle {
 
 function Find-BoostRoot {
     param([string]$RequestedPath)
-    if ($RequestedPath) {
+    if ($RequestedPath -and (Test-Path -LiteralPath $RequestedPath -PathType Container)) {
         return (Resolve-Path -LiteralPath $RequestedPath).Path
     }
-    if (-not $env:VCPKG_INSTALLATION_ROOT) {
-        return $null
-    }
-    $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed"
-    if (-not (Test-Path -LiteralPath $installed -PathType Container)) {
-        return $null
-    }
-    foreach ($triplet in Get-ChildItem -LiteralPath $installed -Directory | Sort-Object FullName) {
-        $license = Get-ChildItem -LiteralPath $triplet.FullName -Recurse -File -Filter "LICENSE_1_0.txt" |
-            Select-Object -First 1
-        if ($license) {
-            return $triplet.FullName
+    if ($env:VCPKG_INSTALLATION_ROOT) {
+        $installed = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed"
+        if (Test-Path -LiteralPath $installed -PathType Container) {
+            foreach ($triplet in Get-ChildItem -LiteralPath $installed -Directory | Sort-Object FullName) {
+                $license = Get-ChildItem -LiteralPath $triplet.FullName -Recurse -File -Filter "LICENSE_1_0.txt" |
+                    Select-Object -First 1
+                if ($license) {
+                    return $triplet.FullName
+                }
+            }
         }
+    }
+    if ($env:BOOST_ROOT -and (Test-Path -LiteralPath $env:BOOST_ROOT -PathType Container)) {
+        return (Resolve-Path -LiteralPath $env:BOOST_ROOT).Path
     }
     return $null
 }

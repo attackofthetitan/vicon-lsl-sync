@@ -39,6 +39,15 @@ set(VICON_LSL_QT_LICENSE_ROOT "" CACHE PATH
 
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
+    if(DEFINED BOOST_LIBRARYDIR AND EXISTS "${BOOST_LIBRARYDIR}")
+        link_directories("${BOOST_LIBRARYDIR}")
+    elseif(DEFINED ENV{BOOST_LIBRARYDIR} AND EXISTS "$ENV{BOOST_LIBRARYDIR}")
+        link_directories("$ENV{BOOST_LIBRARYDIR}")
+    endif()
+endif()
+
+if(MSVC AND NOT CMAKE_GENERATOR MATCHES "Ninja")
+    add_compile_options(/MP)
 endif()
 
 add_library(vicon-lsl-bridge-logic STATIC
@@ -101,10 +110,12 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         endif()
     else()
         include(FetchContent)
+        set(LSL_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(LSL_BUILD_TESTING OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(liblsl
             GIT_REPOSITORY https://github.com/sccn/liblsl.git
             GIT_TAG        6ca188c266c21f7228dc67077303fa6abaf2e8be
-            GIT_SHALLOW    FALSE
+            GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(liblsl)
         set(VICON_LSL_LIB_TARGET lsl)

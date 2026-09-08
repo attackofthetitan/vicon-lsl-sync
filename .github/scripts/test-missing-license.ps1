@@ -20,7 +20,15 @@ if (-not $qtCommand) {
 }
 $qtCommandPath = if ($qtCommand.Source) { $qtCommand.Source } else { $qtCommand.Path }
 $qtRoot = Split-Path -Parent (Split-Path -Parent $qtCommandPath)
-$boostRoot = Join-Path $VcpkgInstallationRoot "installed\$Triplet"
+$boostRoot = if ($VcpkgInstallationRoot -and (Test-Path -LiteralPath (Join-Path $VcpkgInstallationRoot "installed\$Triplet"))) {
+    Join-Path $VcpkgInstallationRoot "installed\$Triplet"
+} elseif ($env:BOOST_ROOT -and (Test-Path -LiteralPath $env:BOOST_ROOT)) {
+    $env:BOOST_ROOT
+} elseif ($VcpkgInstallationRoot) {
+    Join-Path $VcpkgInstallationRoot "installed\$Triplet"
+} else {
+    $null
+}
 $liblslSource = (Resolve-Path (Join-Path $Workspace "vicon-lsl-bridge\build\_deps\liblsl-src")).Path
 $probe = Join-Path $RunnerTemp (
     "missing-license-bundle-" + [guid]::NewGuid().ToString("N"))
@@ -35,6 +43,10 @@ try {
         -BoostRootDirectory $boostRoot
 } catch {
     $failed = $true
+} finally {
+    if (Test-Path -LiteralPath $probe) {
+        Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 if (-not $failed) {
     throw "License collector unexpectedly succeeded with a missing Vicon license source"

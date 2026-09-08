@@ -52,7 +52,8 @@ endif()
 
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     set(VICON_LSL_QT_TEST_ENV
-        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:${VICON_LSL_LIB_TARGET}>")
     if(WIN32)
         list(APPEND VICON_LSL_QT_TEST_ENV "QT_QPA_PLATFORM=set:windows")
     else()
@@ -69,41 +70,31 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     set_target_properties(vicon-lsl-recorder-process-fixture PROPERTIES
         AUTOMOC OFF)
 
-    add_executable(vicon-lsl-labrecorder-tests
-        tests/test_labrecorder_client.cpp
-        tests/LabRecorderFilenameTests.cpp
-        tests/LabRecorderClientProtocolTests.cpp
-        tests/SessionGuiModelTests.cpp
-        tests/RecordingVerifierTests.cpp
-        tests/RecorderProcessControllerTests.cpp
-        tests/SessionSequencerTests.cpp
-        tests/SetupCheckPolicyTests.cpp
-        tests/StreamInventoryTests.cpp
-        src/gui/LabRecorderClient.cpp
-        src/gui/LabRecorderFilenamePolicy.cpp
-        src/gui/CalibrationProfileStore.cpp
-        src/gui/RecorderProcessController.cpp
-        src/gui/RecordingVerifier.cpp
-        src/gui/SessionConfiguration.cpp
-        src/gui/SessionSequencer.cpp
-        src/gui/SessionState.cpp
-        src/gui/SetupCheckPolicy.cpp
-        src/gui/StreamInventory.cpp
-    )
-    target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
-    target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE
-        vicon-lsl-bridge-logic
-        Qt6::Core
-        Qt6::Network
-    )
-    set_target_properties(vicon-lsl-labrecorder-tests PROPERTIES AUTOMOC ON)
-    add_dependencies(vicon-lsl-labrecorder-tests
-        vicon-lsl-recorder-process-fixture)
-    add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)
-    set_tests_properties(vicon-lsl-labrecorder-tests PROPERTIES
-        TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
-    )
+    if(TARGET vicon-lsl-bridge-gui-components)
+        add_executable(vicon-lsl-labrecorder-tests
+            tests/test_labrecorder_client.cpp
+            tests/LabRecorderFilenameTests.cpp
+            tests/LabRecorderClientProtocolTests.cpp
+            tests/SessionGuiModelTests.cpp
+            tests/RecordingVerifierTests.cpp
+            tests/RecorderProcessControllerTests.cpp
+            tests/SessionSequencerTests.cpp
+            tests/SetupCheckPolicyTests.cpp
+            tests/StreamInventoryTests.cpp
+        )
+        target_include_directories(vicon-lsl-labrecorder-tests PRIVATE src)
+        target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE
+            vicon-lsl-bridge-gui-components
+        )
+        set_target_properties(vicon-lsl-labrecorder-tests PROPERTIES AUTOMOC ON)
+        add_dependencies(vicon-lsl-labrecorder-tests
+            vicon-lsl-recorder-process-fixture)
+        add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)
+        set_tests_properties(vicon-lsl-labrecorder-tests PROPERTIES
+            TIMEOUT 30
+            ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
+        )
+    endif()
 
     if(TARGET vicon-lsl-bridge-gui-components)
         add_executable(vicon-lsl-bridge-gui-tests
