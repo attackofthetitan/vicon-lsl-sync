@@ -6,7 +6,7 @@
 - Previous release: `v1.14.0`
 - Target date: 2026-09-08
 - Pull requests: `#37` (CI speedup and build tuning)
-- Status: in progress
+- Status: completed
 - Scope: CI build workflow and build system performance optimizations (Ninja Multi-Config, ccache, /MP compilation, prebuilt Boost, Qt license caching, and deduplicated test compilation)
 
 A patch release. It contains build system, CI pipeline, and packaging improvements without breaking any stream contracts or behavior.
@@ -21,7 +21,7 @@ A patch release. It contains build system, CI pipeline, and packaging improvemen
 
 ## Publication
 
-- [ ] Tagged `v1.14.1` on the release commit, with the tagged build green and the
+- [x] Tagged `v1.14.1` on the release commit, with the tagged build green and the
   release assets published.
-- [ ] Assets confirmed against `SHA256SUMS.txt`, with the bundle reporting
+- [x] Assets confirmed against `SHA256SUMS.txt`, with the bundle reporting
   version `1.14.1`.
