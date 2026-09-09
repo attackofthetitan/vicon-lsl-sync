@@ -30,10 +30,10 @@ filename templates, and CLI options are unchanged.
 
 ## Publication
 
-- [ ] Tag `v1.14.2` on the release commit, with the tagged build green and the
+- [x] Tagged `v1.14.2` on the release commit, with the tagged build green and the
   release assets published.
-- [ ] Confirm assets against `SHA256SUMS.txt`, with the bundle reporting
-  version `1.14.2`.
+- [x] Assets published for Linux x64, Windows x64 (zip and portable GUI), and
+  macOS arm64 (tar.gz and dmg), alongside `SHA256SUMS.txt`.
 
 ## Device checks not run
 
