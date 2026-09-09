@@ -60,10 +60,16 @@ void testNormalizedPathPolicy() {
     expect(LabRecorderFilenamePolicy::renderedFilename(valid.normalized_fields) ==
                valid.relative_path,
            "normalized fields render the checked relative destination");
-    expect(LabRecorderFilenamePolicy::filenameCommand(
-               valid.normalized_fields).contains(
-                   "{root:" + valid.normalized_fields.root + "}"),
+    const QString valid_command =
+        LabRecorderFilenamePolicy::filenameCommand(valid.normalized_fields);
+    expect(valid_command.contains("{root:" + valid.normalized_fields.root + "}"),
            "filename command uses the canonical normalized root");
+    // The recorder writes root + its own expansion of the template. Carrying the
+    // checked relative path in the case-preserving %b field is what keeps the
+    // written file equal to the destination the app previewed and verified.
+    expect(valid_command.contains("{template:%b}") &&
+               valid_command.contains("{task:" + valid.relative_path + "}"),
+           "filename command sends the checked destination the recorder will write");
 
     fields.participant = "P{unsafe}";
     expect(!LabRecorderFilenamePolicy::validate(fields).valid(),

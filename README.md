@@ -143,6 +143,12 @@ closing the recorder.
    preview, stream search, setup check, and recording steps.
 8. Select **Stop Recording** or **Stop Session** when finished.
 
+The bridge expands the filename pattern before sending it to the graphical
+LabRecorder, preserving the exact case, folders, and run formatting shown in
+the destination preview. For compatibility with LabRecorder's legacy protocol,
+its template field shows `%b` and its task field carries the resolved relative
+filename; edit recording details in the bridge.
+
 **Recording Destination** shows the final full path checked by the app, sent to
 the recorder, and saved in the session details. The app appends `.xdf` when
 needed and blocks paths that escape the study folder,

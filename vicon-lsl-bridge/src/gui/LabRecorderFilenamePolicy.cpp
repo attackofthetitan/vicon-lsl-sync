@@ -129,9 +129,16 @@ QString RecordingPathResult::summary() const {
 }
 
 QString LabRecorderFilenamePolicy::filenameCommand(const LabRecorderFilenameFields& fields) {
+    // LabRecorder lowercases explicit templates, switches them to legacy mode
+    // (%n rather than %r), and pads the run itself. Its legacy %b replacement
+    // preserves case, so carry our already validated relative path in that field.
+    // The bridge remains the authority for template expansion and run formatting.
+    LabRecorderFilenameFields wire_fields = fields;
+    wire_fields.templ = "%b";
+    wire_fields.task = renderedFilename(fields);
     QString command = "filename";
     for (const RecordingField& field : kRecordingFields) {
-        appendField(command, QLatin1String(field.command_key), fields.*(field.value));
+        appendField(command, QLatin1String(field.command_key), wire_fields.*(field.value));
     }
     return command;
 }

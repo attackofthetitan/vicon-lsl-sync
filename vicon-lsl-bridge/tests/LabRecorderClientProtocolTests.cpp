@@ -78,7 +78,7 @@ void testTcpCommandSequence() {
 
     std::vector<QString> expected = {
         "update",
-        "filename {root:/tmp/data} {template:sub-%p_task-%b_run-%r.xdf} {participant:P002} {task:Walk} {run:3}",
+        "filename {root:/tmp/data} {template:%b} {participant:P002} {task:sub-P002_task-Walk_run-3.xdf} {run:3}",
         "start",
         "stop",
     };
@@ -147,8 +147,8 @@ void testTcpStartRecordingSequenceWithSelectAll() {
            "server receives select-all before filename in combined start sequence");
     expect(writeReply(socket.get(), "OK"), "server acknowledges select-all");
     expect(readCommand(socket.get()) ==
-               "filename {root:/tmp/data} {template:sub-%p_task-%b_run-%r.xdf} "
-               "{participant:P003} {task:Jump} {run:4}",
+               "filename {root:/tmp/data} {template:%b} "
+               "{participant:P003} {task:sub-P003_task-Jump_run-4.xdf} {run:4}",
            "server receives filename before start in combined start sequence");
     expect(writeReply(socket.get(), "OK"), "server acknowledges start filename");
     expect(readCommand(socket.get()) == "start",

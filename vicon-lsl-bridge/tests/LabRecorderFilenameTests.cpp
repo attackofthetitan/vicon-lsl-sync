@@ -1,5 +1,6 @@
 #include "LabRecorderClientTestSupport.h"
 #include "gui/LabRecorderClient.h"
+#include <QRegularExpression>
 
 namespace labrecorder_client_tests {
 
@@ -15,10 +16,37 @@ void testFilenameCommand() {
     fields.modality = "beh";
 
     QString command = LabRecorderFilenamePolicy::filenameCommand(fields);
-    expect(command == "filename {root:C:/Data/_bad_} {template:sub-%p/%b.xdf} "
-                      "{participant:P001} {session:S001} {task:Reach Task} "
+    expect(command == "filename {root:C:/Data/_bad_} {template:%b} "
+                      "{participant:P001} {session:S001} {task:sub-P001/Reach Task.xdf} "
                       "{run:2} {acquisition:vicon} {modality:beh}",
            "formats and sanitizes filename command");
+
+    // Exercise the actual recorder's legacy semantics: template/modality are
+    // lowercased, %r is unavailable, and %n is padded to three digits.
+    for (const QString& run : {QString("1"), QString("007")}) {
+        fields.root = "/tmp/Study Root";
+        fields.templ = "Upper/sub-%p/ses-%s/%m/Task-%b_Run-%r_Legacy-%n.xdf";
+        fields.task = "AR Walking";
+        fields.run = run;
+        fields.modality = "U";
+        QMap<QString, QString> options;
+        auto matches = QRegularExpression("\\{(\\w+):([^}]*)\\}")
+                           .globalMatch(LabRecorderFilenamePolicy::filenameCommand(fields));
+        while (matches.hasNext()) {
+            const auto match = matches.next();
+            options[match.captured(1)] = match.captured(2);
+        }
+        QString actual = options["template"].toLower();
+        actual.replace("%b", options["task"]);
+        actual.replace("%p", options["participant"]);
+        actual.replace("%s", options["session"]);
+        actual.replace("%a", options["acquisition"]);
+        actual.replace("%m", options["modality"].toLower());
+        actual.replace("%n", QString("%1").arg(options["run"].toInt(), 3, 10, QChar('0')));
+        expect(actual == "Upper/sub-P001/ses-S001/U/Task-AR Walking_Run-" + run +
+                             "_Legacy-" + run + ".xdf",
+               "legacy recorder preserves the bridge's exact case, directories and run format");
+    }
 }
 
 void testRenderedFilenameUsesSharedSanitization() {
@@ -70,7 +98,7 @@ void testStartRecordingCommands() {
         LabRecorderFilenamePolicy::startRecordingCommands(fields, false);
     expect(without_select.size() == 2, "start command sequence without select-all has two commands");
     expect(without_select.value(0) ==
-               "filename {root:/tmp/data} {template:sub-%p_task-%b.xdf} {participant:P002} {task:Walk}",
+               "filename {root:/tmp/data} {template:%b} {participant:P002} {task:sub-P002_task-Walk.xdf}",
            "start command sequence includes filename command first");
     expect(without_select.value(1) == "start", "start command sequence starts recording last");
 

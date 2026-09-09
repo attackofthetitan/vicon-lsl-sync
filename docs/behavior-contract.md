@@ -282,9 +282,20 @@ only for an accepted Start request. Low or unavailable storage is a visible
 warning at the configured threshold rather than a silent condition.
 
 The path shown in **Recording Destination** must equal the path passed to
-the recorder. **Find Next Run** searches at most 1,000 positive run values for a
-nonexistent destination. Optional automatic increment runs only after the file
-exists and the configured file-check completion rule is satisfied.
+the recorder. The app therefore expands the tokens itself instead of delegating
+expansion to the graphical recorder, which lowercases an explicit `template`,
+switches it to the legacy counter `%n`, and pads the run to three digits; a
+delegated template would write a different path than the one checked here. The
+remote command sets `template` to `%b` and carries the resolved relative path in
+`task`, the one field that recorder substitutes before any other and copies
+without changing case. `root`, `participant`, `session`, `run`, `acquisition`,
+and `modality` are still sent so the recorder window shows the same recording
+details, but they no longer affect the written path. Recording details are
+edited in this app.
+
+**Find Next Run** searches at most 1,000 positive run values for a nonexistent
+destination. Optional automatic increment runs only after the file exists and
+the configured file-check completion rule is satisfied.
 
 The default pattern is:
 

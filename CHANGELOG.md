@@ -2,6 +2,49 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.2] - 2026-09-09
+
+### Fixed
+
+- The graphical LabRecorder now writes the exact destination shown in
+  **Recording Destination**. The app sent its filename template to the recorder
+  and let the recorder expand it, but that recorder lowercases the template it
+  is given, treats it as a legacy pattern whose run counter is `%n` rather than
+  `%r`, and pads that counter to three digits. Template `sub-%p/ses-%s/Task-%b_run-%r.xdf`
+  with participant `P001` and run `1`, checked and displayed here as
+  `sub-P001/ses-S001/Task-AR Walking_run-1.xdf`, was written as
+  `sub-P001/ses-S001/task-AR Walking_run-%r.xdf`: the literal text of the
+  template lost its case and `%r` survived unreplaced. A template using `%n`
+  instead recorded run `1` as `001`. Substituted participant, session, task, and
+  acquisition values kept their case; the modality value did not. The app now
+  expands every token itself and sends the resolved relative path in the
+  recorder's `task` field with `template` set to `%b`, the one substitution that
+  recorder applies first and copies without changing case. The written file
+  matches the checked and displayed path, including case, subdirectories, and
+  the run format entered here.
+
+### Changed
+
+- `root`, `participant`, `session`, `run`, `acquisition`, and `modality` are
+  still sent so the recorder window shows the same recording details, but they
+  no longer affect the written path. Recording details are edited in this app.
+- Added regression coverage that replays the recorder's legacy substitution
+  order over the emitted command, and that ties the command's `task` field to
+  the destination the app checked.
+
+### Compatibility
+
+- No change to stream schemas, XDF contents, saved session profiles, filename
+  templates, or CLI options. Saved templates keep their meaning and now resolve
+  the same way in the recorder as in the destination preview. Roll back to
+  `v1.14.1`.
+- The remote `filename` command's encoding changed, affecting only what this app
+  sends to the graphical recorder over its remote-control port. The
+  selected-stream `LabRecorderCLI` path, which already received a full resolved
+  path, is unchanged.
+- The standalone logic suite passed all 79 tests. Physical Vicon, HoloLens, and
+  Vuforia checks were not run.
+
 ## [1.14.1] - 2026-09-08
 
 ### Changed
