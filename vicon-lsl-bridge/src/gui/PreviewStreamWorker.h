@@ -70,13 +70,12 @@ private:
     bool streamIsFresh(const StreamState& state, qint64 now_ms) const;
     bool calibrationFramesCompatible() const;
     PreviewTransformProfile currentGazeTransform() const;
-    void publishLatestFrame(PreviewFrame frame);
     void updateStatus(qint64 now_ms);
     void replaceInventory(PreviewStreamRole role, QVector<gui::StreamIdentity> streams,
                           const QString& warning);
     QString streamStatusText(const StreamState& state, qint64 now_ms) const;
 
-    PreviewWorkerConfig config_;
+    double match_tolerance_seconds_;
     std::unique_ptr<StreamState> markers_;
     std::unique_ptr<StreamState> segments_;
     std::unique_ptr<StreamState> gaze_;
@@ -85,7 +84,6 @@ private:
     mutable std::mutex inventory_mutex_;
     PreviewDeliveryMailbox delivery_mailbox_;
     QVector<vicon_lsl::gui::StreamIdentity> inventory_;
-    qint64 last_status_ms_ = 0;
 };
 
 } // namespace vicon_lsl

@@ -11,6 +11,7 @@
 
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QStringList>
 #include <tuple>
 
 namespace vicon_lsl {
@@ -53,9 +54,7 @@ std::vector<std::string> channelLabels(lsl::stream_info& info, PreviewStreamRole
     return labels;
 }
 
-// A fresh timer stamps the current monotonic reading, so this reads as "now".
-// msecsSinceReference() on a long-lived timer would instead keep returning the
-// instant it was started, which never advances.
+// msecsSinceReference() returns the timer's start time, so start a fresh timer.
 qint64 steadyNowMs() {
     QElapsedTimer timer;
     timer.start();
@@ -102,32 +101,32 @@ struct PreviewStreamWorker::StreamState {
 };
 
 PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* parent)
-    : QThread(parent), config_(std::move(config)),
+    : QThread(parent), match_tolerance_seconds_(config.match_tolerance_seconds),
       markers_(std::make_unique<StreamState>()), segments_(std::make_unique<StreamState>()),
       gaze_(std::make_unique<StreamState>()), calibration_target_(std::make_unique<StreamState>()) {
     qRegisterMetaType<gui::StreamIdentity>("vicon_lsl::gui::StreamIdentity");
     qRegisterMetaType<QVector<gui::StreamIdentity>>("QVector<vicon_lsl::gui::StreamIdentity>");
     qRegisterMetaType<ComponentLifecycleState>("ComponentLifecycleState");
-    config_.vicon_transform.name = "Vicon";
-    config_.vicon_transform.scale = config_.vicon_transform.scale == 0.0 ? 0.001 : config_.vicon_transform.scale;
-    config_.gaze_transform.name = "HoloLens";
+    config.vicon_transform.name = "Vicon";
+    if (config.vicon_transform.scale == 0.0) config.vicon_transform.scale = 0.001;
+    config.gaze_transform.name = "HoloLens";
 
-    auto initStream = [](StreamState& s, const QString& name, const QString& src, bool follow,
-                         PreviewStreamRole role, const PreviewTransformProfile& xform) {
-        s.requested_name = name;
-        s.configured_source_id = src;
-        s.follow_by_name = follow;
-        s.role = role;
-        s.transform = xform;
+    auto initStream = [](StreamState& stream, const QString& name, const QString& source_id, bool follow,
+                         PreviewStreamRole role, const PreviewTransformProfile& transform) {
+        stream.requested_name = name;
+        stream.configured_source_id = source_id;
+        stream.follow_by_name = follow;
+        stream.role = role;
+        stream.transform = transform;
     };
-    initStream(*markers_, config_.marker_stream_name, config_.marker_source_id, config_.marker_follow_by_name,
-               PreviewStreamRole::ViconMarkers, config_.vicon_transform);
-    initStream(*segments_, config_.segment_stream_name, config_.segment_source_id, config_.segment_follow_by_name,
-               PreviewStreamRole::ViconSegments, config_.vicon_transform);
-    initStream(*gaze_, config_.gaze_stream_name, config_.gaze_source_id, config_.gaze_follow_by_name,
-               PreviewStreamRole::HoloLensGaze, config_.gaze_transform);
-    initStream(*calibration_target_, config_.calibration_stream_name, config_.calibration_source_id,
-               config_.calibration_follow_by_name, PreviewStreamRole::HoloLensCalibrationTarget, {});
+    initStream(*markers_, config.marker_stream_name, config.marker_source_id, config.marker_follow_by_name,
+               PreviewStreamRole::ViconMarkers, config.vicon_transform);
+    initStream(*segments_, config.segment_stream_name, config.segment_source_id, config.segment_follow_by_name,
+               PreviewStreamRole::ViconSegments, config.vicon_transform);
+    initStream(*gaze_, config.gaze_stream_name, config.gaze_source_id, config.gaze_follow_by_name,
+               PreviewStreamRole::HoloLensGaze, config.gaze_transform);
+    initStream(*calibration_target_, config.calibration_stream_name, config.calibration_source_id,
+               config.calibration_follow_by_name, PreviewStreamRole::HoloLensCalibrationTarget, {});
 }
 
 PreviewStreamWorker::~PreviewStreamWorker() {
@@ -153,7 +152,7 @@ void PreviewStreamWorker::setGazeTransform(PreviewTransformProfile transform) {
 
 void PreviewStreamWorker::run() {
     emit lifecycleChanged(ComponentLifecycleState::Starting, "Resolving configured streams");
-    last_status_ms_ = 0;
+    qint64 last_status_ms = 0;
 
     emit lifecycleChanged(ComponentLifecycleState::Running, "Live preview worker running");
     StreamState* const all_streams[] = {markers_.get(), segments_.get(), gaze_.get(), calibration_target_.get()};
@@ -185,13 +184,15 @@ void PreviewStreamWorker::run() {
                  segments_->connected(), streamIsFresh(*segments_, now), segments_updated},
                 {gaze_->labels, gaze_->latest_sample, gaze_transform, gaze_->latest_timestamp,
                  gaze_->connected(), streamIsFresh(*gaze_, now), gaze_updated},
-                config_.match_tolerance_seconds};
-            if (auto frame = assemblePreviewFrame(frame_snapshot)) publishLatestFrame(std::move(*frame));
+                match_tolerance_seconds_};
+            if (auto frame = assemblePreviewFrame(frame_snapshot)) {
+                delivery_mailbox_.publish(std::move(*frame), steadyNowMs());
+            }
         }
 
-        if (now - last_status_ms_ >= kStatusIntervalMs) {
+        if (now - last_status_ms >= kStatusIntervalMs) {
             updateStatus(now);
-            last_status_ms_ = now;
+            last_status_ms = now;
         }
         msleep(4);
     }
@@ -209,6 +210,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 0, kResolveTimeoutSeconds);
         if (streams.empty()) return false;
 
+        // Keep the displayed candidates in a consistent order.
         std::stable_sort(streams.begin(), streams.end(), [](const lsl::stream_info& left, const lsl::stream_info& right) {
             return std::make_tuple(left.source_id(), left.hostname(), left.session_id(), left.name()) <
                    std::make_tuple(right.source_id(), right.hostname(), right.session_id(), right.name());
@@ -329,10 +331,6 @@ void PreviewStreamWorker::replaceInventory(PreviewStreamRole role,
     for (const auto& stream : streams) emit streamIdentityChanged(stream, warning);
 }
 
-void PreviewStreamWorker::publishLatestFrame(PreviewFrame frame) {
-    delivery_mailbox_.publish(std::move(frame), steadyNowMs());
-}
-
 bool PreviewStreamWorker::streamIsFresh(const StreamState& state, qint64 now_ms) const {
     return state.hasSample() && now_ms - state.last_sample_ms <= kStaleSampleMs;
 }
@@ -347,9 +345,9 @@ PreviewTransformProfile PreviewStreamWorker::currentGazeTransform() const {
 }
 
 void PreviewStreamWorker::updateStatus(qint64 now_ms) {
+    const StreamState* const states[] = {markers_.get(), segments_.get(), gaze_.get(), calibration_target_.get()};
     {
         std::lock_guard<std::mutex> lock(inventory_mutex_);
-        const StreamState* const states[] = {markers_.get(), segments_.get(), gaze_.get(), calibration_target_.get()};
         for (const StreamState* state : states) {
             for (gui::StreamIdentity& identity : inventory_) {
                 if (identity.stableKey() != state->identity.stableKey()) continue;
@@ -364,17 +362,20 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
             }
         }
     }
-    QString status = streamStatusText(*markers_, now_ms) + "; " + streamStatusText(*segments_, now_ms) + "; " +
-                     streamStatusText(*gaze_, now_ms) + "; " + streamStatusText(*calibration_target_, now_ms);
-    if (!markers_->last_error.isEmpty()) status += "; markers error: " + markers_->last_error;
-    if (!segments_->last_error.isEmpty()) status += "; segments error: " + segments_->last_error;
-    if (!gaze_->last_error.isEmpty()) status += "; gaze error: " + gaze_->last_error;
-    if (!calibration_target_->last_error.isEmpty()) status += "; calibration error: " + calibration_target_->last_error;
-    if (gaze_->connected() && calibration_target_->connected() && !calibrationFramesCompatible()) {
-        status += "; calibration unavailable: gaze frame " + QString::fromStdString(gaze_->coordinate_frame) +
-                  " differs from target frame " + QString::fromStdString(calibration_target_->coordinate_frame);
+    QStringList messages;
+    for (const StreamState* state : states) {
+        messages.push_back(streamStatusText(*state, now_ms));
     }
-    emit statusChanged(status);
+    for (const StreamState* state : states) {
+        if (!state->last_error.isEmpty()) {
+            messages.push_back(roleText(state->role) + " error: " + state->last_error);
+        }
+    }
+    if (gaze_->connected() && calibration_target_->connected() && !calibrationFramesCompatible()) {
+        messages.push_back("calibration unavailable: gaze frame " + QString::fromStdString(gaze_->coordinate_frame) +
+                           " differs from target frame " + QString::fromStdString(calibration_target_->coordinate_frame));
+    }
+    emit statusChanged(messages.join("; "));
 }
 
 QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 now_ms) const {

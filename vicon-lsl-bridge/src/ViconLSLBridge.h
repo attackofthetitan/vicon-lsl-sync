@@ -58,8 +58,7 @@ private:
     void waitForRetry();
     void streamFrames(vicon_lsl::ViconTimestampState& timestamp_state);
     void resetConnectedSession();
-    bool initializeStreams();
-    bool checkLayoutChanged();
+    bool refreshStreams(BridgeState state);
     bool streamFrame(double timestamp);
     void reportStatus(BridgeState state, const std::string& message = "");
     void handleDiagnostics(const std::vector<vicon_lsl::ViconDiagnostic>& diagnostics,

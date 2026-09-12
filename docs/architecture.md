@@ -85,6 +85,9 @@ Each class has one main job:
 - `ViconLSLBridge::run()` connects, reads the first frame, creates streams, and
   cleans up before retrying. `streamFrames()` sends frames and checks for layout
   changes. Retry decisions stay in `run()` without a separate session-result type.
+  `refreshStreams()` reads the layout once and uses that result to create or
+  replace streams. A failed periodic layout check keeps the current streams;
+  a failed first check waits for reconnection.
 - Marker and segment streams build their channel values with ordinary loops,
   then pass them to the shared output helper for size checks and sending.
 

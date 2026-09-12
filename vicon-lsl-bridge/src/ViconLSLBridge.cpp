@@ -111,7 +111,7 @@ void ViconLSLBridge::run() {
         previous_first_frame_failed = false;
         frame_count_ = client_->frameNumber();
 
-        if (initializeStreams()) {
+        if (refreshStreams(BridgeState::Connecting)) {
             streamFrames(timestamp_state);
             resetConnectedSession();
         } else {
@@ -159,15 +159,9 @@ void ViconLSLBridge::streamFrames(vicon_lsl::ViconTimestampState& timestamp_stat
         if (++frames_since_layout_check_ >= 100) {
             frames_since_layout_check_ = 0;
             reportStatus(BridgeState::Streaming);
-            if (checkLayoutChanged()) {
-                std::cout << "Layout changed, reinitializing streams" << std::endl;
-                marker_stream_.destroy();
-                segment_stream_.destroy();
-                if (!initializeStreams()) {
-                    reportStatus(BridgeState::Connecting, last_diagnostic_message_);
-                    return;
-                }
-                reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
+            if (!refreshStreams(BridgeState::Streaming)) {
+                reportStatus(BridgeState::Connecting, last_diagnostic_message_);
+                return;
             }
         }
     }
@@ -204,11 +198,18 @@ void ViconLSLBridge::waitForRetry() {
     }
 }
 
-bool ViconLSLBridge::initializeStreams() {
+bool ViconLSLBridge::refreshStreams(BridgeState state) {
     const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
     if (!discovery.ok()) {
-        handleDiagnostics(discovery.diagnostics, BridgeState::Connecting);
-        return false;
+        handleDiagnostics(discovery.diagnostics, state);
+        // A failed periodic check leaves the working streams in place.
+        return state == BridgeState::Streaming;
+    }
+    if (state == BridgeState::Streaming) {
+        if (discovery.layout == known_layout_) return true;
+        std::cout << "Layout changed, reinitializing streams" << std::endl;
+        marker_stream_.destroy();
+        segment_stream_.destroy();
     }
 
     known_layout_ = discovery.layout;
@@ -254,16 +255,10 @@ bool ViconLSLBridge::initializeStreams() {
         std::cerr << last_diagnostic_message_ << std::endl;
         return false;
     }
-    return true;
-}
-
-bool ViconLSLBridge::checkLayoutChanged() {
-    const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
-    if (!discovery.ok()) {
-        handleDiagnostics(discovery.diagnostics);
-        return false;
+    if (state == BridgeState::Streaming) {
+        reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
     }
-    return discovery.layout != known_layout_;
+    return true;
 }
 
 bool ViconLSLBridge::streamFrame(double timestamp) {

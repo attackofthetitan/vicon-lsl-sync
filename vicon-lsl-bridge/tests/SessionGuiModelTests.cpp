@@ -248,6 +248,18 @@ void testSessionConfiguration() {
     selection = vicon_lsl::gui::selectStreamIdentity(candidates, binding);
     expect(selection.index == 1 && selection.used_name_fallback,
            "Follow by name chooses the deterministic stable identity and reports fallback");
+
+    binding.source_id = first.source_id;
+    first.publisher_created_at = second.publisher_created_at = 20.0;
+    second.source_id = first.source_id;
+    first.uid = "b";
+    second.uid = "a";
+    expect(vicon_lsl::gui::selectStreamIdentity({first, second}, binding).index == 1 &&
+               vicon_lsl::gui::selectStreamIdentity({second, first}, binding).index == 0,
+           "equally recent publishers are chosen consistently regardless of discovery order");
+    selection = vicon_lsl::gui::selectStreamIdentity({}, binding);
+    expect(selection.index < 0 && selection.should_warn,
+           "an empty discovery result reports the missing stream");
 }
 
 void testSessionEventLog() {

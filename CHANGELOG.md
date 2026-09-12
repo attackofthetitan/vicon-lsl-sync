@@ -2,6 +2,10 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.3] - 2026-09-12
+
+- Simplified bridge, preview, and gaze publishing code.
+
 ## [1.14.2] - 2026-09-09
 
 ### Fixed

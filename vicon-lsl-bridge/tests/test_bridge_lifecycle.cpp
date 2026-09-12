@@ -36,6 +36,8 @@ public:
     int connect_calls = 0;
     int disconnect_calls = 0;
     int get_frame_calls = 0;
+    mutable int discovery_calls = 0;
+    bool fail_discovery = false;
 
     bool connect() override {
         ++connect_calls;
@@ -73,7 +75,9 @@ public:
     double frameRate() const override { return 120.0; }
 
     vicon_lsl::CountRead readSubjectCount() const override {
+        ++discovery_calls;
         vicon_lsl::CountRead read;
+        if (fail_discovery) read.status = vicon_lsl::ViconReadStatus::SdkError;
         read.value = expose_marker ? 1u : 0u;
         return read;
     }
@@ -443,6 +447,34 @@ void testLayoutChangeReplacesStreams() {
            "layout change replaces the marker stream and adds a working segment stream");
     expect(client->connect_calls == 1 && client->disconnect_calls == 1,
            "layout replacement keeps the Vicon connection until stop");
+    expect(client->discovery_calls == 2,
+           "layout replacement uses the discovered layout without reading it again");
+}
+
+void testFailedLayoutCheckKeepsStreaming() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 202;
+    client->expose_marker = true;
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = vicon_lsl::bridge_internal::BridgeTestAccess::create(
+        testConfig(), {client, outletFactory(outlets), [] { return 200.0; },
+                       [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 101) client->fail_discovery = true;
+        if (call == 102) {
+            expect(outlets->created == 1, "failed discovery leaves the working outlet in place");
+            client->fail_discovery = false;
+            client->expose_segment = true;
+        }
+        if (call == 202) bridge->stop();
+    };
+
+    bridge->run();
+
+    expect(outlets->created == 3 && outlets->pushed == 202,
+           "streaming continues through failed discovery and picks up the next valid layout");
+    expect(client->connect_calls == 1 && client->discovery_calls == 3,
+           "periodic discovery failure waits for the next check without reconnecting");
 }
 
 void testStopDuringNonCancellableSdkDelayKeepsCallerResponsive() {
@@ -499,6 +531,7 @@ int main() {
     testStopDuringSuccessfulConnectionDisconnects();
     testInitializationFailureClosesPartialStreams();
     testLayoutChangeReplacesStreams();
+    testFailedLayoutCheckKeepsStreaming();
     testStopDuringNonCancellableSdkDelayKeepsCallerResponsive();
     if (failures != 0) {
         std::cerr << failures << " test failure(s)" << std::endl;

@@ -51,17 +51,6 @@ std::string groupKey(const XdfStreamData& stream) {
     return key.str();
 }
 
-int rolePriority(PreviewStreamRole role) {
-    switch (role) {
-        case PreviewStreamRole::ViconMarkers: return 0;
-        case PreviewStreamRole::ViconSegments: return 1;
-        case PreviewStreamRole::HoloLensGaze: return 2;
-        case PreviewStreamRole::HoloLensCalibrationTarget: return 3;
-        case PreviewStreamRole::Unknown: return 4;
-    }
-    return 4;
-}
-
 struct Group {
     std::string key;
     PreviewStreamRole role = PreviewStreamRole::Unknown;
@@ -69,11 +58,11 @@ struct Group {
 };
 
 std::vector<Group> groupsFor(const XdfLoadResult& xdf) {
-    std::map<std::string, Group> groups;
+    std::map<std::pair<PreviewStreamRole, std::string>, Group> groups;
     for (const XdfStreamData& stream : xdf.streams) {
         if (!stream.numeric || stream.samples.empty() || !supportedRole(stream.role)) continue;
         const std::string key = groupKey(stream);
-        Group& group = groups[key];
+        Group& group = groups[{stream.role, key}];
         group.key = key;
         group.role = stream.role;
         group.streams.push_back(&stream);
@@ -87,9 +76,6 @@ std::vector<Group> groupsFor(const XdfLoadResult& xdf) {
             });
         result.push_back(std::move(item.second));
     }
-    std::stable_sort(result.begin(), result.end(), [](const Group& left, const Group& right) {
-        return std::tie(left.role, left.key) < std::tie(right.role, right.key);
-    });
     return result;
 }
 
@@ -231,7 +217,8 @@ XdfMappingAnalysis analyzeXdfStreamMapping(const XdfLoadResult& xdf) {
         const Group* group = chooseSuggestedGroup(groups, role);
         if (!group) continue;
         analysis.suggested_mapping.selected_stream_ids.push_back(group->streams.front()->stream_id);
-        if (analysis.suggested_mapping.master_stream_id == 0 && rolePriority(role) <= 2) {
+        if (analysis.suggested_mapping.master_stream_id == 0 &&
+            role != PreviewStreamRole::HoloLensCalibrationTarget) {
             analysis.suggested_mapping.master_stream_id = group->streams.front()->stream_id;
         }
     }
@@ -257,7 +244,9 @@ XdfLoadResult applyXdfStreamMapping(const XdfLoadResult& xdf,
     std::map<PreviewStreamRole, std::vector<const Group*>> by_role;
     for (const Group& group : groups) by_role[group.role].push_back(&group);
 
-    std::vector<const Group*> selected_groups;
+    XdfLoadResult result;
+    result.truncated_tail_ignored = xdf.truncated_tail_ignored;
+    result.file_size_bytes = xdf.file_size_bytes;
     for (const auto& item : by_role) {
         const Group* selected = nullptr;
         for (const Group* group : item.second) {
@@ -266,7 +255,7 @@ XdfLoadResult applyXdfStreamMapping(const XdfLoadResult& xdf,
                     return requested.find(stream->stream_id) != requested.end();
                 });
             if (requested_group) {
-                if (selected && selected != group) {
+                if (selected) {
                     throw std::runtime_error("Mapping selects incompatible streams for the same preview role");
                 }
                 selected = group;
@@ -278,16 +267,9 @@ XdfLoadResult applyXdfStreamMapping(const XdfLoadResult& xdf,
             }
             selected = item.second.front();
         }
-        selected_groups.push_back(selected);
-    }
-
-    XdfLoadResult result;
-    result.truncated_tail_ignored = xdf.truncated_tail_ignored;
-    result.file_size_bytes = xdf.file_size_bytes;
-    for (const Group* group : selected_groups) {
-        XdfStreamData stitched = stitchGroup(*group, maximum_samples_per_stream);
+        XdfStreamData stitched = stitchGroup(*selected, maximum_samples_per_stream);
         if (mapping.master_stream_id != 0 &&
-            std::any_of(group->streams.begin(), group->streams.end(),
+            std::any_of(selected->streams.begin(), selected->streams.end(),
                 [&mapping](const XdfStreamData* stream) {
                     return stream->stream_id == mapping.master_stream_id;
                 })) {
@@ -295,10 +277,6 @@ XdfLoadResult applyXdfStreamMapping(const XdfLoadResult& xdf,
         }
         result.streams.push_back(std::move(stitched));
     }
-    std::stable_sort(result.streams.begin(), result.streams.end(),
-        [](const XdfStreamData& left, const XdfStreamData& right) {
-            return std::tie(left.role, left.stream_id) < std::tie(right.role, right.stream_id);
-        });
     for (const XdfStreamData& stream : result.streams) {
         result.estimated_memory_bytes += stream.timestamps.capacity() * sizeof(double);
         for (const auto& sample : stream.samples) {

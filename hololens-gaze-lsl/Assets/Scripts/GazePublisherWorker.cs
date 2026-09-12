@@ -60,9 +60,7 @@ namespace GazeLSL
 
     public sealed class GazePublisherWorker
     {
-        // A step publishes at most one sample, so unless steps outpace the tracker a
-        // queue built during a stall never shrinks and accumulates until the backlog
-        // policy dumps it. Does not affect the rate declared on the stream.
+        // Poll faster than the tracker so queued readings drain after a brief delay.
         private const double PublishOversample = 1.25;
 
         private readonly object lifecycleLock = new object();
@@ -165,7 +163,7 @@ namespace GazeLSL
             if (!threadToJoin.Join(timeoutMilliseconds))
             {
                 // The worker may still be inside a provider or outlet call. Retain every
-                // dependency and the cancellation primitive until that call returns.
+                // dependency and the stop signal until that call returns.
                 return false;
             }
 
@@ -192,7 +190,7 @@ namespace GazeLSL
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 double nextSampleMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
                 int consecutiveProviderFailures = 0;
-                int providerRecoveryThreshold = (int)Math.Max(3.0, stepRate);
+                int providerFailureLimit = (int)Math.Max(3.0, stepRate);
 
                 while (!stopSignal.IsSet)
                 {
@@ -205,69 +203,39 @@ namespace GazeLSL
 
                     GazeSample sample;
                     bool hasSample;
-                    bool providerThrew = false;
                     try
                     {
                         Interlocked.Increment(ref providerCallCount);
                         hasSample = provider.TryGetNextSample(out sample);
                         consecutiveProviderFailures = 0;
+                        if (!hasSample)
+                        {
+                            // Empty polls between tracker readings leave the last
+                            // delivery state unchanged.
+                            Interlocked.Increment(ref providerEmptyCount);
+                        }
                     }
                     catch (Exception e)
                     {
-                        providerThrew = true;
                         Volatile.Write(ref lastProviderException, e);
                         Interlocked.Increment(ref providerExceptionCount);
                         consecutiveProviderFailures++;
-                        if (consecutiveProviderFailures >= providerRecoveryThreshold)
+                        if (consecutiveProviderFailures >= providerFailureLimit)
                         {
-                            // The main thread will retire this projected tracker and
-                            // re-enumerate a fresh Extended Eye Tracking SDK session.
+                            // Ask the main thread to reconnect to the tracker.
                             Volatile.Write(ref providerFailure, e);
                             break;
                         }
 
-                        // XR focus changes can briefly invalidate a projected WinRT
-                        // reading. Retry on the next configured acquisition tick.
+                        // Focus changes can briefly interrupt the tracker. Try again
+                        // at the next scheduled read.
                         hasSample = false;
                         sample = default(GazeSample);
                     }
 
                     if (hasSample)
                     {
-                        GazeSampleEncoder.WriteSample(sample, sampleBuffer);
-                        double timestamp = sample.Timestamp;
-                        if (IsFinite(timestamp) && timestamp > 0.0)
-                        {
-                            outlet.PushSample(sampleBuffer, timestamp);
-                            Interlocked.Increment(ref pushedSampleCount);
-                            if (sample.CombinedValid || sample.LeftEyeValid || sample.RightEyeValid)
-                            {
-                                Interlocked.Increment(ref pushedValidGazeSampleCount);
-                                Volatile.Write(
-                                    ref deliveryState,
-                                    (int)GazeDeliveryState.PublishingValidGaze);
-                            }
-                            else
-                            {
-                                Volatile.Write(
-                                    ref deliveryState,
-                                    (int)GazeDeliveryState.PublishingSamplesWithoutValidRays);
-                            }
-                        }
-                        else
-                        {
-                            Interlocked.Increment(ref rejectedTimestampCount);
-                            Volatile.Write(
-                                ref deliveryState,
-                                (int)GazeDeliveryState.RejectingInvalidTimestamp);
-                        }
-                    }
-                    else if (!providerThrew)
-                    {
-                        // Oversampling intentionally produces empty polls between tracker
-                        // frames. Count them, but do not overwrite the last real delivery
-                        // classification once a provider sample has been observed.
-                        Interlocked.Increment(ref providerEmptyCount);
+                        PublishSample(sample, sampleBuffer);
                     }
 
                     nextSampleMilliseconds += intervalMilliseconds;
@@ -285,6 +253,26 @@ namespace GazeLSL
             {
                 Volatile.Write(ref running, 0);
             }
+        }
+
+        private void PublishSample(GazeSample sample, double[] buffer)
+        {
+            GazeSampleEncoder.WriteSample(sample, buffer);
+            double timestamp = sample.Timestamp;
+            if (!IsFinite(timestamp) || timestamp <= 0.0)
+            {
+                Interlocked.Increment(ref rejectedTimestampCount);
+                Volatile.Write(ref deliveryState, (int)GazeDeliveryState.RejectingInvalidTimestamp);
+                return;
+            }
+
+            outlet.PushSample(buffer, timestamp);
+            Interlocked.Increment(ref pushedSampleCount);
+            bool hasValidRay = sample.CombinedValid || sample.LeftEyeValid || sample.RightEyeValid;
+            if (hasValidRay) Interlocked.Increment(ref pushedValidGazeSampleCount);
+            Volatile.Write(ref deliveryState, (int)(hasValidRay
+                ? GazeDeliveryState.PublishingValidGaze
+                : GazeDeliveryState.PublishingSamplesWithoutValidRays));
         }
 
         private void WaitForNextSample(double remainingMilliseconds)

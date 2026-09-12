@@ -29,24 +29,20 @@ if(NOT TARGET Catch2::Catch2WithMain AND VICON_LSL_BRIDGE_FETCH_CATCH2)
     FetchContent_MakeAvailable(Catch2)
 endif()
 
+add_executable(vicon-lsl-bridge-logic-tests ${VICON_LSL_BRIDGE_TEST_SOURCES})
+target_link_libraries(vicon-lsl-bridge-logic-tests PRIVATE vicon-lsl-bridge-logic)
+set_target_properties(vicon-lsl-bridge-logic-tests PROPERTIES AUTOMOC OFF)
+
 if(TARGET Catch2::Catch2WithMain)
-    add_executable(vicon-lsl-bridge-logic-tests ${VICON_LSL_BRIDGE_TEST_SOURCES})
     target_compile_definitions(vicon-lsl-bridge-logic-tests PRIVATE VICON_LSL_USE_CATCH2)
     target_link_libraries(vicon-lsl-bridge-logic-tests PRIVATE
-        vicon-lsl-bridge-logic
         Catch2::Catch2WithMain
     )
-    set_target_properties(vicon-lsl-bridge-logic-tests PROPERTIES AUTOMOC OFF)
     include(Catch)
     catch_discover_tests(vicon-lsl-bridge-logic-tests)
 else()
     message(STATUS "Catch2 not found - using bundled dependency-light test harness")
-    add_executable(vicon-lsl-bridge-logic-tests
-        tests/TestMain.cpp
-        ${VICON_LSL_BRIDGE_TEST_SOURCES}
-    )
-    target_link_libraries(vicon-lsl-bridge-logic-tests PRIVATE vicon-lsl-bridge-logic)
-    set_target_properties(vicon-lsl-bridge-logic-tests PROPERTIES AUTOMOC OFF)
+    target_sources(vicon-lsl-bridge-logic-tests PRIVATE tests/TestMain.cpp)
     add_test(NAME vicon-lsl-bridge-logic-tests COMMAND vicon-lsl-bridge-logic-tests)
 endif()
 
@@ -94,9 +90,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
             TIMEOUT 30
             ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
         )
-    endif()
-
-    if(TARGET vicon-lsl-bridge-gui-components)
         add_executable(vicon-lsl-bridge-gui-tests
             tests/test_bridge_gui.cpp
             tests/SessionFlowTests.cpp)

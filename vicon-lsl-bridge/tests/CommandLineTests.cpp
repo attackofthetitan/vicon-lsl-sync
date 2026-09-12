@@ -1,6 +1,8 @@
 #include "CommandLine.h"
 #include "TestSupport.h"
 
+#include <limits>
+
 TEST_CASE("Command line parser returns defaults") {
     const auto parsed = vicon_lsl::parseCommandLine({"bridge"});
     REQUIRE_EQ(parsed.action, vicon_lsl::CommandLineAction::Run);
@@ -57,4 +59,16 @@ TEST_CASE("Startup diagnostics include configured fields") {
     REQUIRE(startup.find("Vicon-LSL Bridge") != std::string::npos);
     REQUIRE(startup.find("Marker stream: ViconMarkers") != std::string::npos);
     REQUIRE(startup.find("HoloLens gaze") == std::string::npos);
+}
+
+TEST_CASE("Reconnect interval requires a complete positive integer") {
+    for (const std::string value : {"", "1ms", " 1", "+1", "999999999999999999999"}) {
+        const auto parsed = vicon_lsl::parseCommandLine({"bridge", "--reconnect-interval", value});
+        REQUIRE_EQ(parsed.action, vicon_lsl::CommandLineAction::Error);
+        REQUIRE_EQ(parsed.message, "Invalid milliseconds for --reconnect-interval: " + value);
+    }
+    const auto parsed = vicon_lsl::parseCommandLine({
+        "bridge", "--reconnect-interval", std::to_string((std::numeric_limits<int>::max)())});
+    REQUIRE_EQ(parsed.action, vicon_lsl::CommandLineAction::Run);
+    REQUIRE_EQ(parsed.config.reconnect_interval_ms, (std::numeric_limits<int>::max)());
 }

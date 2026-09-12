@@ -2,46 +2,17 @@
 #include "StreamDefaults.h"
 
 #include <charconv>
-#include <limits>
 #include <sstream>
-#include <utility>
 
 namespace vicon_lsl {
 namespace {
 
-CommandLineResult helpResult(const Config& config) {
-    CommandLineResult result;
-    result.action = CommandLineAction::Help;
-    result.config = config;
-    return result;
-}
-
-CommandLineResult errorResult(const Config& config, std::string message) {
-    CommandLineResult result;
-    result.action = CommandLineAction::Error;
-    result.config = config;
-    result.message = std::move(message);
-    return result;
-}
-
-bool parseInt(std::string_view text, int min_value, int max_value, int& value) {
-    if (text.empty()) {
-        return false;
-    }
-
-    int parsed = 0;
+bool parsePositiveInt(std::string_view text, int& value) {
+    if (text.empty()) return false;
     const char* begin = text.data();
     const char* end = text.data() + text.size();
-    const auto [ptr, ec] = std::from_chars(begin, end, parsed);
-    if (ec != std::errc{} || ptr != end) {
-        return false;
-    }
-    if (parsed < min_value || parsed > max_value) {
-        return false;
-    }
-
-    value = parsed;
-    return true;
+    const auto [ptr, error] = std::from_chars(begin, end, value);
+    return error == std::errc{} && ptr == end && value > 0;
 }
 
 bool needsValue(std::string_view option) {
@@ -67,11 +38,11 @@ CommandLineResult parseCommandLine(const std::vector<std::string>& args) {
         const std::string& option = args[i];
 
         if (option == "--help") {
-            return helpResult(config);
+            return {CommandLineAction::Help, config, {}};
         }
 
         if (needsValue(option) && i + 1 >= args.size()) {
-            return errorResult(config, "Missing value for option: " + option);
+            return {CommandLineAction::Error, config, "Missing value for option: " + option};
         }
 
         if (option == "--server") {
@@ -83,18 +54,17 @@ CommandLineResult parseCommandLine(const std::vector<std::string>& args) {
         } else if (option == "--reconnect-interval") {
             int interval_ms = 0;
             const std::string& value = args[++i];
-            if (!parseInt(value, 1, std::numeric_limits<int>::max(), interval_ms)) {
-                return errorResult(config, "Invalid milliseconds for --reconnect-interval: " + value);
+            if (!parsePositiveInt(value, interval_ms)) {
+                return {CommandLineAction::Error, config,
+                        "Invalid milliseconds for --reconnect-interval: " + value};
             }
             config.reconnect_interval_ms = interval_ms;
         } else {
-            return errorResult(config, "Unknown option: " + option);
+            return {CommandLineAction::Error, config, "Unknown option: " + option};
         }
     }
 
-    CommandLineResult result;
-    result.config = config;
-    return result;
+    return {CommandLineAction::Run, config, {}};
 }
 
 std::string formatUsage(std::string_view program) {

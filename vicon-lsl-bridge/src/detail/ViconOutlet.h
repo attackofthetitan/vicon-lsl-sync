@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,9 +33,8 @@ private:
     const char* display_name_;
     const char* item_noun_;
     std::unique_ptr<StreamOutlet> outlet_;
-    std::unique_ptr<lsl::stream_info> info_;
+    std::optional<lsl::stream_info> info_;
     std::size_t channel_count_ = 0;
-    std::size_t item_count_ = 0;
     bool configured_ = false;
 };
 

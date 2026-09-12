@@ -128,12 +128,6 @@ StreamIdentitySelection selectStreamIdentity(
     for (int i = 0; i < candidates.size(); ++i) {
         if (candidates[i].name == binding.name) matches.push_back(i);
     }
-    std::stable_sort(matches.begin(), matches.end(), [&candidates](int l, int r) {
-        const auto& a = candidates[l];
-        const auto& b = candidates[r];
-        return std::tie(a.source_id, a.hostname, a.session_id, a.uid) <
-               std::tie(b.source_id, b.hostname, b.session_id, b.uid);
-    });
     if (matches.isEmpty()) {
         return {-1, false, false, true, "No visible stream matches " + binding.name};
     }
@@ -145,7 +139,7 @@ StreamIdentitySelection selectStreamIdentity(
             if (candidates[idx].source_id == req_src) exact.push_back(idx);
         }
         if (!exact.isEmpty()) {
-            std::stable_sort(exact.begin(), exact.end(), [&candidates](int l, int r) {
+            const auto newest = std::min_element(exact.begin(), exact.end(), [&candidates](int l, int r) {
                 const auto& a = candidates[l];
                 const auto& b = candidates[r];
                 if (a.publisher_created_at != b.publisher_created_at) {
@@ -155,7 +149,7 @@ StreamIdentitySelection selectStreamIdentity(
                        std::tie(b.hostname, b.session_id, b.uid);
             });
             const bool duplicated_source = exact.size() > 1;
-            return {exact.front(), false, false, duplicated_source,
+            return {*newest, false, false, duplicated_source,
                     duplicated_source
                         ? "Selected the newest visible instance of configured source ID " +
                               req_src + " from " + QString::number(exact.size()) +
@@ -176,7 +170,13 @@ StreamIdentitySelection selectStreamIdentity(
     }
 
     const bool fallback = !req_src.isEmpty() || matches.size() > 1;
-    return {matches.front(), false, fallback, fallback,
+    const auto first = std::min_element(matches.begin(), matches.end(), [&candidates](int l, int r) {
+        const auto& a = candidates[l];
+        const auto& b = candidates[r];
+        return std::tie(a.source_id, a.hostname, a.session_id, a.uid) <
+               std::tie(b.source_id, b.hostname, b.session_id, b.uid);
+    });
+    return {*first, false, fallback, fallback,
             fallback ? "Follow by name selected the first matching source"
                      : "Selected the only matching stream"};
 }

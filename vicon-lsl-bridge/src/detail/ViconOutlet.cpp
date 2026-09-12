@@ -47,18 +47,18 @@ void ViconOutlet::initialize(const StreamSchema& schema,
                              double nominal_rate) {
     destroy();
     configured_ = true;
-    item_count_ = item_count;
-    if (item_count_ == 0) {
+    if (item_count == 0) {
         std::cout << "No " << item_noun_ << "s discovered; "
                   << item_noun_ << " stream not created" << std::endl;
         return;
     }
 
     const int channel_count = static_cast<int>(schema.channelCount());
+    channel_count_ = static_cast<std::size_t>(channel_count);
     const double stream_rate = std::isfinite(nominal_rate) && nominal_rate > 0.0
         ? nominal_rate
         : lsl::IRREGULAR_RATE;
-    info_ = std::make_unique<lsl::stream_info>(
+    info_.emplace(
         schema.name,
         schema.type,
         channel_count,
@@ -74,24 +74,22 @@ void ViconOutlet::initialize(const StreamSchema& schema,
     }
     appendTimingMetadata(*info_, stream_rate);
 
-    channel_count_ = static_cast<std::size_t>(channel_count);
     outlet_ = outlet_factory_(*info_);
     if (!outlet_) {
         throw std::runtime_error(std::string(display_name_) +
                                  " outlet factory returned no outlet");
     }
 
-    std::cout << display_name_ << " stream ready, " << item_count_ << " "
+    std::cout << display_name_ << " stream ready, " << item_count << " "
               << item_noun_ << "s, " << channel_count << " channels"
               << std::endl;
 }
 
 void ViconOutlet::destroy() {
-    const bool was_initialized = outlet_ != nullptr || info_ != nullptr;
+    const bool was_initialized = outlet_ != nullptr || info_.has_value();
     outlet_.reset();
     info_.reset();
     channel_count_ = 0;
-    item_count_ = 0;
     configured_ = false;
     if (was_initialized) {
         std::cout << display_name_ << " stream closed" << std::endl;
@@ -99,13 +97,13 @@ void ViconOutlet::destroy() {
 }
 
 bool ViconOutlet::isInitialized() const {
-    return configured_ && (item_count_ == 0 || outlet_ != nullptr);
+    return configured_ && (channel_count_ == 0 || outlet_ != nullptr);
 }
 
 StreamPushResult ViconOutlet::pushSample(const std::vector<double>& sample,
                                        double timestamp) {
     if (!configured_) return StreamPushResult::NotConfigured;
-    if (item_count_ == 0) return StreamPushResult::Pushed;
+    if (channel_count_ == 0) return StreamPushResult::Pushed;
     if (!outlet_) return StreamPushResult::Failed;
 
     if (sample.size() != channel_count_) {
