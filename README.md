@@ -21,16 +21,6 @@ The macOS download requires Apple Silicon. Open the disk image and drag both
 beside them. Keep them together: the bridge starts the recorder by looking for it
 next to itself. Command line tools are in a folder on the same image.
 
-Installing to Applications matters for more than tidiness. Run from the mounted
-image and macOS sees a different location every time, so any permission granted,
-including local network access for stream discovery, is asked for again on the
-next launch.
-
-The build is ad-hoc signed but is not yet Developer ID signed or notarized, so
-macOS asks for explicit approval on first launch, under System Settings, Privacy
-and Security. Permissions are also asked for again after each update, because an
-ad-hoc signature does not carry an identity that survives a new version.
-
 ## Streams
 
 | Stream | What it contains |
