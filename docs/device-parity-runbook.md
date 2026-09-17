@@ -522,7 +522,10 @@ Changing the empty-name rule needs a separate compatibility plan and a review of
 Stop the review when one of these items is missing or disputed:
 
 - The real Unity scene, prefab wiring, or saved-asset owner. This repository does not store the whole scene.
-- An approved measured Vicon pose for the stair target. The current value is the best fixed estimate, not a universal measurement.
+- Agreement with the measured permanent stair setup. The bottom front-left corner
+  is `(-1.205, -0.213, 0)` metres in Vicon coordinates, confirmed on 2026-09-17;
+  [the coordinate guide](time-and-coordinate-semantics.md#fixed-stair-settings)
+  derives the model-origin pose. Other physical setups need their own measurement.
 - An approved device drop-rate limit beyond the current preview warning below 80% of the expected rate. This repository does not define a release-grade maximum drop rate.
 - What `SystemRelativeTime.Ticks` may be compared against, and at what rate those
   ticks run. Device evidence now says the rate is not `Stopwatch.Frequency`, which

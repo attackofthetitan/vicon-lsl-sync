@@ -763,6 +763,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     calibration_state_ = gui::SessionCalibrationState::AutomaticSession;
     calibration_quality_ = solution->quality;
     if (worker_) worker_->setGazeTransform(gazeTransform());
+    reloadStairModel();
     widget_->requestViewRefit();
     refreshControlStates();
     setStatus("Stair-target calibration applied for this session (position error " +

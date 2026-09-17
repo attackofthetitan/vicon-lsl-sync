@@ -2,6 +2,19 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.4] - 2026-09-17
+
+### Fixed
+
+- Replaced the estimated stair placement with the permanent measured setup:
+  bottom front-left corner 120.5 cm ahead and 21.3 cm left of the Vicon origin,
+  at floor height. The model translation accounts for the CAD origin offset.
+  The unsolved built-in setup updates automatically; existing saved gaze
+  solutions retain their original pose and can be replaced by recalibrating
+  from **Default stair setup**.
+- The correction moves the model 2.93 cm ahead, 1.78 cm right, and 0.64 cm
+  down (3.49 cm total), with no change to rotation or scale.
+
 ## [1.14.3] - 2026-09-12
 
 - Simplified bridge, preview, and gaze publishing code.
@@ -575,7 +588,8 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.4...HEAD
+[1.14.4]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.3...v1.14.4
 [1.12.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.5...v1.11.0
 [1.10.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.4...v1.10.5

@@ -48,12 +48,17 @@ std::string lower(std::string value) {
 } // namespace
 
 const CalibrationProfile& defaultStairCalibrationProfile() {
+    // Permanent setup measured 2026-09-17: facing up the stairs, forward is
+    // -X, left is -Y, and the floor is Z=0. The measured point is the bottom
+    // front-left corner, not the OBJ/target origin. The OBJ uses millimetres.
+    static const PreviewVec3 measured_corner_m{-1.205, -0.213, 0.0};
+    static const PreviewVec3 model_corner_m{1.677676086, -0.523499985, 0.0};
     static const CalibrationProfile profile{
         "stair-model-v1",
         20,
         0.02,
         3.0,
-        {{-2.853343307500, 0.292672723112, 0.006432986454},
+        {measured_corner_m - model_corner_m,
          {0.0, 0.0, 0.0, 1.0}},
     };
     return profile;

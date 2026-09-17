@@ -98,7 +98,14 @@ and angle error. Saved calibrations can be applied, copied, hidden, imported,
 and exported. Confirm missing coordinate details deliberately; quality and
 compatibility remain visible as stream status changes.
 
-Restarting the HoloLens app can create a new Unity world, so run the alignment again after a restart. If the physical stairs move, update the fixed Vicon stair pose before relying on the result.
+The stairs are permanently fixed. Their bottom front-left corner is 120.5 cm
+straight ahead and 21.3 cm left of the Vicon origin, at floor height:
+`(-1.205, -0.213, 0)` metres when facing up the stairs. The built-in
+**Default stair setup** accounts for the model origin's offset from this corner.
+For saved calibrations made with the previous estimate, select **Default stair
+setup**, recalibrate, and save the result. Restarting the HoloLens app can create
+a new Unity world, so run the gaze alignment again after a restart even though
+the physical stairs remain fixed.
 
 The Unity app keeps the original device capture time. It drops duplicate,
 invalid, or out-of-order readings, and walks forward through every reading the

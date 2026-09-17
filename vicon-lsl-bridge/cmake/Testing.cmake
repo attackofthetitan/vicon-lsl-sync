@@ -46,6 +46,9 @@ else()
     add_test(NAME vicon-lsl-bridge-logic-tests COMMAND vicon-lsl-bridge-logic-tests)
 endif()
 
+target_compile_definitions(vicon-lsl-bridge-logic-tests PRIVATE
+    VICON_LSL_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+
 if(VICON_LSL_BRIDGE_BUILD_RUNTIME AND Qt6_FOUND)
     set(VICON_LSL_QT_TEST_ENV
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"

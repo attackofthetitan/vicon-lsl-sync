@@ -56,6 +56,15 @@ bool finiteRigid(const PreviewRigidTransform& r) {
            std::isfinite(q.w) && (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 1e-12;
 }
 
+bool usesLegacyStairEstimate(const PreviewRigidTransform& r) {
+    const auto& t = r.translation;
+    const auto& q = r.rotation;
+    return std::abs(t.x + 2.853343307500) < 1e-12 &&
+           std::abs(t.y - 0.292672723112) < 1e-12 &&
+           std::abs(t.z - 0.006432986454) < 1e-12 &&
+           q.x == 0.0 && q.y == 0.0 && q.z == 0.0 && q.w == 1.0;
+}
+
 QString normalizedId(QString v) {
     v = v.trimmed().toLower();
     v.replace(QRegularExpression("[^a-z0-9_-]+"), "-");
@@ -155,7 +164,20 @@ QVector<ManagedCalibrationProfile> CalibrationProfileStore::load(QSettings& sett
             }
         }
     }
-    if (res.isEmpty()) res.push_back(defaultProfile());
+    const auto built_in = defaultProfile();
+    auto existing = std::find_if(res.begin(), res.end(), [&built_in](const auto& p) {
+        return p.id == built_in.id;
+    });
+    if (existing == res.end()) {
+        res.prepend(built_in);
+    } else if (existing->quality.sample_count == 0 &&
+               existing->physical_setup_id == built_in.physical_setup_id &&
+               usesLegacyStairEstimate(existing->vicon_from_target)) {
+        // Refresh the unsolved built-in setup after a measurement correction.
+        // Saved solutions retain the fixed pose used when they were solved.
+        existing->vicon_from_target = built_in.vicon_from_target;
+        existing->setup_notes = built_in.setup_notes;
+    }
     return res;
 }
 
@@ -189,7 +211,9 @@ ManagedCalibrationProfile CalibrationProfileStore::defaultProfile() {
     res.gaze_transform.name = "HoloLens";
     res.gaze_coordinate_frame = "hololens_stationary_shared_with_gaze";
     res.target_coordinate_frame = "hololens_stationary_shared_with_gaze";
-    res.setup_notes = "Built-in setup; confirm the measured stair pose before reuse.";
+    res.setup_notes = "Permanent stair setup measured 2026-09-17: bottom front-left corner "
+                      "120.5 cm ahead (-X), 21.3 cm left (-Y), floor Z=0. "
+                      "Stairs ascend along -X. Recalibrate gaze when the HoloLens world changes.";
     res.created_at = QDateTime::currentDateTimeUtc();
     res.metadata_fallback_confirmed = false;
     return res;

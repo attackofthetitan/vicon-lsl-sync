@@ -468,10 +468,27 @@ The current stair settings are:
 - Required samples: `20`.
 - Allowed position movement: `0.02 m`.
 - Allowed rotation movement: `3 degrees`.
-- Fixed `vicon_from_target` position: `(-2.853343307500, 0.292672723112, 0.006432986454)`.
+- Fixed `vicon_from_target` position: `(-2.882676086, 0.310499985, 0.0)` metres.
 - Fixed target rotation: identity.
 
-The stair OBJ file uses millimetres. Scale it by `0.001`, then apply the fixed rotation and position to place it in the preview's metre space.
+The physical stairs are permanently fixed. The measurement confirmed on
+2026-09-17 places the bottom front-left corner 120.5 cm straight ahead and
+21.3 cm left of the Vicon origin while facing up the stairs. Forward is `-X`,
+left is `-Y`, and the floor is `Z=0`, so this corner is
+`(-1.205, -0.213, 0.0)` metres. The stairs ascend along `-X`.
+
+The stair OBJ file uses millimetres. Its matching corner is
+`(1677.676086, -523.499985, 0.0)`, rather than the model origin. With identity
+rotation, subtract that corner scaled by `0.001` from the measured Vicon corner
+to obtain the fixed model translation above. Scale the mesh by `0.001`, then
+apply the fixed rotation and translation to place it in the preview's metre space.
+
+The unsolved **Default stair setup** refreshes to this measurement when settings
+load. Existing saved solutions retain their original pose and transform. To
+replace a solution based on the old estimate, select **Default stair setup**,
+run **Calibrate from Stair Target**, and save the new session calibration.
+The physical stair pose stays fixed, but a new HoloLens world still needs a new
+gaze-to-Vicon calibration.
 
 ### Find a stable target pose
 

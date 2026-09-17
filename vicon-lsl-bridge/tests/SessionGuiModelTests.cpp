@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 
 #include <limits>
+#include <cmath>
 
 namespace labrecorder_client_tests {
 namespace {
@@ -343,6 +344,45 @@ void testCalibrationProfileStore() {
     const auto loaded = CalibrationProfileStore::load(settings);
     expect(loaded.size() == 2 && loaded.back().retired,
            "loads retired profiles without losing audit history");
+
+    const auto fixed_setup = CalibrationProfileStore::defaultProfile();
+    auto old_setup = fixed_setup;
+    old_setup.vicon_from_target.translation =
+        {-2.853343307500, 0.292672723112, 0.006432986454};
+    old_setup.setup_notes = "Built-in setup; confirm the measured stair pose before reuse.";
+    expect(CalibrationProfileStore::save(settings, {old_setup}, &error),
+           "stores the previous unsolved built-in stair estimate");
+    const auto refreshed = CalibrationProfileStore::load(settings);
+    const auto& updated_pose = refreshed.front().vicon_from_target.translation;
+    expect(refreshed.size() == 1 &&
+               std::abs(updated_pose.x + 2.882676086) < 1e-9 &&
+               std::abs(updated_pose.y - 0.310499985) < 1e-9 &&
+               updated_pose.z == 0.0 &&
+               refreshed.front().quality.sample_count == 0 &&
+               refreshed.front().setup_notes == fixed_setup.setup_notes,
+           "refreshes the unsolved built-in estimate to the measured corner without claiming a gaze solve");
+
+    old_setup.quality.sample_count = 20;
+    old_setup.gaze_transform.translation = {1.0, 2.0, 3.0};
+    expect(CalibrationProfileStore::save(settings, {old_setup}, &error),
+           "stores a solution based on the previous stair estimate");
+    const auto historical = CalibrationProfileStore::load(settings);
+    expect(historical.front().toJson() == old_setup.toJson(),
+           "keeps a saved solution and its original fixed stair pose together");
+
+    auto custom_setup = fixed_setup;
+    custom_setup.vicon_from_target.translation = {1.0, 2.0, 3.0};
+    expect(CalibrationProfileStore::save(settings, {custom_setup}, &error),
+           "stores a custom pose using the default profile identity");
+    expect(CalibrationProfileStore::load(settings).front().toJson() == custom_setup.toJson(),
+           "does not overwrite a custom pose when refreshing the old estimate");
+
+    expect(CalibrationProfileStore::save(settings, {duplicate}, &error),
+           "stores calibrations without a built-in setup");
+    const auto with_default = CalibrationProfileStore::load(settings);
+    expect(with_default.size() == 2 && with_default.front().id == fixed_setup.id &&
+               with_default.back().toJson() == duplicate.toJson(),
+           "makes the measured built-in setup available alongside saved calibrations");
 
     QJsonObject unsupported = profile.toJson();
     unsupported["version"] = ManagedCalibrationProfile::CurrentVersion + 1;

@@ -5,11 +5,39 @@
 #include "TestSupport.h"
 
 #include <cmath>
+#include <algorithm>
 #include <limits>
 #include <vector>
 
 using preview_core_test_support::calibrationLabels;
 using preview_core_test_support::near;
+
+TEST_CASE("Preview places the stair mesh at the measured permanent corner") {
+    const auto mesh = vicon_lsl::loadObjMesh(
+        std::string(VICON_LSL_TEST_ASSET_DIR) + "/stair_model/stair_model1.obj");
+    REQUIRE(!mesh.vertices.empty());
+    // The stairs ascend toward -X; the front-left floor corner is the
+    // vertex with greatest X, least Y, then least Z.
+    const auto corner = std::max_element(mesh.vertices.begin(), mesh.vertices.end(),
+        [](const auto& a, const auto& b) {
+            if (a.x != b.x) return a.x < b.x;
+            if (a.y != b.y) return a.y > b.y;
+            return a.z > b.z;
+        });
+    auto transform = vicon_lsl::transformProfileFromRigid(
+        vicon_lsl::defaultStairCalibrationProfile().vicon_from_target);
+    transform.scale = 0.001;
+    const auto placed = vicon_lsl::applyTransformPoint(transform, *corner);
+    REQUIRE(near(placed.x, -1.205));
+    REQUIRE(near(placed.y, -0.213));
+    REQUIRE(near(placed.z, 0.0));
+
+    for (const auto& vertex : mesh.vertices) {
+        const auto point = vicon_lsl::applyTransformPoint(transform, vertex);
+        REQUIRE(point.x <= placed.x + 1e-9);
+        REQUIRE(point.z >= placed.z - 1e-9);
+    }
+}
 
 TEST_CASE("Preview calibration composes and inverts rigid transforms") {
     const vicon_lsl::PreviewRigidTransform vicon_from_stair{
