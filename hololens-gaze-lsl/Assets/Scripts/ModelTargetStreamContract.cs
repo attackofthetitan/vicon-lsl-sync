@@ -29,7 +29,7 @@ namespace GazeLSL
             "normalized",
             "normalized",
             "normalized",
-            "bool"
+            "state"
         };
     }
 }

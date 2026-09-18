@@ -1,44 +1,47 @@
-# v1.14.2 release checklist
+# v1.14.5 release checklist
 
 ## Release details
 
-- Version: `1.14.2`
-- Previous release: `v1.14.1`
-- Target date: 2026-09-09
-- Pull requests: none; released directly from `main`
-- Status: completed
-- Scope: the graphical LabRecorder writes the destination the app checked and displayed, instead of re-expanding the filename template under its own legacy rules
+- Version: `1.14.5`
+- Previous release: `v1.14.4`
+- Target date: 2026-09-18
+- Pull requests: none; releasing directly from `main`
+- Status: prepared; publication pending tagged CI
+- Scope: preserve a stable stair reference in recordings started after Vuforia
+  is paused, and identify missing or frozen calibration during desktop playback
 
-A patch release. It changes the encoding of the remote `filename` command sent
-to the graphical recorder. Stream schemas, XDF contents, saved session profiles,
-filename templates, and CLI options are unchanged.
+The target stream keeps eight channels. Its final `Tracked` channel now has unit
+`state`: 0 invalid, 1 live tracked, and 2 frozen reference. The updated HoloLens
+publisher must be deployed; desktop binaries alone cannot supply missing target
+poses. The XDF contains the frozen target pose, not the final desktop transform.
 
-## Pre-merge checks
+## Pre-publication checks
 
-- [x] The CMake version and dated changelog section both use `1.14.2`.
-- [x] The dependency-light logic suite passes locally: 79 test cases.
-- [x] Stream contracts verified unchanged with `tools/generate_stream_contracts.py --check`.
+- [x] The CMake version and dated changelog section use `1.14.5`.
+- [x] Platform-neutral HoloLens checks pass locally: 34 test cases, including
+  stable acquisition, intentional pause, tracking loss, resume, reset, invalid
+  poses, position jumps, and quaternion averaging.
+- [x] Desktop logic checks pass locally: 78 test cases, including an XDF recorded
+  entirely with frozen target poses and the original all-invalid pattern.
+- [x] Desktop GUI checks pass locally at normal and 1.5x scale: five cases each.
+- [x] All six desktop CTest suites pass, including recorder, lifecycle, and
+  stream recovery; the v1.14.5 desktop executable builds successfully.
+- [x] Generated stream contracts pass `tools/generate_stream_contracts.py --check`.
 - [x] `git diff --check` is clean.
-- [x] The recorder's substitution rules were re-read in `labrecorder/src/mainwindow.cpp`
-  (`rcsUpdateFilename`, `replaceFilename`, `counterPlaceholder`) and match what
-  `LabRecorderFilenamePolicy::filenameCommand` now relies on: `template` and
-  `modality` are lowercased, `%b` is substituted first and keeps its case, and
-  the legacy counter is `%n` padded to three digits.
-- [x] Removing the fix fails the filename, protocol, and destination assertions,
-  confirming the regression coverage has teeth.
-- [x] `docs/behavior-contract.md` and `README.md` describe the wire encoding.
+- [x] Behavior, timing, recording instructions, and the hardware runbook describe
+  frozen-reference semantics and the required HoloLens deployment.
 
 ## Publication
 
-- [x] Tagged `v1.14.2` on the release commit, with the tagged build green and the
-  release assets published.
-- [x] Assets published for Linux x64, Windows x64 (zip and portable GUI), and
-  macOS arm64 (tar.gz and dmg), alongside `SHA256SUMS.txt`.
+- [ ] Release commit pushed to `main`; tag `v1.14.5` points to that commit.
+- [ ] Tagged CI passes the logic matrix, HoloLens checks, and full desktop build,
+  tests, and packaging on Linux x64, Windows x64, and macOS arm64.
+- [ ] Five platform payloads and `SHA256SUMS.txt` are published and verified.
+- [ ] Release notes explain the HoloLens upgrade and reference-pose semantics.
 
 ## Device checks not run
 
-- Physical Vicon, HoloLens, and Vuforia checks were not run for this release.
-- A recording against the graphical LabRecorder should be spot-checked on the
-  study machine: confirm the written `.xdf` path matches **Recording
-  Destination** exactly, including capitalisation, subdirectories, and the run
-  number as entered.
+- Physical Unity/OpenXR/Vuforia, HoloLens, and Vicon checks were not run locally.
+- Follow **Recording after deliberately pausing Vuforia** in
+  `docs/device-parity-runbook.md`: record after pausing, reopen in a fresh desktop
+  session, then check resume, reacquisition, and ordinary tracking loss.

@@ -15,7 +15,9 @@ struct PreviewRigidTransform {
 
 struct CalibrationTargetPose {
     PreviewRigidTransform holo_from_target;
+    // Usable for calibration: either live tracked or an explicitly frozen reference.
     bool tracked = false;
+    bool frozen_reference = false;
 };
 
 struct CalibrationProfile {
@@ -35,6 +37,7 @@ struct CalibrationQuality {
 struct CalibrationSolution {
     PreviewRigidTransform holo_from_target;
     CalibrationQuality quality;
+    bool uses_frozen_reference = false;
 };
 
 const CalibrationProfile& defaultStairCalibrationProfile();

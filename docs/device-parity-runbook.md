@@ -344,6 +344,28 @@ Save example values for good and bad cases.
 - Stair direction and gaze match the known-good build. There is no X/Z mirror, 180-degree reversal, or metre/millimetre mistake.
 - Running alignment again after a HoloLens world restart restores the match.
 
+### Recording after deliberately pausing Vuforia
+
+This check covers the new frozen-reference behavior, not parity with the former
+all-invalid paused output. Automated checks exercise the retention policy and
+XDF reconstruction; this scenario also needs Unity/OpenXR/Vuforia on the device.
+
+1. With unchanged stairs and Unity world, acquire a stable target and complete
+   desktop calibration. Pause Vuforia with **M**, leaving the target outlet enabled.
+2. Start a new recording after the pause, including gaze, target, and Vicon.
+   Verify target samples contain a constant finite pose and `Tracked = 2`.
+3. Close and restart only the desktop application, then open that XDF without
+   applying a saved calibration. Check gaze position and direction against the
+   physical Vicon path. The summary must identify a frozen stair reference.
+4. Repeat for several separate runs while paused. Confirm every XDF can be
+   opened independently. Gaze timestamps and live sample rates must be unchanged.
+5. Resume Vuforia and reacquire the target. Pause again and confirm the new
+   reference is used. Restarting the HoloLens app or disabling the target outlet
+   must discard the old reference; pausing before acquiring a new one yields
+   `Tracked = 0` and seven NaNs, with a playback calibration warning.
+6. Lose sight of the target with Vuforia still enabled. Confirm the output
+   becomes invalid rather than falsely reporting a frozen or live tracked pose.
+
 ### Recorded-data steps
 
 1. Record gaze, target, marker, and segment streams while the target stays still.

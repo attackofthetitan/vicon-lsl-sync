@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -256,6 +257,51 @@ TEST_CASE("Preview XDF playback calibrates shared Unity-world gaze from the stai
     REQUIRE(recording.summary.find("stair-target calibration applied") != std::string::npos);
 }
 
+TEST_CASE("Preview XDF recorded entirely after Vuforia pause retains stair alignment") {
+    // No live calibration exists in this fresh reader. Everything needed must
+    // come from the frozen references carried inside the XDF itself.
+    for (const int state : {0, 1, 2}) {
+        const TemporaryFilePath path(".xdf");
+        std::vector<double> gaze(vicon_lsl::kHoloLensGazeChannelCount, 0.0);
+        gaze[0] = 1.25; gaze[1] = 2.0; gaze[2] = -3.5;
+        gaze[5] = -1.0; gaze[6] = 1.0;
+        {
+            std::ofstream output(path.string(), std::ios::binary);
+            output << "XDF:";
+            writeStreamHeader(output, 1, "HoloLensGaze", "Gaze", gazeLabels(), 90.0);
+            writeSampleChunk(output, 1, {10.1}, {gaze});
+            writeStreamHeader(output, 2, "HoloLensModelTargetPose", "Calibration", calibrationLabels());
+            std::vector<double> times;
+            std::vector<std::vector<double>> samples;
+            for (int index = 0; index < 20; ++index) {
+                times.push_back(10.0 + index / 60.0);
+                samples.push_back({1.0, 2.0, -3.0, 0.0, 0.0, 0.0, 1.0, static_cast<double>(state)});
+                if (state == 0) {
+                    for (int field = 0; field < 7; ++field) samples.back()[field] = std::numeric_limits<double>::quiet_NaN();
+                }
+            }
+            writeSampleChunk(output, 2, times, samples);
+        }
+        const auto recording = vicon_lsl::loadXdfPreviewRecording(path.string(), {}, {}, 0.05);
+        REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+        const auto& ray = recording.frames.front().gaze_rays.front();
+        REQUIRE(ray.valid);
+        if (state == 0) {
+            REQUIRE(!recording.calibration_warning.empty());
+            REQUIRE(recording.summary.find("WARNING:") != std::string::npos);
+            REQUIRE(near(ray.origin.x, gaze[0]));
+        } else {
+            REQUIRE(recording.calibration_warning.empty());
+            const auto stair = vicon_lsl::defaultStairCalibrationProfile().vicon_from_target.translation;
+            REQUIRE(near(ray.origin.x, stair.x - 0.25));
+            REQUIRE(near(ray.origin.y, stair.y));
+            REQUIRE(near(ray.origin.z, stair.z + 0.5));
+            REQUIRE(near(ray.direction.z, 1.0));
+            REQUIRE((recording.summary.find("frozen stair reference") != std::string::npos) == (state == 2));
+        }
+    }
+}
+
 TEST_CASE("Preview XDF loader reconstructs timestamps and applies fitted clock offsets") {
     const TemporaryFilePath temporary_path(".xdf");
     const std::string path = temporary_path.string();
@@ -304,6 +350,7 @@ TEST_CASE("Preview XDF loader reconstructs timestamps and applies fitted clock o
 
     REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(3));
     REQUIRE(recording.summary.find("2 stream(s)") != std::string::npos);
+    REQUIRE(!recording.calibration_warning.empty());
     REQUIRE(near(recording.frames.front().timestamp, 0.0));
     REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
     REQUIRE_EQ(recording.frames.front().gaze_rays.size(), static_cast<std::size_t>(3));

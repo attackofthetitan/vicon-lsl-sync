@@ -187,14 +187,31 @@ The gaze stream includes these values:
 - Rate: LSL irregular rate.
 - Value count: eight.
 
-The values are `PositionX`, `PositionY`, and `PositionZ` in `meters`; `RotationX`, `RotationY`, `RotationZ`, and `RotationW` in `normalized`; and `Tracked` in `bool`.
+The values are `PositionX`, `PositionY`, and `PositionZ` in `meters`; `RotationX`, `RotationY`, `RotationZ`, and `RotationW` in `normalized`; and `Tracked` in `state`.
 
 A tracked Unity pose is converted to the published right-handed coordinates:
 
 - Position `(x, y, z)` becomes `(x, y, -z)`.
 - Rotation `(x, y, z, w)` becomes `(-x, -y, z, w)`.
 
-When the target is not tracked, send seven `NaN` values and `Tracked = 0.0`.
+`Tracked = 1.0` is a live tracked pose. Ordinary tracking loss sends seven
+`NaN` values and `Tracked = 0.0`. Deliberately disabling Vuforia retains the
+latest stable 20-pose reference and publishes it with `Tracked = 2.0`.
+The reference averages position and sign-aligned normalized quaternions in
+the already reflected shared world. It is not reflected a second time.
+Samples must remain within 2 cm and 3 degrees of the window's first pose.
+Without a stable reference, paused samples remain invalid. Resuming Vuforia
+or disabling the outlet clears the retained reference. A detected tracked
+pose jump invalidates a previous reference before collecting another window.
+
+Compatibility: the stream retains eight channels, labels, order, source ID,
+and coordinate frame. Headers declare `pose_state_version = 2`, the three
+`tracking_states`, and `pose_retention = stable_reference_while_vuforia_disabled`.
+Consumers of the former boolean channel must accept 2 as a valid fixed reference
+while retaining the distinction from live tracking. Existing built-in readers
+that accept `Tracked > 0.5` can solve it; the updated reader accepts exactly 0,
+1, or 2 and rejects unknown states. Never infer a fresh optical measurement
+from a frozen reference's timestamp or zero variation across repeated samples.
 
 Read `LSL.local_clock()` in `LateUpdate` just before encoding and sending the sample. Use `hololens_stationary_shared_with_gaze` as the coordinate-frame metadata.
 

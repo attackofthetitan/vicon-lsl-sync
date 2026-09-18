@@ -2,6 +2,38 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.5] - 2026-09-18
+
+### Fixed
+
+- Keep a stable stair reference in `HoloLensModelTargetPose` while Vuforia is
+  deliberately paused, so recordings started after calibration can reconstruct
+  gaze alignment without the desktop session's in-memory transform. Resuming
+  tracking discards the reference and requires a new stable acquisition.
+- Show a persistent playback warning when an XDF has gaze but no usable recorded
+  stair calibration. Distinguish frozen-reference calibration from live tracking.
+
+### Compatibility
+
+- The target stream keeps its eight channel labels and order. `Tracked` now has
+  unit `state`: 0 means invalid, 1 live tracked, and 2 a frozen reference. Headers
+  declare `pose_state_version = 2`. Consumers must treat 2 as a valid stationary
+  reference, not as a fresh tracking measurement. The built-in v1.10.5–v1.14.4
+  readers already accept this positive state for alignment; updated desktop
+  builds additionally identify it and warn about missing calibration.
+
+### Upgrade
+
+- Update the Unity scripts from this tag, including `ModelTargetPoseReference.cs`,
+  and rebuild/deploy the HoloLens app. Updating only the desktop app does not
+  change the HoloLens publisher's paused output. Keep the target outlet enabled
+  and include `HoloLensModelTargetPose` alongside gaze in each recording.
+- The XDF stores the frozen stair-reference pose. Playback combines it with the
+  built-in Vicon stair placement to reconstruct alignment; it does not store the
+  final desktop calibration matrix. Existing recordings are not rewritten.
+- Automated HoloLens policy, desktop logic, and GUI checks passed locally.
+  Physical Unity/OpenXR/Vuforia and Vicon checks remain to be run on hardware.
+
 ## [1.14.4] - 2026-09-17
 
 ### Fixed
@@ -588,7 +620,8 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.4...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.5...HEAD
+[1.14.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.4...v1.14.5
 [1.14.4]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.3...v1.14.4
 [1.12.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.10.5...v1.11.0

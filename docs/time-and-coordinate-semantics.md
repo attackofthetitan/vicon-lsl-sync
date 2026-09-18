@@ -254,11 +254,20 @@ The Vuforia target output reads `LSL.local_clock()` in `LateUpdate`, just before
 
 It uses:
 
-- `timestamp = lsl_local_clock_at_transform_read`
+- `timestamp = lsl_local_clock_at_pose_publication`
 - `clock_domain = lsl_local_clock`
-- `synchronization/timestamp_origin = local_clock_at_transform_read`
+- `synchronization/timestamp_origin = local_clock_at_pose_publication`
 
 The target has no SDK capture time and uses an irregular rate. Gaze and target share one clock, but the target time is less precise about the true capture moment.
+
+While Vuforia is deliberately disabled, target samples carry the last stable
+stair reference with `Tracked = 2`. Their timestamps describe current reference
+publication, not the time of a new optical pose measurement. Live tracked samples
+use 1; invalid samples use 0 and seven NaNs. The reference is built from 20 stable
+poses before the pause and is cleared on resume or outlet disable. This lets a
+recording begun after calibration reconstruct spatial alignment without keeping
+Vuforia active. The physical stairs and shared Unity world must remain unchanged.
+Ordinary tracking loss never publishes a frozen reference automatically.
 
 ## Live preview time
 

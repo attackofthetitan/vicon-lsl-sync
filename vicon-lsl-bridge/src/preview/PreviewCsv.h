@@ -11,6 +11,7 @@ namespace vicon_lsl {
 struct PreviewRecording {
     std::vector<PreviewFrame> frames;
     std::string summary;
+    std::string calibration_warning;
     std::size_t source_frame_count = 0;
     std::size_t stored_frame_stride = 1;
     std::size_t estimated_memory_bytes = 0;

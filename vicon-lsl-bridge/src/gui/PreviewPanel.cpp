@@ -327,6 +327,12 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     auto* playback_area_layout = new QVBoxLayout(playback_area_);
     playback_area_layout->setContentsMargins(0, 0, 0, 0);
     playback_area_layout->setSpacing(4);
+    recording_calibration_warning_ = new QLabel();
+    recording_calibration_warning_->setObjectName("recordingCalibrationWarning");
+    recording_calibration_warning_->setAccessibleName("Recording gaze alignment warning");
+    recording_calibration_warning_->setWordWrap(true);
+    recording_calibration_warning_->setVisible(false);
+    playback_area_layout->addWidget(recording_calibration_warning_);
     playback_area_layout->addLayout(playback_row);
     // The timeline needs the full width to be usable, so it sits below the
     // transport controls rather than competing with them for space.
@@ -766,11 +772,15 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     reloadStairModel();
     widget_->requestViewRefit();
     refreshControlStates();
-    setStatus("Stair-target calibration applied for this session (position error " +
+    setStatus(solution->uses_frozen_reference
+        ? "Calibration applied from the frozen stair reference (Vuforia paused)"
+        : "Stair-target calibration applied for this session (position error " +
               QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) + " mm, angle error " +
               QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg)");
     updateCalibrationPersistentStatus(gui::SessionCalibrationState::AutomaticSession,
-        "Quality: " + QString::number(solution->quality.sample_count) + " samples, position error " +
+        solution->uses_frozen_reference
+            ? "Quality: frozen stair reference; repeated samples are not new tracking measurements"
+            : "Quality: " + QString::number(solution->quality.sample_count) + " samples, position error " +
             QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) + " mm, angle error " +
             QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg", calibration_metadata_compatible_);
 }
@@ -842,6 +852,8 @@ void PreviewPanel::applyLoadedRecording(PreviewFileLoader* loader, const QString
     play_recording_button_->setText("Play Recording");
     widget_->resetForNewSource();
     recording_frames_ = std::move(loaded->frames);
+    recording_calibration_warning_->setText(QString::fromStdString(loaded->calibration_warning));
+    recording_calibration_warning_->setVisible(!loaded->calibration_warning.empty());
     playback_clock_.setFrameTimeline(recording_frames_);
     playback_clock_.setLooping(loop_playback_check_->isChecked(), playback_elapsed_.elapsed() / 1000.0);
     playback_clock_.setSpeed(playback_speed_spin_->value(), playback_elapsed_.elapsed() / 1000.0);

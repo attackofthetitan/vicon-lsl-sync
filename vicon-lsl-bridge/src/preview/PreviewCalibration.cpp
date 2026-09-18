@@ -95,6 +95,7 @@ std::optional<CalibrationSolution> solveTrackedTargetCalibration(
     double translation_squared_sum = 0.0;
     double rotation_squared_sum = 0.0;
     std::size_t count = 0;
+    bool uses_frozen_reference = false;
     const PreviewQuaternion mean_rotation = normalizeQuaternion(average->rotation);
     for (const auto& pose : poses) {
         if (!pose.tracked || !isFinite(pose.holo_from_target.translation) ||
@@ -115,12 +116,14 @@ std::optional<CalibrationSolution> solveTrackedTargetCalibration(
                                      3.14159265358979323846;
         rotation_squared_sum += angle_degrees * angle_degrees;
         ++count;
+        uses_frozen_reference = uses_frozen_reference || pose.frozen_reference;
     }
     if (count < profile.required_samples) {
         return std::nullopt;
     }
 
     CalibrationSolution solution;
+    solution.uses_frozen_reference = uses_frozen_reference;
     solution.holo_from_target = *average;
     solution.quality.sample_count = count;
     solution.quality.translation_rms_m =
@@ -198,8 +201,11 @@ std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
     if (!tracked || !std::isfinite(*tracked)) {
         return std::nullopt;
     }
-    if (*tracked <= 0.5) {
+    if (*tracked == 0.0) {
         return CalibrationTargetPose{{}, false};
+    }
+    if (*tracked != 1.0 && *tracked != 2.0) {
+        return std::nullopt;
     }
     if (!x || !y || !z || !qx || !qy || !qz || !qw ||
         !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z) ||
@@ -211,7 +217,7 @@ std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
         return std::nullopt;
     }
     const PreviewQuaternion rotation = normalizeQuaternion(raw_rotation);
-    return CalibrationTargetPose{{{*x, *y, *z}, rotation}, *tracked > 0.5};
+    return CalibrationTargetPose{{{*x, *y, *z}, rotation}, true, *tracked == 2.0};
 }
 
 std::optional<PreviewRigidTransform> averageTrackedTargetPoses(

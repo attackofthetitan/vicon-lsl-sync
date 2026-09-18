@@ -13,6 +13,6 @@
     {"label": "RotationY", "unit": "normalized"},
     {"label": "RotationZ", "unit": "normalized"},
     {"label": "RotationW", "unit": "normalized"},
-    {"label": "Tracked", "unit": "bool"}
+    {"label": "Tracked", "unit": "state"}
   ]
 }

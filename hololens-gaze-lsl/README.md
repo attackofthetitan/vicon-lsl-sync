@@ -46,6 +46,26 @@ The tracking work is split between two threads:
 
 This keeps the gaze ray in the same stationary world as the optional Vuforia model-target stream.
 
+## Record with Vuforia paused
+
+Keep `VuforiaModelTargetPoseOutlet` enabled and record `HoloLensModelTargetPose`
+alongside gaze. While tracking, the outlet collects a stable 20-pose stair
+reference (within 2 cm and 3 degrees). Press **M** to pause Vuforia after the
+stairs have been acquired. The outlet continues sending that reference with
+`Tracked = 2`, including when recording starts after the pause. Playback can
+then align gaze using the reference stored in the XDF.
+
+`Tracked = 1` means a live pose, and `0` means invalid (seven NaNs). Ordinary
+tracking loss still sends invalid poses; only deliberately disabling Vuforia
+publishes the frozen reference. If no stable reference exists, pausing leaves
+the samples invalid and logs a warning. Resume tracking to acquire a reference.
+Resuming clears the previous reference; disabling the outlet also clears it.
+
+Keep the stairs and Unity world unchanged while using a frozen reference.
+Reacquire after moving the stairs or changing/restarting the world. Frozen
+samples have current publication timestamps but are not new measurements, and
+their repeated values do not establish a new zero-error calibration.
+
 ## How timestamps are handled
 
 Each eye-tracking reading includes `SystemRelativeTime`. The app treats that value as an opaque monotonic count: it orders readings against each other and locates the device pose at the moment of capture, and it is never turned into a duration. The rate behind it is not the fixed .NET `TimeSpan` rate, and it is not `Stopwatch.Frequency` either -- on this device the same reading read 0.020 s old on the SDK's own clock and 231 s in the future against `Stopwatch`, with the gap widening as the session ran.

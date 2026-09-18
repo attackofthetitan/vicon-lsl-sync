@@ -7,6 +7,11 @@ internal static partial class Program
         var tests = new Action[]
         {
             ModelTargetPoseEncoding,
+            TargetReferenceSurvivesExplicitPauseOnly,
+            TargetReferenceNeedsStableWindow,
+            TargetReferenceResumeAndResetDiscardOldWorldPose,
+            TargetReferenceRejectsPoseJumpsAndInvalidRotations,
+            TargetReferenceAveragesQuaternionSignsAndPosition,
             GazeTrackerRayTransformsIntoWorld,
             GazeSampleEncodingMatchesContract,
             GazeTimingTakesDurationsInOneDomain,

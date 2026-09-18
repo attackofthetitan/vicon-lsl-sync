@@ -151,6 +151,7 @@ private:
     QVector<QWidget*> profile_selection_controls_;
     QVector<QWidget*> playback_controls_;
     QWidget* playback_area_ = nullptr;
+    QLabel* recording_calibration_warning_ = nullptr;
     QComboBox* calibration_profile_combo_ = nullptr;
     QLineEdit* calibration_profile_name_edit_ = nullptr;
     QLineEdit* calibration_setup_id_edit_ = nullptr;

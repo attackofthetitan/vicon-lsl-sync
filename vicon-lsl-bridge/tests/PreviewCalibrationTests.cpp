@@ -221,6 +221,25 @@ TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses
     REQUIRE(near(average->rotation.w, 1.0));
 }
 
+TEST_CASE("Preview calibration distinguishes frozen references from live tracking") {
+    const auto frozen = vicon_lsl::parseCalibrationTargetPose(
+        calibrationLabels(), {1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0, 2.0});
+    REQUIRE(frozen.has_value());
+    REQUIRE(frozen->tracked);
+    REQUIRE(frozen->frozen_reference);
+    const auto profile = vicon_lsl::defaultStairCalibrationProfile();
+    const auto solution = vicon_lsl::solveStableTrackedTargetCalibration(
+        std::vector<vicon_lsl::CalibrationTargetPose>(profile.required_samples, *frozen), profile);
+    REQUIRE(solution.has_value());
+    REQUIRE(solution->uses_frozen_reference);
+    for (const double invalid_state : {0.75, 3.0, -1.0}) {
+        REQUIRE(!vicon_lsl::parseCalibrationTargetPose(
+            calibrationLabels(), {1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0, invalid_state}));
+    }
+    REQUIRE(!vicon_lsl::parseCalibrationTargetPose(
+        calibrationLabels(), {1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 2.0}));
+}
+
 TEST_CASE("Preview calibration reports quality and rejects unstable target motion") {
     const auto profile = vicon_lsl::defaultStairCalibrationProfile();
     std::vector<vicon_lsl::CalibrationTargetPose> stable(

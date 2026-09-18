@@ -12,7 +12,7 @@ constexpr std::array<HoloLensModelTargetChannel, kHoloLensModelTargetChannelCoun
     {"RotationY", "normalized"},
     {"RotationZ", "normalized"},
     {"RotationW", "normalized"},
-    {"Tracked", "bool"},
+    {"Tracked", "state"},
 }};
 
 } // namespace

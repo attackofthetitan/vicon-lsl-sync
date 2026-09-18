@@ -186,6 +186,7 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
 
     PreviewTransformProfile resolved_gaze_transform = gaze_transform;
     bool automatically_calibrated = false;
+    bool frozen_reference_calibration = false;
     bool tracker_local_gaze = false;
     if (gaze_stream) {
         tracker_local_gaze = lowerAscii(gaze_stream->coordinate_frame) == "eye_tracker_space";
@@ -209,6 +210,7 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                 defaultStairCalibrationProfile(),
                 solution->holo_from_target);
             automatically_calibrated = true;
+            frozen_reference_calibration = solution->uses_frozen_reference;
         }
     }
 
@@ -226,6 +228,11 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
         });
 
     PreviewRecording recording;
+    if (gaze_stream && !automatically_calibrated) {
+        recording.calibration_warning = tracker_local_gaze
+            ? "Gaze is in legacy tracker-local coordinates and cannot be aligned from the stair target."
+            : "No usable stair calibration in this recording. Gaze alignment with Vicon is unverified; record a stable stair reference or apply a calibration saved for this HoloLens session before opening the file.";
+    }
     recording.source_frame_count = master->sample_count;
     recording.stored_frame_stride = master->stored_sample_stride;
     recording.source_start_timestamp = master->start_timestamp;
@@ -273,6 +280,12 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                                      automatically_calibrated,
                                      tracker_local_gaze,
                                      target_stream);
+    if (frozen_reference_calibration) {
+        recording.summary += "; using frozen stair reference (Vuforia paused)";
+    }
+    if (!recording.calibration_warning.empty()) {
+        recording.summary += "; WARNING: " + recording.calibration_warning;
+    }
     for (const XdfStreamData& stream : xdf.streams) {
         if (&stream == master || stream.samples.empty()) continue;
         const double matched = static_cast<double>(matched_samples[stream.stream_id]);

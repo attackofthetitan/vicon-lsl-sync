@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Program.EncodingTests.cs" />
+    <Compile Include="Program.ModelTargetReferenceTests.cs" />
     <Compile Include="Program.TimingPolicyTests.cs" />
     <Compile Include="Program.PublisherWorkerTests.cs" />
     <Compile Include="Program.DeliveryStateTransitionTests.cs" />
@@ -23,5 +24,6 @@
     <Compile Include="..\Assets\Scripts\ModelTargetStreamContract.cs" Link="ModelTargetStreamContract.cs" />
     <Compile Include="..\Assets\Scripts\GazeSample.cs" Link="GazeSample.cs" />
     <Compile Include="..\Assets\Scripts\ModelTargetPoseEncoder.cs" Link="ModelTargetPoseEncoder.cs" />
+    <Compile Include="..\Assets\Scripts\ModelTargetPoseReference.cs" Link="ModelTargetPoseReference.cs" />
   </ItemGroup>
 </Project>

@@ -84,6 +84,13 @@ In the desktop preview:
 4. Select **Calibrate from Stair Target**.
 5. Hold the target still while the app collects 20 good samples.
 
+If you then pause Vuforia with **M**, keep the target outlet running and include
+`HoloLensModelTargetPose` in each recording. The updated HoloLens publisher keeps
+a stable stair reference in that stream while paused, so a run started after
+calibration can still be aligned when reopened. It marks these references as
+frozen rather than live tracked. Resuming Vuforia requires a new stable reference.
+Playback shows a warning if the file has no usable recorded calibration.
+
 The result lasts only for the current desktop session. There are no hand-entered
 HoloLens translation and rotation fields, because the transform between the
 HoloLens world and Vicon cannot be known before it is measured. Until an
