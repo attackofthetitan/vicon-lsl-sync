@@ -121,7 +121,7 @@ jobs:
           & "$env:GITHUB_WORKSPACE\vicon-lsl-bridge\packaging\windows\tests\PackagingSafety.Tests.ps1"
 
       - name: Install Qt6
-        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4
+        uses: jurplel/install-qt-action@bcb88e3bed2e992f5f9e24c0f9e364a231d278eb # v4
         with:
           version: '6.8.3'
           cache: true
