@@ -117,9 +117,6 @@ PreviewVec3 rotateByQuaternion(const PreviewVec3& value, const PreviewQuaternion
 }
 
 PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const PreviewVec3& point) {
-    if (!transform.enabled) {
-        return point;
-    }
     const PreviewVec3 scaled{
         point.x * transform.input_axis_sign.x * transform.scale,
         point.y * transform.input_axis_sign.y * transform.scale,
@@ -132,9 +129,6 @@ PreviewVec3 applyTransformPoint(const PreviewTransformProfile& transform, const 
 }
 
 PreviewVec3 applyTransformDirection(const PreviewTransformProfile& transform, const PreviewVec3& direction) {
-    if (!transform.enabled) {
-        return normalize(direction);
-    }
     const PreviewVec3 rebased{
         direction.x * transform.input_axis_sign.x,
         direction.y * transform.input_axis_sign.y,

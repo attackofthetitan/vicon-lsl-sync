@@ -3,7 +3,7 @@
 #include "Config.h"
 #include "MarkerStream.h"
 #include "SegmentStream.h"
-#include "ViconDiagnostics.h"
+#include "ViconFrameMapper.h"
 
 #include <atomic>
 #include <chrono>
@@ -12,18 +12,10 @@
 #include <string>
 #include <vector>
 
-namespace vicon_lsl {
-
-struct ViconTimestampState;
-
-namespace bridge_internal {
-
-class BridgeTestAccess;
+namespace vicon_lsl::bridge_internal {
 class ViconClient;
 struct Dependencies;
-
-} // namespace bridge_internal
-} // namespace vicon_lsl
+} // namespace vicon_lsl::bridge_internal
 
 enum class BridgeState {
     Disconnected,
@@ -40,20 +32,23 @@ struct BridgeStatus {
     std::string message;
 };
 
+// Connects to Vicon, publishes the marker and segment streams, and reconnects
+// after errors until stop() is called.
 class ViconLSLBridge {
 public:
     using StatusCallback = std::function<void(const BridgeStatus&)>;
 
     explicit ViconLSLBridge(const Config& config);
+    // Tests use this to supply a fake Vicon client, outlets, clock, and sleep.
+    ViconLSLBridge(const Config& config,
+                   vicon_lsl::bridge_internal::Dependencies dependencies);
+
     void run();
+    // Only asks run() to finish. run() closes the streams and connection itself.
     void stop();
     void setStatusCallback(StatusCallback callback);
 
 private:
-    friend class vicon_lsl::bridge_internal::BridgeTestAccess;
-
-    ViconLSLBridge(const Config& config,
-                   vicon_lsl::bridge_internal::Dependencies dependencies);
     void connectWithRetry();
     void waitForRetry();
     void streamFrames(vicon_lsl::ViconTimestampState& timestamp_state);

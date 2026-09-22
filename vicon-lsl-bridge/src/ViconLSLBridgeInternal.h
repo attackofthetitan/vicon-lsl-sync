@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Config.h"
 #include "StreamOutlet.h"
 #include "ViconFrameTypes.h"
 
@@ -9,10 +8,10 @@
 #include <memory>
 #include <string>
 
-class ViconLSLBridge;
-
 namespace vicon_lsl::bridge_internal {
 
+// The Vicon reads the bridge needs. The real client wraps the Vicon SDK; tests
+// use a fake.
 class ViconClient {
 public:
     virtual ~ViconClient() = default;
@@ -44,21 +43,11 @@ public:
         const std::string& segment) = 0;
 };
 
-using Clock = std::function<double()>;
-using Wait = std::function<void(std::chrono::milliseconds)>;
-
 struct Dependencies {
     std::shared_ptr<ViconClient> client;
     StreamOutletFactory outlet_factory;
-    Clock clock;
-    Wait wait;
-};
-
-class BridgeTestAccess {
-public:
-    static std::unique_ptr<::ViconLSLBridge> create(
-        const Config& config,
-        Dependencies dependencies);
+    std::function<double()> clock;
+    std::function<void(std::chrono::milliseconds)> wait;
 };
 
 } // namespace vicon_lsl::bridge_internal

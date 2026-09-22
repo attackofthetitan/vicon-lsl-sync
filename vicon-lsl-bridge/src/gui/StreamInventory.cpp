@@ -6,8 +6,9 @@
 namespace vicon_lsl::gui {
 namespace {
 
-auto findByKey(const QVector<StreamIdentity>& inventory, const StreamIdentity& wanted) {
-    return std::find_if(inventory.cbegin(), inventory.cend(),
+template <class Inventory>
+auto findByKey(Inventory& inventory, const StreamIdentity& wanted) {
+    return std::find_if(inventory.begin(), inventory.end(),
                         [&wanted](const StreamIdentity& candidate) {
                             return candidate.stableKey() == wanted.stableKey();
                         });
@@ -18,15 +19,12 @@ auto findByKey(const QVector<StreamIdentity>& inventory, const StreamIdentity& w
 void mergeStreamInventory(QVector<StreamIdentity>& inventory,
                           const QVector<StreamIdentity>& seen) {
     for (const StreamIdentity& stream : seen) {
-        auto existing = std::find_if(inventory.begin(), inventory.end(),
-                                     [&stream](const StreamIdentity& candidate) {
-                                         return candidate.stableKey() == stream.stableKey();
-                                     });
+        const auto existing = findByKey(inventory, stream);
         if (existing == inventory.end()) {
             inventory.push_back(stream);
             continue;
         }
-        // Refresh the stream's details but never the operator's choices.
+        // Update the stream's details but keep the user's choices.
         const bool selected = existing->selected;
         const bool required = existing->required;
         *existing = stream;
@@ -44,7 +42,7 @@ QVector<StreamIdentity> reconcileDiscoveredStreams(
 
     for (StreamIdentity& stream : discovered) {
         const auto previous = findByKey(known, stream);
-        if (previous != known.cend()) {
+        if (previous != known.end()) {
             stream.selected = previous->selected;
             stream.required = previous->required;
             stream.freshness_ms = previous->freshness_ms;
@@ -66,7 +64,7 @@ QVector<StreamIdentity> reconcileDiscoveredStreams(
 
     for (const StreamIdentity& previous : known) {
         if (!previous.selected && !previous.required) continue;
-        if (findByKey(reconciled, previous) != reconciled.cend()) continue;
+        if (findByKey(reconciled, previous) != reconciled.end()) continue;
         StreamIdentity missing = previous;
         missing.present = false;
         missing.freshness_ms = -1;

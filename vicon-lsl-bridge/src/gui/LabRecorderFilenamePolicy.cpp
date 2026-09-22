@@ -129,10 +129,9 @@ QString RecordingPathResult::summary() const {
 }
 
 QString LabRecorderFilenamePolicy::filenameCommand(const LabRecorderFilenameFields& fields) {
-    // LabRecorder lowercases explicit templates, switches them to legacy mode
-    // (%n rather than %r), and pads the run itself. Its legacy %b replacement
-    // preserves case, so carry our already validated relative path in that field.
-    // The bridge remains the authority for template expansion and run formatting.
+    // LabRecorder would change an explicit template (lowercase it, switch to %n,
+    // and pad the run), but it copies %b unchanged. So the template is "%b" and
+    // the task carries the checked path, and LabRecorder writes exactly that path.
     LabRecorderFilenameFields wire_fields = fields;
     wire_fields.templ = "%b";
     wire_fields.task = renderedFilename(fields);
@@ -186,18 +185,14 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
     const LabRecorderFilenameFields& fields,
     const RecordingPathValidationOptions& options) {
     RecordingPathResult result;
-    result.normalized_fields = fields;
-    result.normalized_fields.root = QDir::cleanPath(fields.root.trimmed());
+    for (const RecordingField& field : kRecordingFields) {
+        result.normalized_fields.*(field.value) = (fields.*(field.value)).trimmed();
+    }
+    result.normalized_fields.root = QDir::cleanPath(result.normalized_fields.root);
     const QString normalized_template =
-        QDir::fromNativeSeparators(fields.templ.trimmed());
+        QDir::fromNativeSeparators(result.normalized_fields.templ);
     result.normalized_fields.templ = normalized_template.isEmpty()
         ? QString() : QDir::cleanPath(normalized_template);
-    result.normalized_fields.participant = fields.participant.trimmed();
-    result.normalized_fields.session = fields.session.trimmed();
-    result.normalized_fields.task = fields.task.trimmed();
-    result.normalized_fields.run = fields.run.trimmed();
-    result.normalized_fields.acquisition = fields.acquisition.trimmed();
-    result.normalized_fields.modality = fields.modality.trimmed();
 
     for (const RecordingField& recording_field : kRecordingFields) {
         const QString& value = fields.*(recording_field.value);

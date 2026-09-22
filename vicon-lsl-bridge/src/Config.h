@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string>
-#include "StreamDefaults.h"
+#include "StreamDefaults.generated.h"
 
 struct Config {
     std::string vicon_server = "localhost:801";

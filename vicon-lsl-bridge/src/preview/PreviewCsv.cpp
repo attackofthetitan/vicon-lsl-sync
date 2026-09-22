@@ -2,15 +2,15 @@
 
 #include "preview/PreviewParsing.h"
 
-#include <fstream>
-#include <filesystem>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
-#include <optional>
 
 namespace vicon_lsl {
 namespace {
@@ -60,19 +60,6 @@ std::size_t findColumn(const std::vector<std::string>& labels, const std::string
     return labels.size();
 }
 
-void reportProgress(const PreviewLoadOptions& options,
-                    PreviewLoadStage stage,
-                    std::uint64_t completed,
-                    std::uint64_t total,
-                    const std::string& detail = {}) {
-    if (options.cancel_requested && options.cancel_requested()) {
-        throw std::runtime_error("Preview load canceled");
-    }
-    if (options.progress) {
-        options.progress({stage, completed, total, detail});
-    }
-}
-
 std::size_t estimateFramePayloadBytes(const PreviewFrame& frame) {
     std::size_t bytes = 0;
     bytes += frame.markers.capacity() * sizeof(PreviewMarker);
@@ -84,17 +71,9 @@ std::size_t estimateFramePayloadBytes(const PreviewFrame& frame) {
     return bytes;
 }
 
+// Drops every other frame but keeps the last one, so the end time stays exact.
 void compactFrames(PreviewRecording& recording) {
-    std::vector<PreviewFrame> compacted;
-    compacted.reserve((recording.frames.size() + 1) / 2 + 1);
-    for (std::size_t input = 0; input < recording.frames.size(); input += 2) {
-        compacted.push_back(std::move(recording.frames[input]));
-    }
-    if (recording.frames.size() > 2 &&
-        (recording.frames.size() - 1) % 2 != 0) {
-        compacted.push_back(std::move(recording.frames.back()));
-    }
-    recording.frames.swap(compacted);
+    keepEveryOther(recording.frames, true);
     if (recording.stored_frame_stride <=
         (std::numeric_limits<std::size_t>::max)() / 2) {
         recording.stored_frame_stride *= 2;
@@ -183,7 +162,7 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
     std::string line;
     double first_lsl_time = std::numeric_limits<double>::quiet_NaN();
     std::optional<PreviewFrame> pending_last_frame;
-    reportProgress(options, PreviewLoadStage::Reading, 0, file_size, "CSV header");
+    reportPreviewLoadProgress(options, PreviewLoadStage::Reading, 0, file_size, "CSV header");
     while (std::getline(input, line)) {
         if (line.size() > options.maximum_line_bytes) {
             throw std::runtime_error("CSV row exceeds the configured line-size limit");
@@ -231,10 +210,10 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
         if (recording.source_frame_count % (std::max)(
                 std::size_t{1}, options.cancellation_check_sample_interval) == 0) {
             const auto position = input.tellg();
-            reportProgress(options, PreviewLoadStage::Reading,
-                           position < 0 ? 0 : static_cast<std::uint64_t>(position),
-                           file_size,
-                           std::to_string(recording.source_frame_count) + " rows");
+            reportPreviewLoadProgress(options, PreviewLoadStage::Reading,
+                                      position < 0 ? 0 : static_cast<std::uint64_t>(position),
+                                      file_size,
+                                      std::to_string(recording.source_frame_count) + " rows");
         }
     }
 
@@ -244,8 +223,9 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
                                   options.maximum_memory_bytes);
     }
 
-    reportProgress(options, PreviewLoadStage::FramePreparation,
-                   recording.frames.size(), recording.frames.size(), "CSV preview frames");
+    reportPreviewLoadProgress(options, PreviewLoadStage::FramePreparation,
+                              recording.frames.size(), recording.frames.size(),
+                              "CSV preview frames");
     boundPreviewRecordingCache(recording, options.maximum_preview_frames,
                                options.maximum_memory_bytes);
 
@@ -256,7 +236,8 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
             << " column(s), "
             << recording.estimated_memory_bytes / (1024 * 1024) << " MiB memory";
     recording.summary = summary.str();
-    reportProgress(options, PreviewLoadStage::Complete, file_size, file_size, recording.summary);
+    reportPreviewLoadProgress(options, PreviewLoadStage::Complete, file_size, file_size,
+                              recording.summary);
     return recording;
 }
 

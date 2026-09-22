@@ -2,10 +2,11 @@
 
 #include "HoloLensGazeSchema.h"
 #include "HoloLensModelTargetSchema.h"
-#include "StreamDefaults.h"
+#include "StreamDefaults.generated.h"
 #include "preview/PreviewMath.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -26,6 +27,7 @@ std::string stripStreamPrefix(std::string label, const std::string& stream_prefi
     return label;
 }
 
+// "Subject:Marker" is shown as "Marker".
 std::string displayNameForRoot(const std::string& root) {
     const std::size_t colon = root.rfind(':');
     if (colon == std::string::npos || colon + 1 >= root.size()) {
@@ -34,6 +36,7 @@ std::string displayNameForRoot(const std::string& root) {
     return root.substr(colon + 1);
 }
 
+// Finds the first label equal to `exact`, or else the first ending in `suffix`.
 std::optional<std::size_t> findIndex(const std::vector<std::string>& labels,
                                      const std::string& exact,
                                      const std::string& suffix = {}) {
@@ -66,6 +69,7 @@ std::optional<PreviewVec3> parseVec3(const std::vector<double>& sample,
     return PreviewVec3{sample[x], sample[y], sample[z]};
 }
 
+// Maps each label to its first position.
 using LabelIndex = std::unordered_map<std::string, std::size_t>;
 
 LabelIndex indexLabels(const std::vector<std::string>& labels) {
@@ -76,13 +80,23 @@ LabelIndex indexLabels(const std::vector<std::string>& labels) {
     return result;
 }
 
+// Looks up `name` as written, then with the stream-name prefix used in CSV files.
 std::optional<std::size_t> findChannel(const LabelIndex& labels,
-                                      const std::string& name,
-                                      const std::string& prefix) {
+                                       const std::string& name,
+                                       const std::string& prefix) {
     auto found = labels.find(name);
     if (found == labels.end()) found = labels.find(prefix + name);
     if (found == labels.end()) return std::nullopt;
     return found->second;
+}
+
+template <class Channels>
+std::vector<std::string> labelsOf(const Channels& channels) {
+    std::vector<std::string> labels;
+    for (const auto& channel : channels) {
+        labels.emplace_back(channel.label);
+    }
+    return labels;
 }
 
 } // namespace
@@ -129,25 +143,26 @@ PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema) {
     return PreviewStreamRole::HoloLensGaze;
 }
 
+const char* previewStreamRoleName(PreviewStreamRole role) {
+    switch (role) {
+        case PreviewStreamRole::ViconMarkers: return "markers";
+        case PreviewStreamRole::ViconSegments: return "segments";
+        case PreviewStreamRole::HoloLensGaze: return "gaze";
+        case PreviewStreamRole::HoloLensCalibrationTarget: return "calibration";
+        case PreviewStreamRole::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
 std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
                                                        std::size_t channel_count) {
     if (role == PreviewStreamRole::HoloLensGaze &&
         channel_count == kHoloLensGazeChannelCount) {
-        std::vector<std::string> labels;
-        labels.reserve(kHoloLensGazeChannelCount);
-        for (const auto& channel : holoLensGazeChannels()) {
-            labels.emplace_back(channel.label);
-        }
-        return labels;
+        return labelsOf(holoLensGazeChannels());
     }
     if (role == PreviewStreamRole::HoloLensCalibrationTarget &&
         channel_count == kHoloLensModelTargetChannelCount) {
-        std::vector<std::string> labels;
-        labels.reserve(kHoloLensModelTargetChannelCount);
-        for (const auto& channel : holoLensModelTargetChannels()) {
-            labels.emplace_back(channel.label);
-        }
-        return labels;
+        return labelsOf(holoLensModelTargetChannels());
     }
     return {};
 }
@@ -156,6 +171,7 @@ std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& lab
                                              const std::vector<double>& sample,
                                              const PreviewTransformProfile& transform) {
     const auto label_to_index = indexLabels(labels);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
 
     std::vector<PreviewMarker> markers;
     for (std::size_t index = 0; index < labels.size(); ++index) {
@@ -164,24 +180,22 @@ std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& lab
             continue;
         }
         const std::string root = label.substr(0, label.size() - 2);
-        const auto y = findChannel(label_to_index, root + ":Y", "ViconMarkers_");
-        const auto z = findChannel(label_to_index, root + ":Z", "ViconMarkers_");
-        const auto valid = findChannel(label_to_index, root + ":Valid", "ViconMarkers_");
+        const auto channel = [&](const char* suffix) {
+            return findChannel(label_to_index, root + suffix, "ViconMarkers_");
+        };
+        const auto y = channel(":Y");
+        const auto z = channel(":Z");
         if (!y || !z) continue;
-        const auto valid_index = valid.value_or(sample.size());
+        // A missing Valid channel counts as valid.
+        const auto valid_index = channel(":Valid").value_or(sample.size());
 
         PreviewMarker marker;
         marker.name = displayNameForRoot(root);
         const auto position = parseVec3(sample, index, *y, *z);
         marker.valid = position.has_value() &&
                        (valid_index >= sample.size() || sample[valid_index] > 0.5);
-        if (marker.valid) {
-            marker.position = applyTransformPoint(transform, *position);
-        } else {
-            marker.position = {std::numeric_limits<double>::quiet_NaN(),
-                               std::numeric_limits<double>::quiet_NaN(),
-                               std::numeric_limits<double>::quiet_NaN()};
-        }
+        marker.position = marker.valid ? applyTransformPoint(transform, *position)
+                                       : PreviewVec3{nan, nan, nan};
         markers.push_back(std::move(marker));
     }
     return markers;
@@ -199,16 +213,16 @@ std::vector<PreviewSegment> parseSegmentSample(const std::vector<std::string>& l
             continue;
         }
         const std::string root = label.substr(0, label.size() - 2);
-        auto get = [&](const std::string& suffix) {
+        const auto channel = [&](const char* suffix) {
             return findChannel(label_to_index, root + suffix, "ViconSegments_");
         };
 
-        const auto y = get(":Y");
-        const auto z = get(":Z");
-        const auto qx = get(":QX");
-        const auto qy = get(":QY");
-        const auto qz = get(":QZ");
-        const auto qw = get(":QW");
+        const auto y = channel(":Y");
+        const auto z = channel(":Z");
+        const auto qx = channel(":QX");
+        const auto qy = channel(":QY");
+        const auto qz = channel(":QZ");
+        const auto qw = channel(":QW");
         if (!y || !z || !qx || !qy || !qz || !qw) {
             continue;
         }
@@ -231,17 +245,20 @@ std::vector<PreviewSegment> parseSegmentSample(const std::vector<std::string>& l
 std::vector<PreviewGazeRay> parseGazeSample(const std::vector<std::string>& labels,
                                             const std::vector<double>& sample,
                                             const PreviewTransformProfile& transform) {
-    const std::string names[] = {"Combined", "LeftEye", "RightEye"};
     std::vector<PreviewGazeRay> rays;
-
-    for (const std::string& name : names) {
-        const auto ox = findIndex(labels, name + "OriginX", "_" + name + "OriginX");
-        const auto oy = findIndex(labels, name + "OriginY", "_" + name + "OriginY");
-        const auto oz = findIndex(labels, name + "OriginZ", "_" + name + "OriginZ");
-        const auto dx = findIndex(labels, name + "DirectionX", "_" + name + "DirectionX");
-        const auto dy = findIndex(labels, name + "DirectionY", "_" + name + "DirectionY");
-        const auto dz = findIndex(labels, name + "DirectionZ", "_" + name + "DirectionZ");
-        const auto valid = findIndex(labels, name + "Valid", "_" + name + "Valid");
+    for (const std::string name : {"Combined", "LeftEye", "RightEye"}) {
+        // Labels may carry a stream-name prefix such as "HoloLensGaze_".
+        const auto channel = [&](const char* field) {
+            const std::string label = name + field;
+            return findIndex(labels, label, "_" + label);
+        };
+        const auto ox = channel("OriginX");
+        const auto oy = channel("OriginY");
+        const auto oz = channel("OriginZ");
+        const auto dx = channel("DirectionX");
+        const auto dy = channel("DirectionY");
+        const auto dz = channel("DirectionZ");
+        const auto valid = channel("Valid");
         if (!ox || !oy || !oz || !dx || !dy || !dz) {
             continue;
         }
@@ -262,6 +279,13 @@ std::vector<PreviewGazeRay> parseGazeSample(const std::vector<std::string>& labe
     }
 
     return rays;
+}
+
+std::string lowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
 }
 
 } // namespace vicon_lsl

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <string>
 #include <vector>
 
@@ -19,18 +18,16 @@ struct PreviewQuaternion {
     double w = 1.0;
 };
 
+// Moves points from a source stream into the preview's Vicon coordinates:
+// scale, flip axes, rotate, then translate.
 struct PreviewTransformProfile {
     std::string name;
-    bool enabled = true;
     double scale = 1.0;
-    // Converts a source stream's coordinate basis before the rigid transform.
-    // The current eye-tracker stream uses +Z opposite to the right-handed
-    // HoloLens target-pose convention, so its Z sign is -1.
+    // Multiplies each input axis before rotating, for example to flip Z.
     PreviewVec3 input_axis_sign{1.0, 1.0, 1.0};
+    // Fixed transforms rotate with Euler angles. Solved calibrations use the
+    // quaternion instead, so converting to angles and back cannot lose accuracy.
     PreviewVec3 rotation_degrees{};
-    // Solved calibration uses a quaternion so a rigid transform is not degraded
-    // by an Euler-angle round trip. Fixed profiles without a rotation, such as
-    // the Vicon millimetre-to-metre scale, keep the Euler default.
     bool use_quaternion_rotation = false;
     PreviewQuaternion rotation{};
     PreviewVec3 translation{};
@@ -61,6 +58,7 @@ struct PreviewFrame {
     std::vector<PreviewMarker> markers;
     std::vector<PreviewSegment> segments;
     std::vector<PreviewGazeRay> gaze_rays;
+    // True when the stream is connected. It does not mean the frame holds its data.
     bool marker_stream_present = false;
     bool segment_stream_present = false;
     bool gaze_stream_present = false;

@@ -106,8 +106,7 @@ TEST_CASE("Preview preserves raw eye-tracker basis and rejects world calibration
     sample[5] = 1.0;
     sample[6] = 1.0;
 
-    const auto transform = vicon_lsl::gazeTransformForCoordinateFrame(
-        {}, "eye_tracker_space");
+    const vicon_lsl::PreviewTransformProfile transform;
     const auto rays = vicon_lsl::parseGazeSample(gazeLabels(), sample, transform);
 
     REQUIRE(rays.front().valid);

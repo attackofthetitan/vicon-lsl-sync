@@ -7,12 +7,13 @@
 #include <string>
 #include <vector>
 
+// The LSL stream of Vicon markers. An empty layout creates no LSL stream.
 class MarkerStream {
 public:
     explicit MarkerStream(StreamOutletFactory outlet_factory = createLslStreamOutlet);
 
-    // marker_names: vector of (subject, marker) pairs
-    void initialize(const std::vector<std::pair<std::string, std::string>>& marker_names,
+    // Replaces any open stream. Each name is a (subject, marker) pair.
+    void initialize(const std::vector<vicon_lsl::NamedViconItem>& marker_names,
                     const std::string& stream_name,
                     const std::string& source_id,
                     double nominal_rate = lsl::IRREGULAR_RATE);

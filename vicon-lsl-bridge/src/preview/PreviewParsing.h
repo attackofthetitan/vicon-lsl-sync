@@ -9,6 +9,10 @@
 namespace vicon_lsl {
 
 PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema);
+// Short name for a role: markers, segments, gaze, calibration, or unknown.
+const char* previewStreamRoleName(PreviewStreamRole role);
+// The fixed HoloLens labels for a gaze or target stream of the expected size,
+// or nothing for any other stream.
 std::vector<std::string> canonicalPreviewChannelLabels(PreviewStreamRole role,
                                                        std::size_t channel_count);
 std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& labels,
@@ -20,5 +24,7 @@ std::vector<PreviewSegment> parseSegmentSample(const std::vector<std::string>& l
 std::vector<PreviewGazeRay> parseGazeSample(const std::vector<std::string>& labels,
                                             const std::vector<double>& sample,
                                             const PreviewTransformProfile& transform);
+
+std::string lowerAscii(std::string value);
 
 } // namespace vicon_lsl

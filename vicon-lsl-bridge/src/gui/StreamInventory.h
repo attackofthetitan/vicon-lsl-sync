@@ -6,22 +6,18 @@
 
 namespace vicon_lsl::gui {
 
-// How the list of streams the session knows about changes as they are
-// discovered, rediscovered, and lost. These are the rules that decide what
-// stays selected across a rediscovery, so they are kept apart from the widgets
-// that display the result.
+// Rules for keeping the list of known streams up to date as streams appear,
+// restart, and disappear.
 
-// Folds newly seen streams into the known list, keeping the operator's record
-// and required choices for a stream that is already listed.
+// Adds newly seen streams and updates known ones, keeping the user's Record and
+// Required choices.
 void mergeStreamInventory(QVector<StreamIdentity>& inventory,
                           const QVector<StreamIdentity>& seen);
 
-// Rebuilds the list from a completed discovery pass. A stream that was already
-// known keeps the operator's choices and its last measurements; a stream the
-// saved configuration asked for is selected; anything else follows
-// `record_every_visible_stream`. A stream that was selected or required but did
-// not appear is retained and flagged, so it is visible as missing rather than
-// silently dropped.
+// Rebuilds the list after a stream search. Known streams keep the user's choices
+// and last measurements. Streams named in the saved settings are selected, and
+// the rest follow `record_every_visible_stream`. A selected or required stream
+// that is no longer visible stays in the list, marked as missing.
 QVector<StreamIdentity> reconcileDiscoveredStreams(
     const QVector<StreamIdentity>& known,
     QVector<StreamIdentity> discovered,

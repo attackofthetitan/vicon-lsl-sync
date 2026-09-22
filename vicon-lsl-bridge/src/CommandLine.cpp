@@ -1,5 +1,4 @@
 #include "CommandLine.h"
-#include "StreamDefaults.h"
 
 #include <charconv>
 #include <sstream>
@@ -24,9 +23,8 @@ bool needsValue(std::string_view option) {
 
 CommandLineResult parseCommandLine(int argc, const char* const argv[]) {
     std::vector<std::string> args;
-    args.reserve(argc > 0 ? static_cast<std::size_t>(argc) : 0);
     for (int i = 0; i < argc; ++i) {
-        args.emplace_back(argv[i] == nullptr ? "" : argv[i]);
+        args.emplace_back(argv[i] ? argv[i] : "");
     }
     return parseCommandLine(args);
 }

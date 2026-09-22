@@ -457,7 +457,7 @@ Gaze is therefore drawn in the published `hololens_stationary_shared_with_gaze`
 frame. It is displayed, but it is not aligned to Vicon, and the calibration state
 reads **Not calibrated**.
 
-`gazeTransformForCoordinateFrame` currently returns the supplied transform without changing it. Code may simplify this private work, but the public wrapper must stay when source compatibility needs it. Changing the result needs coordinate checks.
+The preview uses the same gaze transform whatever coordinate-frame name the gaze stream reports. Changing that needs coordinate checks.
 
 ### Decide whether gaze and target can align
 
@@ -511,11 +511,12 @@ gaze-to-Vicon calibration.
 
 ### Build the gaze-to-Vicon transform
 
-The target stream's `acquisition/sdk` value identifies the publisher:
+The target stream's `acquisition/sdk` value names the publisher:
 `Unity.XR.manual_stair_registration` means a manual three-point registration of
-the Unity CAD root, and every other value, including a missing one, means the
-Vuforia model target. Both publishers locate the Unity-imported stair model and
-use the same conversion to the preview's OBJ basis.
+the Unity CAD root, and any other value, including a missing one, means the
+Vuforia model target. Both publishers locate the Unity-imported stair model, so
+the preview uses the same conversion to its OBJ basis for both and does not read
+this value.
 
 The preview draws the stair OBJ in the file's own coordinates, while Unity's
 model import negates X. After undoing the published world's Z reflection, undo

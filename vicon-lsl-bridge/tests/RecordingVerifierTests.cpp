@@ -100,7 +100,6 @@ vicon_lsl::gui::RecordingVerificationRequest verificationRequest(
     const QString& path) {
     vicon_lsl::gui::RecordingVerificationRequest request;
     request.path = path;
-    request.record_every_visible_stream = false;
     vicon_lsl::gui::StreamBinding expected;
     expected.role = "markers";
     expected.name = "Markers";

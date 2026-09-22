@@ -120,11 +120,9 @@ void RecordingVerifier::run() {
             return cancel_requested_.load() || isInterruptionRequested();
         };
         options.progress = [this](const PreviewLoadProgress& progress) {
-            const int percent = progress.total == 0 ? 0 : static_cast<int>(
-                (std::min)(100.0, 100.0 * static_cast<double>(progress.completed) /
-                                         static_cast<double>(progress.total)));
             emit progressChanged(QString::fromLatin1(previewLoadStageName(progress.stage)),
-                                 percent, QString::fromStdString(progress.detail));
+                                 previewLoadPercent(progress),
+                                 QString::fromStdString(progress.detail));
         };
         emit lifecycleChanged(ComponentLifecycleState::Running,
                               "Checking streams and sample times");

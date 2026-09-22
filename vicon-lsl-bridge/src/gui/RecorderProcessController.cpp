@@ -6,8 +6,18 @@
 
 namespace vicon_lsl::gui {
 namespace {
+
 constexpr qsizetype kMaxLogLineBytes = 4096;
 constexpr qsizetype kMaxOutputBytes = 64 * 1024;
+
+QString firstExistingFile(const QStringList& candidates) {
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.exists() && info.isFile()) return QDir::toNativeSeparators(info.absoluteFilePath());
+    }
+    return {};
+}
+
 } // namespace
 
 RecorderProcessController::RecorderProcessController(QObject* parent) : QObject(parent) {
@@ -75,6 +85,7 @@ void RecorderProcessController::detach() {
     kind_ = RecorderProcessKind::None;
 }
 
+// Looks beside the app, in a labrecorder folder, and next to a macOS app bundle.
 QString RecorderProcessController::bundledGraphicalRecorderExecutable(const QString& app_dir) {
     QStringList candidates = {
         QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
@@ -93,12 +104,7 @@ QString RecorderProcessController::bundledGraphicalRecorderExecutable(const QStr
             "LabRecorder.app/Contents/MacOS/LabRecorder"));
         candidates.push_back(QDir(package_root).filePath("LabRecorder"));
     }
-    for (const QString& candidate : candidates) {
-        const QFileInfo info(candidate);
-        if (info.exists() && info.isFile())
-            return QDir::toNativeSeparators(info.absoluteFilePath());
-    }
-    return {};
+    return firstExistingFile(candidates);
 }
 
 QString RecorderProcessController::bundledSelectedStreamExecutable(
@@ -114,13 +120,11 @@ QString RecorderProcessController::bundledSelectedStreamExecutable(
     candidates.push_back(QDir(app_dir).filePath("labrecorder/LabRecorderCLI"));
     candidates.push_back(QDir(app_dir).filePath("LabRecorderCLI.exe"));
     candidates.push_back(QDir(app_dir).filePath("LabRecorderCLI"));
-    for (const QString& candidate : candidates) {
-        const QFileInfo info(candidate);
-        if (info.exists() && info.isFile()) return QDir::toNativeSeparators(info.absoluteFilePath());
-    }
-    return {};
+    return firstExistingFile(candidates);
 }
 
+// LabRecorderCLI arguments: the output file, then one query per selected stream.
+// A query matches the source ID when known, or else the name and host.
 QStringList RecorderProcessController::selectedStreamArguments(const QString& absolute_output_path,
                                                         const QVector<StreamIdentity>& selected_streams,
                                                         QString* error) {
@@ -249,9 +253,8 @@ void RecorderProcessController::setState(RecorderProcessState state, const QStri
     emit stateChanged(state_, detail);
 }
 
-// Each channel carries its own partial line: a stdout line that has not been
-// terminated yet must not be completed by the next chunk of stderr, which would
-// splice two unrelated lines and report them at the wrong severity.
+// Keeps the last 64 KiB of output and reports each complete line. Standard
+// output and error each keep their own unfinished line, so the two never mix.
 void RecorderProcessController::appendOutput(const QByteArray& bytes, EventSeverity severity,
                                              QByteArray& partial_line) {
     if (bytes.isEmpty()) return;
@@ -273,6 +276,7 @@ void RecorderProcessController::appendOutput(const QByteArray& bytes, EventSever
     }
 }
 
+// Quotes a value for a LabRecorderCLI query. Fails when it cannot be quoted safely.
 QString RecorderProcessController::queryLiteral(const QString& value, QString* error) {
     if (value.contains('\n') || value.contains('\r')) {
         if (error) *error = "Stream source contains a line break";

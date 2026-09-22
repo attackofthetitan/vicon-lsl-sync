@@ -2,6 +2,13 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.7] - 2026-09-23
+
+### Changed
+
+- Simplified the desktop bridge code. Behavior is unchanged: streams, saved
+  settings, calibrations, and recordings work as before.
+
 ## [1.14.6] - 2026-09-22
 
 ### Fixed

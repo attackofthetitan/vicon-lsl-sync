@@ -1,7 +1,6 @@
 #include "ViconLSLBridge.h"
-#include "ViconLSLBridgeInternal.h"
 #include "ViconClient.h"
-#include "ViconFrameMapper.h"
+#include "ViconLSLBridgeInternal.h"
 
 #include <lsl_cpp.h>
 
@@ -10,7 +9,6 @@
 #include <chrono>
 #include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -22,8 +20,7 @@
 
 namespace {
 
-vicon_lsl::bridge_internal::Dependencies liveDependencies(
-    const Config& config) {
+vicon_lsl::bridge_internal::Dependencies liveDependencies(const Config& config) {
     vicon_lsl::bridge_internal::Dependencies dependencies;
     dependencies.client = std::make_shared<::ViconClient>(config.vicon_server);
     dependencies.outlet_factory = createLslStreamOutlet;
@@ -47,24 +44,7 @@ ViconLSLBridge::ViconLSLBridge(
       marker_stream_(dependencies.outlet_factory),
       segment_stream_(std::move(dependencies.outlet_factory)),
       clock_(std::move(dependencies.clock)),
-      wait_(std::move(dependencies.wait)) {
-    if (!client_) {
-        throw std::invalid_argument("Vicon bridge needs a client");
-    }
-    if (!clock_) {
-        throw std::invalid_argument("Vicon bridge needs a clock");
-    }
-    if (!wait_) {
-        throw std::invalid_argument("Vicon bridge needs a wait function");
-    }
-}
-
-std::unique_ptr<ViconLSLBridge> vicon_lsl::bridge_internal::BridgeTestAccess::create(
-    const Config& config,
-    Dependencies dependencies) {
-    return std::unique_ptr<ViconLSLBridge>(
-        new ViconLSLBridge(config, std::move(dependencies)));
-}
+      wait_(std::move(dependencies.wait)) {}
 
 void ViconLSLBridge::setStatusCallback(StatusCallback callback) {
     status_callback_ = std::move(callback);
@@ -87,9 +67,9 @@ void ViconLSLBridge::stop() {
 }
 
 void ViconLSLBridge::run() {
-    // LabRecorder can recover a recreated outlet by source_id and continue it
-    // as the same XDF stream. Keep the timestamp guard alive across Vicon
-    // reconnects so that recovered samples never move backwards in that stream.
+    // LabRecorder continues a recreated stream as the same stream when its
+    // source ID matches, so the timestamp guard lives across reconnects. That
+    // way time never goes backward within one recorded stream.
     vicon_lsl::ViconTimestampState timestamp_state;
     bool previous_first_frame_failed = false;
     while (running_) {
@@ -103,7 +83,8 @@ void ViconLSLBridge::run() {
             std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
             reportStatus(BridgeState::Connecting, "Failed to get initial frame, reconnecting");
             client_->disconnect();
-            // Allow one immediate retry while the server starts up.
+            // Retry once right away, since a server that is still starting
+            // usually sends a frame on the next try. Wait before later retries.
             if (previous_first_frame_failed) waitForRetry();
             previous_first_frame_failed = true;
             continue;
@@ -189,6 +170,7 @@ void ViconLSLBridge::connectWithRetry() {
     }
 }
 
+// Sleeps in steps of at most 100 ms so stop() takes effect quickly.
 void ViconLSLBridge::waitForRetry() {
     int remaining_ms = config_.reconnect_interval_ms;
     while (running_ && remaining_ms > 0) {
@@ -198,11 +180,13 @@ void ViconLSLBridge::waitForRetry() {
     }
 }
 
+// Connecting: read the layout and create the streams.
+// Streaming: recreate both streams only if the layout changed. A failed read
+// keeps the working streams.
 bool ViconLSLBridge::refreshStreams(BridgeState state) {
     const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
     if (!discovery.ok()) {
         handleDiagnostics(discovery.diagnostics, state);
-        // A failed periodic check leaves the working streams in place.
         return state == BridgeState::Streaming;
     }
     if (state == BridgeState::Streaming) {

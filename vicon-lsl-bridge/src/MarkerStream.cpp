@@ -1,7 +1,6 @@
 #include "MarkerStream.h"
 
-#include "StreamSchema.h"
-#include "ViconFrameMapping.h"
+#include "ViconFrameMapper.h"
 
 #include <tuple>
 #include <utility>
@@ -11,7 +10,7 @@ MarkerStream::MarkerStream(StreamOutletFactory outlet_factory)
     : outlet_(std::move(outlet_factory), "Marker", "marker") {}
 
 void MarkerStream::initialize(
-    const std::vector<std::pair<std::string, std::string>>& marker_names,
+    const std::vector<vicon_lsl::NamedViconItem>& marker_names,
     const std::string& stream_name,
     const std::string& source_id,
     double nominal_rate) {

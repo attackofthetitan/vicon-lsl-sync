@@ -8,8 +8,8 @@
 
 namespace vicon_lsl::gui {
 
-// Everything that has to be true before a recording may start, gathered from
-// the session so the policy itself can be read and tested on its own.
+// The facts the setup check needs, gathered in one place so the check can be
+// tested on its own.
 struct SetupCheckInputs {
     bool recorder_only = false;
     bool bridge_running_with_current_data = false;
@@ -22,8 +22,8 @@ struct SetupCheckInputs {
     SessionCalibrationState calibration = SessionCalibrationState::Uncalibrated;
 };
 
-// A required stream is ready only when it is visible, recently updated, and
-// still matches the shape the saved configuration expects.
+// A required stream is ready when it is visible, recently updated, and still has
+// the channel count and coordinate name the settings expect.
 bool requiredStreamReady(const StreamBinding& binding, const QVector<StreamIdentity>& inventory);
 
 SetupCheckResult runSetupCheck(const SetupCheckInputs& inputs,

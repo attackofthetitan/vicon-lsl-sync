@@ -18,6 +18,8 @@ enum class PreviewFileType {
     Xdf,
 };
 
+// Loads a CSV or XDF recording on its own thread. The result is only available
+// after a complete load, so a cancel or failure leaves the current source alone.
 class PreviewFileLoader : public QThread {
     Q_OBJECT
 

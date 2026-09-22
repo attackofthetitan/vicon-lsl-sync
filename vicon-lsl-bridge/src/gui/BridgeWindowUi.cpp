@@ -28,7 +28,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-#include "StreamDefaults.h"
+#include "StreamDefaults.generated.h"
 #include "gui/PreviewPanel.h"
 
 namespace vicon_lsl::gui_detail {
@@ -37,9 +37,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     QWidget* window, bool enable_preview, const std::shared_ptr<QSettings>& settings) {
     auto ui = std::make_unique<BridgeWindowUi>();
     window->setWindowTitle("Vicon LSL Bridge");
-    // An honest floor: below this the two panes cannot both hold their controls
-    // and the tabs start scrolling sideways. The old 680x540 was reachable but
-    // never actually laid out, and the content really demanded 800x601.
+    // The smallest size at which both panes fit without sideways scrolling.
     window->setMinimumSize(800, 560);
 
     auto* main_layout = new QVBoxLayout(window);
@@ -52,10 +50,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     db_layout->setHorizontalSpacing(12);
     db_layout->setVerticalSpacing(5);
 
-    // The headline strip owns its own row rather than borrowing cells from the
-    // field grid below. Sharing them put "Elapsed:" in the column that holds
-    // values and its clock in the column that holds labels, so nothing beneath
-    // it lined up.
+    // The headline gets its own row so the field grid below stays aligned.
     ui->recording_indicator_label = makeStateValue("NOT RECORDING", "Recording indicator");
     QFont ind_font = ui->recording_indicator_label->font();
     ind_font.setBold(true);
@@ -78,8 +73,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
 
     auto* destination_value = makeStateValue("No checked destination", "Recording destination",
                                              Qt::ElideMiddle);
-    // BridgeWindow pairs the path with its validation summary, so the label must
-    // not replace that with a plain copy of the path.
+    // BridgeWindow sets a tooltip with the path and its check results.
     destination_value->setAutomaticToolTip(false);
     destination_value->setToolTip("The exact file path used by the recorder.");
     ui->recording_path_label = destination_value;
@@ -97,8 +91,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->drop_label = makeStateValue("0 frame(s) skipped, 0 update(s) combined, 0 ms behind",
                                     "Preview update status");
 
-    // Every field is a label in an even column and its value in the odd column
-    // beside it, so the three pairs on a row stay aligned down the whole block.
+    // Labels go in even columns and values in odd columns, so every row lines up.
     addField(db_layout, 2, 0, "Bridge:", ui->bridge_state_label);
     addField(db_layout, 2, 2, "Recorder:", ui->recorder_state_label);
     addField(db_layout, 2, 4, "Preview:", ui->preview_state_label);
@@ -122,8 +115,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->shutdown_label = makeStateValue(QString(), "Shutdown progress");
     db_buttons->addWidget(ui->shutdown_label, 1);
     db_layout->addLayout(db_buttons, 6, 0, 1, 6);
-    // Only the value columns absorb spare width; the label columns stay at the
-    // width of their text so the three pairs read as columns.
+    // Only the value columns stretch.
     db_layout->setColumnStretch(1, 1);
     db_layout->setColumnStretch(3, 1);
     db_layout->setColumnStretch(5, 1);
@@ -154,8 +146,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     preset_row->addWidget(makeTooltipLabel("Preset:", ui->preset_combo, ui->preset_combo->toolTip()));
     preset_row->addWidget(ui->preset_combo, 1);
     preset_layout->addLayout(preset_row);
-    // Five buttons in fixed grid cells could not shrink below their combined
-    // width, which was the Session tab's sideways overflow.
+    // The buttons wrap when the panel is narrow.
     auto* preset_buttons = new FlowLayout();
     for (QWidget* control : {ui->reset_configuration_button, ui->save_preset_button,
                              ui->load_preset_button, ui->import_configuration_button,
@@ -285,8 +276,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->storage_warning_spin->setValue(10.0);
     recording_form->addRow(makeTooltipLabel("Storage warning:", ui->storage_warning_spin, "Warn when available storage falls below this threshold."), ui->storage_warning_spin);
 
-    // Three long checkbox labels in one unbreakable row were most of the
-    // Recording tab's sideways overflow.
+    // The options wrap when the panel is narrow.
     auto* path_policy = new FlowLayout();
     ui->allow_overwrite_check = makeCheck("Allow overwrite", "Advanced opt-in to overwrite an existing destination.");
     ui->allow_outside_root_check = makeCheck("Allow outside study root", "Allow a recording to be saved outside the study folder.");
@@ -454,8 +444,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->main_splitter->setSizes({520, 980});
     main_layout->addWidget(ui->main_splitter, 1);
 
-    // Parented to the window, so it lives exactly as long as the fields it
-    // watches. Installed last, once every field in both panes exists.
+    // Added last so it sees every text field. The window owns it.
     new LineEditStartKeeper(window);
     return ui;
 }

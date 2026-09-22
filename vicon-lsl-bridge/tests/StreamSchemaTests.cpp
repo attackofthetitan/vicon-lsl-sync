@@ -1,7 +1,7 @@
 #include "StreamSchema.h"
 #include "HoloLensGazeSchema.h"
 #include "HoloLensModelTargetSchema.h"
-#include "StreamDefaults.h"
+#include "StreamDefaults.generated.h"
 #include "TestSupport.h"
 
 #include <string>

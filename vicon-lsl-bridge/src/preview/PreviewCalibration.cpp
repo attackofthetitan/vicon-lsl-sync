@@ -1,10 +1,10 @@
 #include "preview/PreviewCalibration.h"
 
 #include "preview/PreviewMath.h"
+#include "preview/PreviewParsing.h"
 
-#include <cmath>
 #include <algorithm>
-#include <cctype>
+#include <cmath>
 #include <unordered_map>
 
 namespace vicon_lsl {
@@ -20,29 +20,29 @@ bool usableQuaternion(const PreviewQuaternion& value) {
            value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w > 1e-24;
 }
 
-PreviewVec3 reflectZ(const PreviewVec3& value) {
-    return {value.x, value.y, -value.z};
+bool usablePose(const CalibrationTargetPose& pose) {
+    return pose.tracked && isFinite(pose.holo_from_target.translation) &&
+           usableQuaternion(pose.holo_from_target.rotation);
 }
 
-PreviewQuaternion reflectZBasis(const PreviewQuaternion& value) {
-    // F R(q) F, for F = diag(1, 1, -1). Quaternion vector components
-    // are axial under a reflection.
-    return {-value.x, -value.y, value.z, value.w};
+// Angle between two unit quaternions, in degrees.
+double angleBetweenDegrees(const PreviewQuaternion& left, const PreviewQuaternion& right) {
+    const double orientation_dot = std::clamp(
+        std::abs(left.x * right.x + left.y * right.y + left.z * right.z + left.w * right.w),
+        0.0,
+        1.0);
+    return 2.0 * std::acos(orientation_dot) * 180.0 / 3.14159265358979323846;
 }
 
-PreviewVec3 reflectX(const PreviewVec3& value) {
-    return {-value.x, value.y, value.z};
+// Undoes the published world's Z flip and the Unity model import's X flip.
+// Together they map (x, y, z) to (-x, y, -z). For a rotation, the quaternion's
+// X and Z parts change sign.
+PreviewVec3 flipXZ(const PreviewVec3& value) {
+    return {-value.x, value.y, -value.z};
 }
 
-PreviewQuaternion reflectXBasis(const PreviewQuaternion& value) {
-    return {value.x, -value.y, -value.z, value.w};
-}
-
-std::string lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return value;
+PreviewQuaternion flipXZ(const PreviewQuaternion& value) {
+    return {-value.x, value.y, -value.z, value.w};
 }
 
 } // namespace
@@ -72,16 +72,9 @@ bool targetPoseWithinTolerance(const CalibrationTargetPose& reference,
     if (length(delta) > profile.translation_tolerance_m) {
         return false;
     }
-    const PreviewQuaternion left = normalizeQuaternion(reference.holo_from_target.rotation);
-    const PreviewQuaternion right = normalizeQuaternion(candidate.holo_from_target.rotation);
-    const double orientation_dot = std::clamp(
-        std::abs(left.x * right.x + left.y * right.y +
-                 left.z * right.z + left.w * right.w),
-        0.0,
-        1.0);
-    const double angle_degrees = 2.0 * std::acos(orientation_dot) * 180.0 /
-                                 3.14159265358979323846;
-    return angle_degrees <= profile.rotation_tolerance_degrees;
+    return angleBetweenDegrees(normalizeQuaternion(reference.holo_from_target.rotation),
+                               normalizeQuaternion(candidate.holo_from_target.rotation)) <=
+           profile.rotation_tolerance_degrees;
 }
 
 std::optional<CalibrationSolution> solveTrackedTargetCalibration(
@@ -98,22 +91,15 @@ std::optional<CalibrationSolution> solveTrackedTargetCalibration(
     bool uses_frozen_reference = false;
     const PreviewQuaternion mean_rotation = normalizeQuaternion(average->rotation);
     for (const auto& pose : poses) {
-        if (!pose.tracked || !isFinite(pose.holo_from_target.translation) ||
-            !usableQuaternion(pose.holo_from_target.rotation)) {
+        if (!usablePose(pose)) {
             continue;
         }
-        const PreviewVec3 delta = pose.holo_from_target.translation - average->translation;
-        const double translation_error = length(delta);
+        const double translation_error =
+            length(pose.holo_from_target.translation - average->translation);
         translation_squared_sum += translation_error * translation_error;
 
-        const PreviewQuaternion rotation = normalizeQuaternion(pose.holo_from_target.rotation);
-        const double orientation_dot = std::clamp(
-            std::abs(mean_rotation.x * rotation.x + mean_rotation.y * rotation.y +
-                     mean_rotation.z * rotation.z + mean_rotation.w * rotation.w),
-            0.0,
-            1.0);
-        const double angle_degrees = 2.0 * std::acos(orientation_dot) * 180.0 /
-                                     3.14159265358979323846;
+        const double angle_degrees = angleBetweenDegrees(
+            mean_rotation, normalizeQuaternion(pose.holo_from_target.rotation));
         rotation_squared_sum += angle_degrees * angle_degrees;
         ++count;
         uses_frozen_reference = uses_frozen_reference || pose.frozen_reference;
@@ -194,32 +180,38 @@ std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
         const auto found = fields.find(name);
         return found == fields.end() ? std::nullopt : std::optional<double>(found->second);
     };
-    const auto x = value("PositionX"); const auto y = value("PositionY"); const auto z = value("PositionZ");
-    const auto qx = value("RotationX"); const auto qy = value("RotationY");
-    const auto qz = value("RotationZ"); const auto qw = value("RotationW");
     const auto tracked = value("Tracked");
     if (!tracked || !std::isfinite(*tracked)) {
         return std::nullopt;
     }
+    // 0 = lost, 1 = tracked live, 2 = held reference while Vuforia is paused.
     if (*tracked == 0.0) {
         return CalibrationTargetPose{{}, false};
     }
     if (*tracked != 1.0 && *tracked != 2.0) {
         return std::nullopt;
     }
+    const auto x = value("PositionX");
+    const auto y = value("PositionY");
+    const auto z = value("PositionZ");
+    const auto qx = value("RotationX");
+    const auto qy = value("RotationY");
+    const auto qz = value("RotationZ");
+    const auto qw = value("RotationW");
     if (!x || !y || !z || !qx || !qy || !qz || !qw ||
-        !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z) ||
-        !finiteQuaternion({*qx, *qy, *qz, *qw})) {
+        !std::isfinite(*x) || !std::isfinite(*y) || !std::isfinite(*z)) {
         return std::nullopt;
     }
     const PreviewQuaternion raw_rotation{*qx, *qy, *qz, *qw};
     if (!usableQuaternion(raw_rotation)) {
         return std::nullopt;
     }
-    const PreviewQuaternion rotation = normalizeQuaternion(raw_rotation);
-    return CalibrationTargetPose{{{*x, *y, *z}, rotation}, true, *tracked == 2.0};
+    return CalibrationTargetPose{
+        {{*x, *y, *z}, normalizeQuaternion(raw_rotation)}, true, *tracked == 2.0};
 }
 
+// Averages positions and rotations. Each quaternion is flipped to the same
+// sign as the first, since q and -q are the same rotation.
 std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
     const std::vector<CalibrationTargetPose>& poses) {
     PreviewVec3 translation_sum{};
@@ -227,8 +219,7 @@ std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
     PreviewQuaternion reference{};
     std::size_t count = 0;
     for (const auto& pose : poses) {
-        if (!pose.tracked || !isFinite(pose.holo_from_target.translation) ||
-            !usableQuaternion(pose.holo_from_target.rotation)) {
+        if (!usablePose(pose)) {
             continue;
         }
         const PreviewQuaternion rotation = normalizeQuaternion(pose.holo_from_target.rotation);
@@ -251,76 +242,47 @@ std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
                                  normalizeQuaternion(rotation_sum)};
 }
 
-PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& transform,
-                                                  const std::string& name) {
+PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& transform) {
     PreviewTransformProfile profile;
-    profile.name = name;
     profile.use_quaternion_rotation = true;
     profile.rotation = normalizeQuaternion(transform.rotation);
     profile.translation = transform.translation;
     return profile;
 }
 
-GazeTargetBasis gazeTargetBasisFromPublisherSdk(const std::string& sdk) {
-    return lower(sdk) == "unity.xr.manual_stair_registration"
-        ? GazeTargetBasis::ManualStairRegistration
-        : GazeTargetBasis::VuforiaModelTarget;
-}
-
 PreviewTransformProfile gazeTransformFromTargetCalibration(
     const CalibrationProfile& profile,
-    const PreviewRigidTransform& holo_from_target,
-    GazeTargetBasis /*basis*/) {
+    const PreviewRigidTransform& holo_from_target) {
     const PreviewQuaternion target_from_holo_rotation =
         inverseQuaternion(holo_from_target.rotation);
     const PreviewVec3 target_from_holo_translation = rotateByQuaternion(
         holo_from_target.translation * -1.0,
         target_from_holo_rotation);
 
+    // Both target publishers (the Vuforia model target and the manual stair
+    // registration) locate the stair model as Unity imported it. Go from the
+    // HoloLens world to the target, undo the two flips to reach the drawn OBJ,
+    // then place it in Vicon. The inverse pose and the input signs must change
+    // together, or a rotated HoloLens world mirrors the gaze.
     PreviewTransformProfile transform;
     transform.name = "HoloLens";
     transform.use_quaternion_rotation = true;
-
-    // Both publishers locate the Unity-imported stair model. Undo the shared
-    // world's Z reflection, then the model import's X reflection to reach the
-    // OBJ basis. A 180-degree Z turn also negates lateral Y, mirroring gaze.
-    // Convert the inverse pose and input together so this works for rotated
-    // HoloLens worlds and keeps the target origin fixed in Vicon.
     transform.rotation = normalizeQuaternion(multiplyQuaternions(
-        profile.vicon_from_target.rotation,
-        reflectXBasis(reflectZBasis(target_from_holo_rotation))));
+        profile.vicon_from_target.rotation, flipXZ(target_from_holo_rotation)));
     transform.translation = applyRigidTransformPoint(
-        profile.vicon_from_target,
-        reflectX(reflectZ(target_from_holo_translation)));
+        profile.vicon_from_target, flipXZ(target_from_holo_translation));
     transform.input_axis_sign.x = -1.0;
     transform.input_axis_sign.z = -1.0;
     return transform;
 }
 
-PreviewTransformProfile gazeTransformForCoordinateFrame(
-    PreviewTransformProfile transform,
-    const std::string& coordinate_frame) {
-    // Extended eye-tracker samples are already right-handed (+Z forward).
-    // New recordings are transformed into the shared stationary world before
-    // publication; legacy eye_tracker_space recordings remain tracker-local.
-    (void)coordinate_frame;
-    return transform;
-}
-
 bool calibrationCoordinateFramesCompatible(const std::string& gaze_frame,
                                            const std::string& target_frame) {
-    if (lower(gaze_frame) == "eye_tracker_space") {
+    const std::string gaze = lowerAscii(gaze_frame);
+    if (gaze == "eye_tracker_space") {
         return false;
     }
-    if (gaze_frame.empty() || target_frame.empty()) {
-        return true;
-    }
-    const std::string gaze = lower(gaze_frame);
-    const std::string target = lower(target_frame);
-    if (gaze == target) {
-        return true;
-    }
-    return false;
+    return gaze_frame.empty() || target_frame.empty() || gaze == lowerAscii(target_frame);
 }
 
 } // namespace vicon_lsl

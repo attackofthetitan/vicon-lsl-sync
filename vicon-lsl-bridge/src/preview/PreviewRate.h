@@ -5,10 +5,9 @@
 
 namespace vicon_lsl {
 
-// Estimates the effective rate of a stream from its corrected sample
-// timestamps.  A rate is only available after the timestamps span the full
-// rolling window, so short startup bursts cannot be mistaken for a steady
-// stream rate.
+// Measures a stream's actual sample rate over the last few seconds. No rate is
+// given until the samples cover the whole window, so a burst at startup is not
+// mistaken for the steady rate.
 class PreviewRateTracker {
 public:
     static constexpr double kDefaultWindowSeconds = 2.0;
@@ -16,16 +15,15 @@ public:
     explicit PreviewRateTracker(double window_seconds = kDefaultWindowSeconds);
 
     void reset();
-    // Non-finite and duplicate timestamps are ignored. A regression starts a
-    // new measurement window because clock correction need not be monotonic.
-    // Returning false distinguishes ignored timestamps without changing the
-    // live stream's sample handling.
+    // Ignores a time that is not a number or repeats the last one, and returns
+    // false for it. A time that goes backward starts a new window, because
+    // clock correction can move time back.
     bool addTimestamp(double corrected_timestamp);
 
     bool hasFullWindow() const;
     double effectiveRateHz() const;
-    // Returns true only when a complete window has been measured and the
-    // effective rate is below the requested fraction of a valid nominal rate.
+    // True when a full window has been measured and its rate is below
+    // `fraction` of the expected rate.
     bool belowNominalRate(double nominal_rate, double fraction) const;
     std::size_t sampleCount() const;
 

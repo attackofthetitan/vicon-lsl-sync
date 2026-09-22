@@ -34,6 +34,7 @@ struct BridgeWindowUi;
 }
 }
 
+// Runs one ViconLSLBridge on its own thread and reports its status as signals.
 class BridgeWorker : public QThread {
     Q_OBJECT
 public:
@@ -106,6 +107,7 @@ private:
     void loadSettings();
     void saveSettings();
     void applyConfigurationToUi();
+    void replaceConfiguration(vicon_lsl::gui::SessionConfiguration configuration);
     void updateConfigurationFromUi();
     void refreshPresetList(const QString& select = {});
     void restoreUiState();

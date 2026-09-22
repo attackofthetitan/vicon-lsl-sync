@@ -1,6 +1,4 @@
-#include "ViconDiagnostics.h"
-#include "ViconFrameMapping.h"
-#include "ViconTimestamp.h"
+#include "ViconFrameMapper.h"
 
 #include <cmath>
 #include <limits>
@@ -9,6 +7,7 @@
 #include <utility>
 
 namespace vicon_lsl {
+
 DiagnosticAggregator::DiagnosticAggregator(unsigned int repeat_interval)
     : repeat_interval_(repeat_interval) {
     if (repeat_interval_ == 0) {
@@ -21,8 +20,7 @@ DiagnosticEmission DiagnosticAggregator::record(
     DiagnosticEmission emission;
 
     for (const auto& diagnostic : diagnostics) {
-        const std::string key = diagnosticKey(diagnostic);
-        const unsigned int count = ++counts_[key];
+        const unsigned int count = ++counts_[diagnosticKey(diagnostic)];
         if (count == 1 || count % repeat_interval_ == 0) {
             std::string line = formatDiagnostic(diagnostic);
             if (count > 1) {
@@ -84,10 +82,8 @@ bool enforceViconTimestamp(double candidate_timestamp,
         *adjusted = false;
     }
 
-    double timestamp = candidate_timestamp;
-    if (!std::isfinite(timestamp)) {
-        timestamp = receipt_timestamp;
-    }
+    double timestamp = std::isfinite(candidate_timestamp) ? candidate_timestamp
+                                                          : receipt_timestamp;
     if (!std::isfinite(timestamp)) {
         return false;
     }
@@ -154,22 +150,8 @@ std::string formatDiagnostic(const ViconDiagnostic& diagnostic) {
 }
 
 std::string diagnosticKey(const ViconDiagnostic& diagnostic) {
-    // Occlusion raises one diagnostic per item per frame, so build the key in a
-    // single sized allocation instead of a chain of temporaries.
-    std::string key;
-    key.reserve(diagnostic.operation.size() + diagnostic.subject.size() +
-                diagnostic.object_name.size() + diagnostic.sdk_result.size() +
-                diagnostic.message.size() + 4);
-    key += diagnostic.operation;
-    key += '|';
-    key += diagnostic.subject;
-    key += '|';
-    key += diagnostic.object_name;
-    key += '|';
-    key += diagnostic.sdk_result;
-    key += '|';
-    key += diagnostic.message;
-    return key;
+    return diagnostic.operation + '|' + diagnostic.subject + '|' + diagnostic.object_name +
+           '|' + diagnostic.sdk_result + '|' + diagnostic.message;
 }
 
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics) {

@@ -96,6 +96,7 @@ private slots:
     void exportCalibrationProfile();
 
 private:
+    bool calibrationInUse() const;
     PreviewTransformProfile gazeTransform() const;
     PreviewTransformProfile stairTransform() const;
     void resetCalibrationSession();
@@ -122,8 +123,7 @@ private:
     void updateCalibrationPersistentStatus(gui::SessionCalibrationState state,
                                            const QString& text,
                                            bool metadata_compatible);
-    // Keeps every control that only works in some states enabled exactly when it
-    // does work, so no button is live while its action would do nothing.
+    // Enables each control only when its action can do something.
     void refreshControlStates();
 
     PreviewWidget* widget_ = nullptr;
@@ -201,7 +201,6 @@ private:
     QVector<gui::ManagedCalibrationProfile> calibration_profiles_;
     CalibrationQuality calibration_quality_;
     QString calibration_rejection_reason_;
-    QString calibration_publisher_sdk_;
     bool calibration_metadata_compatible_ = true;
     QElapsedTimer calibration_progress_throttle_;
     std::shared_ptr<QSettings> settings_;

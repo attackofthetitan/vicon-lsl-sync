@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace vicon_lsl {
 
@@ -24,6 +26,7 @@ struct PreviewLoadProgress {
     std::string detail;
 };
 
+// Limits that keep a large or damaged file from using too much memory.
 struct PreviewLoadOptions {
     std::uint64_t maximum_file_bytes = 64ULL * 1024ULL * 1024ULL * 1024ULL;
     std::uint64_t maximum_samples_per_stream = 100000000ULL;
@@ -41,5 +44,30 @@ struct PreviewLoadOptions {
 };
 
 const char* previewLoadStageName(PreviewLoadStage stage);
+
+// Throws when the load was canceled; otherwise passes progress to the caller.
+void reportPreviewLoadProgress(const PreviewLoadOptions& options,
+                               PreviewLoadStage stage,
+                               std::uint64_t completed,
+                               std::uint64_t total,
+                               const std::string& detail = {});
+
+// Progress as a whole percentage from 0 to 100.
+int previewLoadPercent(const PreviewLoadProgress& progress);
+
+// Halves a list by keeping every other item, starting with the first. With
+// keep_last, the final item is kept too.
+template <class T>
+void keepEveryOther(std::vector<T>& values, bool keep_last) {
+    std::vector<T> kept;
+    kept.reserve((values.size() + 1) / 2 + 1);
+    for (std::size_t index = 0; index < values.size(); index += 2) {
+        kept.push_back(std::move(values[index]));
+    }
+    if (keep_last && values.size() > 2 && values.size() % 2 == 0) {
+        kept.push_back(std::move(values.back()));
+    }
+    values.swap(kept);
+}
 
 } // namespace vicon_lsl

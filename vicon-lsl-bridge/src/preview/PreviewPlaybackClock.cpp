@@ -5,7 +5,6 @@
 #include <stdexcept>
 
 namespace vicon_lsl {
-
 namespace {
 
 std::vector<double> relativeTimeline(const std::vector<double>& timestamps) {
@@ -30,7 +29,9 @@ std::vector<double> relativeTimeline(const std::vector<double>& timestamps) {
 
 void PreviewPlaybackClock::setTimeline(const std::vector<double>& timestamps) {
     timeline_ = relativeTimeline(timestamps);
-    reset();
+    playing_ = false;
+    paused_position_ = 0.0;
+    anchor_monotonic_seconds_ = 0.0;
 }
 
 void PreviewPlaybackClock::setFrameTimeline(const std::vector<PreviewFrame>& frames) {
@@ -38,12 +39,6 @@ void PreviewPlaybackClock::setFrameTimeline(const std::vector<PreviewFrame>& fra
     timestamps.reserve(frames.size());
     for (const PreviewFrame& frame : frames) timestamps.push_back(frame.timestamp);
     setTimeline(timestamps);
-}
-
-void PreviewPlaybackClock::reset() {
-    playing_ = false;
-    paused_position_ = 0.0;
-    anchor_monotonic_seconds_ = 0.0;
 }
 
 void PreviewPlaybackClock::play(double monotonic_seconds) {
@@ -66,19 +61,20 @@ void PreviewPlaybackClock::setSpeed(double speed, double monotonic_seconds) {
     if (!std::isfinite(speed) || speed <= 0.0) {
         throw std::invalid_argument("Playback speed must be positive and finite");
     }
-    if (playing_) {
-        paused_position_ = position(monotonic_seconds);
-        anchor_monotonic_seconds_ = monotonic_seconds;
-    }
+    reanchor(monotonic_seconds);
     speed_ = speed;
 }
 
 void PreviewPlaybackClock::setLooping(bool looping, double monotonic_seconds) {
+    reanchor(monotonic_seconds);
+    looping_ = looping;
+}
+
+void PreviewPlaybackClock::reanchor(double monotonic_seconds) {
     if (playing_) {
         paused_position_ = position(monotonic_seconds);
         anchor_monotonic_seconds_ = monotonic_seconds;
     }
-    looping_ = looping;
 }
 
 void PreviewPlaybackClock::seek(double position_seconds, double monotonic_seconds) {

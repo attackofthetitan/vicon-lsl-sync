@@ -64,10 +64,11 @@ struct RecordingVerificationRequest {
     QString path;
     QVector<StreamIdentity> setup_check_inventory;
     QVector<StreamBinding> expected_streams;
-    bool record_every_visible_stream = true;
     std::function<QDateTime()> now_utc;
 };
 
+// Reads a finished XDF on its own thread and reports each stream's sample count,
+// timing, and gaps. It never changes the file.
 class RecordingVerifier : public QThread {
     Q_OBJECT
 

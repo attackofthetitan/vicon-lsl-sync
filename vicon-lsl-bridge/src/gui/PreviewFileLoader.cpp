@@ -1,11 +1,9 @@
 #include "gui/PreviewFileLoader.h"
 
-#include "gui/SessionState.h"
 #include "preview/PreviewXdf.h"
 
 #include <QMutexLocker>
 
-#include <algorithm>
 #include <exception>
 
 namespace vicon_lsl {
@@ -52,6 +50,7 @@ std::optional<PreviewRecording> PreviewFileLoader::takeRecording() {
     return result;
 }
 
+// Asks the window which streams to use and waits for the answer or a cancel.
 XdfStreamMapping PreviewFileLoader::awaitMapping(const XdfMappingAnalysis& analysis) {
     emit mappingRequired(analysis);
     QMutexLocker lock(&mutex_);
@@ -70,13 +69,8 @@ void PreviewFileLoader::run() {
         PreviewLoadOptions options = options_;
         options.cancel_requested = [this]() { return canceled(); };
         options.progress = [this](const PreviewLoadProgress& progress) {
-            const int percent = progress.total == 0
-                ? 0
-                : static_cast<int>((std::min)(100.0,
-                    100.0 * static_cast<double>(progress.completed) /
-                        static_cast<double>(progress.total)));
             emit progressChanged(QString::fromLatin1(previewLoadStageName(progress.stage)),
-                                 percent,
+                                 previewLoadPercent(progress),
                                  QString::fromStdString(progress.detail));
         };
         emit lifecycleChanged(ComponentLifecycleState::Running, "Loading recording");

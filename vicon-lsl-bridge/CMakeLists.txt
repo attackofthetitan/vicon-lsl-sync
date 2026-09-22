@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.14.6 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.14.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,11 +63,8 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/preview/PreviewPlaybackClock.cpp
     src/preview/PreviewParsing.cpp
     src/preview/PreviewXdf.cpp
-    src/preview/PreviewXdfMetadata.cpp
     src/preview/PreviewXdfMapping.cpp
     src/preview/PreviewXdfReader.cpp
-    src/preview/PreviewXdfRecording.cpp
-    src/preview/PreviewXdfTimestamps.cpp
     src/StreamSchema.cpp
     src/CommandLine.cpp
     src/ViconFrameMapper.cpp
@@ -147,7 +144,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
         ${VICON_LSL_LIB_TARGET}
         ViconDataStreamSDK_CPP
     )
-    target_include_directories(vicon-lsl-bridge-runtime PUBLIC src)
     target_compile_definitions(vicon-lsl-bridge-runtime PUBLIC _BUILD_STATIC_LIB)
 
     if(WIN32)
@@ -160,8 +156,8 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     if(VICON_LSL_BRIDGE_BUILD_GUI)
         find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
         if(Qt6_FOUND)
-            # Some Qt 6 macOS packages still expose the removed AGL framework
-            # through WrapOpenGL, which breaks linking on current macOS SDKs.
+            # Some Qt 6 macOS packages still link the AGL framework, which
+            # current macOS SDKs no longer have. Remove it.
             if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
                 get_target_property(_wrap_gl_libs
                     WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
@@ -201,7 +197,6 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 Qt6::Widgets
                 Qt6::Network
             )
-            target_include_directories(vicon-lsl-bridge-gui-components PUBLIC src)
 
             if(APPLE)
                 add_executable(vicon-lsl-bridge-gui MACOSX_BUNDLE src/gui/main_gui.cpp)

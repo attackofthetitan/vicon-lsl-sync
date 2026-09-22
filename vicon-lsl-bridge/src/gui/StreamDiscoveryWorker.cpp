@@ -1,6 +1,6 @@
 #include "gui/StreamDiscoveryWorker.h"
 
-#include "StreamDefaults.h"
+#include "StreamDefaults.generated.h"
 #include "HoloLensGazeSchema.h"
 #include "HoloLensModelTargetSchema.h"
 #include "StreamSchema.h"
@@ -98,9 +98,8 @@ void StreamDiscoveryWorker::run() {
         }
         QHash<QString, int> streams_per_name;
         for (const gui::StreamIdentity& identity : result) ++streams_per_name[identity.name];
-        // Each affected stream carries its own warning, but the summary names a
-        // duplicated stream once rather than once per copy of it. Walking the
-        // sorted results keeps that summary in a stable order.
+        // Every copy of a duplicated name gets a warning, but the summary lists
+        // each name once.
         QStringList reported_duplicates;
         for (gui::StreamIdentity& identity : result) {
             const int duplicates = streams_per_name.value(identity.name);

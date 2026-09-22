@@ -1,5 +1,5 @@
 #include "ViconClient.h"
-#include "ViconTimestamp.h"
+#include "ViconFrameMapper.h"
 
 #include <lsl_cpp.h>
 
@@ -25,10 +25,10 @@ namespace SDK = ViconDataStreamSDK::CPP;
 
 namespace {
 
-// Limit each connection probe so an unavailable server does not delay Stop.
+// How long each connection check may take, so a missing server cannot delay Stop.
 constexpr int kReachabilityTimeoutMs = 500;
 
-// The port the Vicon DataStream server listens on when an address omits one.
+// Vicon's port when the address does not give one.
 constexpr const char* kDefaultViconPort = "801";
 
 #ifdef _WIN32
@@ -67,7 +67,7 @@ bool markNonBlocking(SocketHandle handle) {
 #endif
 }
 
-// True once the handshake completes, false if it fails or outlasts the budget.
+// Returns true once the connection succeeds, false if it fails or times out.
 bool waitForConnection(SocketHandle handle, int timeout_ms) {
 #ifdef _WIN32
     fd_set writable;
@@ -76,7 +76,7 @@ bool waitForConnection(SocketHandle handle, int timeout_ms) {
     timeval timeout{};
     timeout.tv_sec = timeout_ms / 1000;
     timeout.tv_usec = (timeout_ms % 1000) * 1000;
-    // The first argument is ignored on Windows, where a socket is not an index.
+    // Windows ignores the first argument.
     if (select(0, nullptr, &writable, nullptr, &timeout) <= 0) {
         return false;
     }
@@ -89,8 +89,8 @@ bool waitForConnection(SocketHandle handle, int timeout_ms) {
     }
 #endif
 
-    // Becoming writable only means the attempt finished; it may have been
-    // refused, so the pending socket error is what decides.
+    // A writable socket only means the attempt finished. The socket error says
+    // whether it actually connected.
     int pending_error = 0;
     SocketLength length = sizeof(pending_error);
     return getsockopt(handle, SOL_SOCKET, SO_ERROR,
@@ -117,8 +117,8 @@ bool addressAccepts(const addrinfo& candidate, int timeout_ms) {
     return accepted;
 }
 
-// Splits "host:port", leaving an address that carries no port on the default.
-// An IPv6 literal is full of colons, so only a trailing all-digit field counts.
+// Splits "host:port", using the default port when none is given. Only a final
+// all-digit part counts as a port, because IPv6 addresses contain colons.
 std::pair<std::string, std::string> splitServerAddress(const std::string& address) {
     const std::size_t separator = address.rfind(':');
     if (separator == std::string::npos || separator + 1 == address.size()) {
@@ -133,13 +133,13 @@ std::pair<std::string, std::string> splitServerAddress(const std::string& addres
     return {address.substr(0, separator), port};
 }
 
-// Skip the SDK's blocking Connect() when a TCP probe cannot reach the server.
-// DNS lookup and Connect() itself can still block; this is not a total timeout.
+// A quick TCP check before the SDK's Connect(), which can block for a long time
+// when nothing is listening. Name lookup and Connect() itself can still block.
 bool serverIsListening(const std::string& address) {
 #ifdef _WIN32
     WSADATA winsock_data;
     if (WSAStartup(MAKEWORD(2, 2), &winsock_data) != 0) {
-        // Without sockets there is nothing to check, so let the SDK decide.
+        // Without sockets we cannot check, so let the SDK try.
         return true;
     }
     struct WinsockRelease {
@@ -217,7 +217,7 @@ vicon_lsl::ViconReadStatus readStatus(SDK::Result::Enum result) {
                : vicon_lsl::ViconReadStatus::SdkError;
 }
 
-// Keep connection and SDK errors consistent across read types.
+// Failed reads look the same for every read type.
 template <class Read>
 Read notConnected() {
     Read read;
@@ -236,7 +236,7 @@ Read sdkFailed(SDK::Result::Enum result, std::string message) {
     return read;
 }
 
-// Hidden items retain their status so the stream can send invalid values.
+// Hidden items are marked so the stream sends invalid values for them.
 template <class Read>
 Read occludedOrOk(Read read, bool occluded, const char* occlusion_message) {
     read.occluded = occluded;
@@ -316,8 +316,7 @@ void ViconClient::disconnect() {
 }
 
 bool ViconClient::isConnected() const {
-    // connected_ tracks what this object asked for; the SDK knows whether the
-    // socket is still up. Both have to agree for a session to keep streaming.
+    // Both our own flag and the SDK must agree that the connection is up.
     return connected_ && client_.IsConnected().Connected;
 }
 
@@ -328,11 +327,8 @@ bool ViconClient::getFrame() {
         return false;
     }
 
-    // Capture the local clock immediately after GetFrame. GetLatencyTotal is a
-    // Vicon pipeline-latency estimate, not a capture-accurate timestamp or a
-    // measurement of ServerPush/network delay, so subtracting a valid value
-    // produces only an estimated acquisition timestamp. Invalid values fall
-    // back to this immediate receipt time.
+    // Read the local clock right after the frame arrives, then subtract Vicon's
+    // latency estimate. See viconFrameTimestamp().
     const double receipt_timestamp = lsl::local_clock();
     const auto latency = client_.GetLatencyTotal();
     frame_timestamp_ = vicon_lsl::viconFrameTimestamp(

@@ -1,7 +1,6 @@
 #include "SegmentStream.h"
 
-#include "StreamSchema.h"
-#include "ViconFrameMapping.h"
+#include "ViconFrameMapper.h"
 
 #include <tuple>
 #include <utility>
@@ -11,7 +10,7 @@ SegmentStream::SegmentStream(StreamOutletFactory outlet_factory)
     : outlet_(std::move(outlet_factory), "Segment", "segment") {}
 
 void SegmentStream::initialize(
-    const std::vector<std::pair<std::string, std::string>>& segment_names,
+    const std::vector<vicon_lsl::NamedViconItem>& segment_names,
     const std::string& stream_name,
     const std::string& source_id,
     double nominal_rate) {

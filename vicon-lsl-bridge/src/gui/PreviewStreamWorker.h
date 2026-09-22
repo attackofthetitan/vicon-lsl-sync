@@ -4,7 +4,6 @@
 #include "preview/PreviewDeliveryMailbox.h"
 #include "preview/PreviewRate.h"
 #include "preview/PreviewTypes.h"
-#include "StreamDefaults.h"
 #include "gui/SessionConfiguration.h"
 #include "gui/SessionState.h"
 
@@ -14,34 +13,28 @@
 
 #include <memory>
 #include <mutex>
-#include <string>
-#include <vector>
 
 namespace lsl {
 class stream_inlet;
 class stream_info;
-}
+} // namespace lsl
 
 namespace vicon_lsl {
 
+// Which streams to open. Each binding's name, source ID, and reconnection mode
+// are used.
 struct PreviewWorkerConfig {
-    QString marker_stream_name = vicon_lsl::stream_defaults::ViconMarkers;
-    QString segment_stream_name = vicon_lsl::stream_defaults::ViconSegments;
-    QString gaze_stream_name = vicon_lsl::stream_defaults::HoloLensGaze;
-    QString calibration_stream_name = vicon_lsl::stream_defaults::HoloLensModelTargetPose;
+    gui::StreamBinding markers;
+    gui::StreamBinding segments;
+    gui::StreamBinding gaze;
+    gui::StreamBinding calibration;
     double match_tolerance_seconds = 0.05;
     PreviewTransformProfile vicon_transform;
     PreviewTransformProfile gaze_transform;
-    QString marker_source_id;
-    QString segment_source_id;
-    QString gaze_source_id;
-    QString calibration_source_id;
-    bool marker_follow_by_name = false;
-    bool segment_follow_by_name = false;
-    bool gaze_follow_by_name = false;
-    bool calibration_follow_by_name = false;
 };
 
+// Reads the four live preview streams on its own thread. Only the newest frame
+// waits for display; stream rates and calibration poses are tracked separately.
 class PreviewStreamWorker : public QThread {
     Q_OBJECT
 

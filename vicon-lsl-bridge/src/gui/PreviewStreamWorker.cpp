@@ -1,9 +1,6 @@
 #include "gui/PreviewStreamWorker.h"
 
-#include "StreamDefaults.h"
 #include "gui/LslStreamIdentity.h"
-#include "gui/SessionConfiguration.h"
-#include "preview/PreviewCalibration.h"
 #include "preview/PreviewFrameAssembler.h"
 #include "preview/PreviewParsing.h"
 
@@ -12,6 +9,9 @@
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QStringList>
+
+#include <algorithm>
+#include <cmath>
 #include <tuple>
 
 namespace vicon_lsl {
@@ -24,52 +24,42 @@ constexpr double kGazeLowRateFraction = 0.8;
 constexpr double kMetadataTimeoutSeconds = 0.25;
 constexpr double kResolveTimeoutSeconds = 0.05;
 
-std::vector<std::string> channelLabels(lsl::stream_info& info, PreviewStreamRole role, bool* complete) {
+// Channel labels from the stream details. When they are incomplete, uses the
+// fixed HoloLens labels for that role, or else ch_0, ch_1, and so on.
+std::vector<std::string> channelLabels(lsl::stream_info& info, PreviewStreamRole role,
+                                       bool& complete) {
+    const auto channel_count = static_cast<std::size_t>(info.channel_count());
     std::vector<std::string> labels;
-    labels.reserve(static_cast<std::size_t>(info.channel_count()));
-    bool metadata_complete = true;
+    labels.reserve(channel_count);
+    complete = true;
     for (lsl::xml_element ch = info.desc().child("channels").child("channel"); !ch.empty(); ch = ch.next_sibling()) {
-        const char* val = ch.child_value("label");
-        if (val && *val) {
-            labels.emplace_back(val);
+        const char* label = ch.child_value("label");
+        if (label && *label) {
+            labels.emplace_back(label);
         } else {
-            metadata_complete = false;
+            complete = false;
             labels.push_back("ch_" + std::to_string(labels.size()));
         }
     }
-    const std::size_t channel_count = static_cast<std::size_t>(info.channel_count());
-    if (metadata_complete && labels.size() == channel_count) {
-        if (complete) *complete = true;
+    if (complete && labels.size() == channel_count) {
         return labels;
     }
 
+    complete = false;
     auto canonical = canonicalPreviewChannelLabels(role, channel_count);
     if (!canonical.empty()) {
-        if (complete) *complete = false;
         return canonical;
     }
     while (labels.size() < channel_count) labels.push_back("ch_" + std::to_string(labels.size()));
     labels.resize(channel_count);
-    if (complete) *complete = false;
     return labels;
 }
 
-// msecsSinceReference() returns the timer's start time, so start a fresh timer.
+// Milliseconds on a clock that never goes backward.
 qint64 steadyNowMs() {
     QElapsedTimer timer;
     timer.start();
     return timer.msecsSinceReference();
-}
-
-QString roleText(PreviewStreamRole role) {
-    switch (role) {
-        case PreviewStreamRole::ViconMarkers: return "markers";
-        case PreviewStreamRole::ViconSegments: return "segments";
-        case PreviewStreamRole::HoloLensGaze: return "gaze";
-        case PreviewStreamRole::HoloLensCalibrationTarget: return "calibration";
-        case PreviewStreamRole::Unknown: return "unknown";
-    }
-    return "unknown";
 }
 
 } // namespace
@@ -107,26 +97,19 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
     qRegisterMetaType<gui::StreamIdentity>("vicon_lsl::gui::StreamIdentity");
     qRegisterMetaType<QVector<gui::StreamIdentity>>("QVector<vicon_lsl::gui::StreamIdentity>");
     qRegisterMetaType<ComponentLifecycleState>("ComponentLifecycleState");
-    config.vicon_transform.name = "Vicon";
-    if (config.vicon_transform.scale == 0.0) config.vicon_transform.scale = 0.001;
-    config.gaze_transform.name = "HoloLens";
 
-    auto initStream = [](StreamState& stream, const QString& name, const QString& source_id, bool follow,
+    const auto init = [](StreamState& stream, const gui::StreamBinding& binding,
                          PreviewStreamRole role, const PreviewTransformProfile& transform) {
-        stream.requested_name = name;
-        stream.configured_source_id = source_id;
-        stream.follow_by_name = follow;
+        stream.requested_name = binding.name;
+        stream.configured_source_id = binding.source_id;
+        stream.follow_by_name = binding.reconnection == gui::StreamReconnectionMode::FollowName;
         stream.role = role;
         stream.transform = transform;
     };
-    initStream(*markers_, config.marker_stream_name, config.marker_source_id, config.marker_follow_by_name,
-               PreviewStreamRole::ViconMarkers, config.vicon_transform);
-    initStream(*segments_, config.segment_stream_name, config.segment_source_id, config.segment_follow_by_name,
-               PreviewStreamRole::ViconSegments, config.vicon_transform);
-    initStream(*gaze_, config.gaze_stream_name, config.gaze_source_id, config.gaze_follow_by_name,
-               PreviewStreamRole::HoloLensGaze, config.gaze_transform);
-    initStream(*calibration_target_, config.calibration_stream_name, config.calibration_source_id,
-               config.calibration_follow_by_name, PreviewStreamRole::HoloLensCalibrationTarget, {});
+    init(*markers_, config.markers, PreviewStreamRole::ViconMarkers, config.vicon_transform);
+    init(*segments_, config.segments, PreviewStreamRole::ViconSegments, config.vicon_transform);
+    init(*gaze_, config.gaze, PreviewStreamRole::HoloLensGaze, config.gaze_transform);
+    init(*calibration_target_, config.calibration, PreviewStreamRole::HoloLensCalibrationTarget, {});
 }
 
 PreviewStreamWorker::~PreviewStreamWorker() {
@@ -145,7 +128,6 @@ QVector<gui::StreamIdentity> PreviewStreamWorker::streamInventory() const {
 
 void PreviewStreamWorker::setGazeTransform(PreviewTransformProfile transform) {
     std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
-    transform.name = "HoloLens";
     transform.scale = 1.0;
     gaze_->transform = std::move(transform);
 }
@@ -210,7 +192,7 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 0, kResolveTimeoutSeconds);
         if (streams.empty()) return false;
 
-        // Keep the displayed candidates in a consistent order.
+        // Sort so the candidates always appear in the same order.
         std::stable_sort(streams.begin(), streams.end(), [](const lsl::stream_info& left, const lsl::stream_info& right) {
             return std::make_tuple(left.source_id(), left.hostname(), left.session_id(), left.name()) <
                    std::make_tuple(right.source_id(), right.hostname(), right.session_id(), right.name());
@@ -219,9 +201,10 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
         candidates.reserve(static_cast<qsizetype>(streams.size()));
         for (lsl::stream_info& c : streams) {
             gui::StreamIdentity id = gui::identityFromStreamInfo(c);
-            id.role = roleText(state.role);
+            id.role = previewStreamRoleName(state.role);
             candidates.push_back(std::move(id));
         }
+        // A source ID from the settings wins over the one found on the last connection.
         gui::StreamBinding selection_binding;
         selection_binding.name = state.requested_name;
         selection_binding.source_id = !state.configured_source_id.trimmed().isEmpty()
@@ -253,7 +236,7 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
     try { metadata = inlet->info(kMetadataTimeoutSeconds); } catch (const std::exception&) {}
 
     bool metadata_complete = false;
-    state.labels = channelLabels(metadata, state.role, &metadata_complete);
+    state.labels = channelLabels(metadata, state.role, metadata_complete);
     state.coordinate_frame = gui::coordinateFrameOf(metadata).toStdString();
     state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
     state.nominal_rate = metadata.nominal_srate() > 0.0 && std::isfinite(metadata.nominal_srate()) ? metadata.nominal_srate() : 0.0;
@@ -262,12 +245,13 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
     state.clearSample();
     state.last_error.clear();
     state.identity = gui::identityFromStreamInfo(metadata);
-    state.identity.role = roleText(state.role);
+    state.identity.role = previewStreamRoleName(state.role);
     state.identity.nominal_rate = state.nominal_rate;
     const bool coordinate_required = state.role == PreviewStreamRole::HoloLensGaze ||
                                      state.role == PreviewStreamRole::HoloLensCalibrationTarget;
     state.identity.metadata_complete = metadata_complete &&
         gui::identityDescribesItself(state.identity, coordinate_required);
+    // Remember the source ID so a restart reconnects to the same publisher.
     if (!state.follow_by_name && !state.identity.source_id.isEmpty()) state.bound_source_id = state.identity.source_id;
     if (isInterruptionRequested()) return false;
     if (!state.identity.metadata_complete) {
@@ -279,6 +263,7 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
     return true;
 }
 
+// Reads up to 16 waiting samples without blocking and keeps the newest.
 bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
     if (!state.inlet) return false;
     int samples_in_pass = 0;
@@ -319,15 +304,16 @@ void PreviewStreamWorker::replaceInventory(PreviewStreamRole role,
                                           const QString& warning) {
     {
         std::lock_guard<std::mutex> lock(inventory_mutex_);
+        const QString role_name = previewStreamRoleName(role);
         inventory_.erase(std::remove_if(inventory_.begin(), inventory_.end(),
-            [role](const gui::StreamIdentity& item) { return item.role == roleText(role); }),
+            [&role_name](const gui::StreamIdentity& item) { return item.role == role_name; }),
             inventory_.end());
         for (gui::StreamIdentity stream : streams) {
             stream.warning = warning;
             inventory_.push_back(std::move(stream));
         }
     }
-    // Deliver signals after releasing the lock: receivers may read the inventory.
+    // Emit after unlocking, because receivers may read the inventory.
     for (const auto& stream : streams) emit streamIdentityChanged(stream, warning);
 }
 
@@ -341,7 +327,7 @@ bool PreviewStreamWorker::calibrationFramesCompatible() const {
 
 PreviewTransformProfile PreviewStreamWorker::currentGazeTransform() const {
     std::lock_guard<std::mutex> lock(gaze_transform_mutex_);
-    return gazeTransformForCoordinateFrame(gaze_->transform, gaze_->coordinate_frame);
+    return gaze_->transform;
 }
 
 void PreviewStreamWorker::updateStatus(qint64 now_ms) {
@@ -368,7 +354,7 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
     }
     for (const StreamState* state : states) {
         if (!state->last_error.isEmpty()) {
-            messages.push_back(roleText(state->role) + " error: " + state->last_error);
+            messages.push_back(QString(previewStreamRoleName(state->role)) + " error: " + state->last_error);
         }
     }
     if (gaze_->connected() && calibration_target_->connected() && !calibrationFramesCompatible()) {

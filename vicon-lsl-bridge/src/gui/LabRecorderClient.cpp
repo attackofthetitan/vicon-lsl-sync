@@ -1,5 +1,4 @@
 #include "gui/LabRecorderClient.h"
-#include "gui/LabRecorderFilenamePolicy.h"
 
 #include <algorithm>
 #include <utility>

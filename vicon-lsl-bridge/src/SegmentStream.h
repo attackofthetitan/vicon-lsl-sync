@@ -7,12 +7,13 @@
 #include <string>
 #include <vector>
 
+// The LSL stream of Vicon segments. An empty layout creates no LSL stream.
 class SegmentStream {
 public:
     explicit SegmentStream(StreamOutletFactory outlet_factory = createLslStreamOutlet);
 
-    // segment_names: vector of (subject, segment) pairs
-    void initialize(const std::vector<std::pair<std::string, std::string>>& segment_names,
+    // Replaces any open stream. Each name is a (subject, segment) pair.
+    void initialize(const std::vector<vicon_lsl::NamedViconItem>& segment_names,
                     const std::string& stream_name,
                     const std::string& source_id,
                     double nominal_rate = lsl::IRREGULAR_RATE);

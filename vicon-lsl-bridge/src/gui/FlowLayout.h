@@ -11,14 +11,9 @@
 
 namespace vicon_lsl::gui_detail {
 
-// Places items left to right and wraps to a new line when the width runs out.
-// A row of controls in a QHBoxLayout cannot shrink below the sum of its items,
-// so a narrow panel forces horizontal scrolling and clips whatever does not
-// fit. This layout reports the widest single item as its minimum instead, so
-// the same controls stay reachable at any width.
-//
-// No Q_OBJECT: this needs no meta-object, so it stays header-only and does not
-// depend on moc.
+// Places items left to right and wraps onto a new line when the width runs out,
+// so a row of controls never forces sideways scrolling. Its minimum width is
+// the width of its widest item.
 class FlowLayout : public QLayout {
 public:
     explicit FlowLayout(int horizontal_spacing = 6, int vertical_spacing = 4)
@@ -29,9 +24,6 @@ public:
     ~FlowLayout() override {
         while (QLayoutItem* item = takeAt(0)) delete item;
     }
-
-    FlowLayout(const FlowLayout&) = delete;
-    FlowLayout& operator=(const FlowLayout&) = delete;
 
     void addItem(QLayoutItem* item) override { items_.append(item); }
     int count() const override { return static_cast<int>(items_.size()); }
@@ -53,10 +45,7 @@ public:
         layoutItems(rect, false);
     }
 
-    // The natural size has to account for wrapping, or every widget above this
-    // layout believes one row is enough and comes up short by the height of the
-    // rows that actually wrapped. Once laid out, the width already given is the
-    // width to measure against.
+    // Report the height needed at the current width, including wrapped rows.
     QSize sizeHint() const override {
         QSize size = minimumSize();
         const int laid_out_width = geometry().width();
@@ -82,12 +71,10 @@ private:
         int y = area.y();
         int line_height = 0;
         for (QLayoutItem* item : items_) {
-            // A hidden widget, such as the load progress bar before a load
-            // starts, must not reserve a slot on the line.
+            // Hidden widgets take no space.
             if (item->isEmpty()) continue;
             QSize hint = item->sizeHint();
-            // An item wider than a whole line, such as a long status value, was
-            // handed its full hint and drew past the right edge. Fit it instead.
+            // Shrink an item wider than the line so it stays inside the edge.
             hint.setWidth((std::max)(item->minimumSize().width(),
                                      qMin(hint.width(), area.width())));
             int next_x = x + hint.width();

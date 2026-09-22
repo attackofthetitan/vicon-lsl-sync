@@ -9,14 +9,11 @@ static ViconLSLBridge* g_bridge = nullptr;
 
 void signalHandler(int sig) {
     std::cout << "\nCaught signal " << sig << ", stopping" << std::endl;
-    if (g_bridge) {
-        g_bridge->stop();
-    }
+    if (g_bridge) g_bridge->stop();
 }
 
 int main(int argc, char* argv[]) {
-    const auto parsed = vicon_lsl::parseCommandLine(
-        argc, const_cast<const char* const*>(argv));
+    const auto parsed = vicon_lsl::parseCommandLine(argc, argv);
     const std::string program = argc > 0 ? argv[0] : "vicon-lsl-bridge";
     if (parsed.action == vicon_lsl::CommandLineAction::Help) {
         std::cout << vicon_lsl::formatUsage(program);

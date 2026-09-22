@@ -4,14 +4,16 @@
 
 #include <QWidget>
 #include <QPoint>
+#include <QPointF>
 
 #include <deque>
 #include <map>
-#include <optional>
 #include <vector>
 
 namespace vicon_lsl {
 
+// Draws markers, segment axes, gaze rays, and the stair model with QPainter.
+// Drag to rotate and scroll to zoom.
 class PreviewWidget : public QWidget {
     Q_OBJECT
 
@@ -35,19 +37,13 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
-    struct ProjectedPoint {
-        QPointF point;
-    };
-
     struct Bounds {
         PreviewVec3 lower;
         PreviewVec3 upper;
         bool valid = false;
     };
 
-    // The ground the walking runs happen on: a rectangle at one height rather
-    // than a face of the view box, so it can meet the foot of the stairs and
-    // reach past them along the walkway.
+    // A flat floor at the height of the stairs' base.
     struct FloorPlane {
         double lower_x = 0.0;
         double upper_x = 0.0;
@@ -66,15 +62,13 @@ private:
     double viewScale(const Bounds& bounds, const ViewBasis& basis) const;
     double usableWidth() const;
     double usableHeight() const;
-    ProjectedPoint project(const PreviewVec3& point, const Bounds& bounds) const;
+    QPointF project(const PreviewVec3& point, const Bounds& bounds) const;
     Bounds sceneContentBounds() const;
     FloorPlane floorPlane() const;
     Bounds currentSceneBounds() const;
     void resetViewFit();
     void lockViewToCurrentScene();
-    void expandViewToInclude(const Bounds& bounds);
     void includePoint(Bounds& bounds, const PreviewVec3& point) const;
-    std::optional<PreviewVec3> gazeEndpoint(const PreviewGazeRay& ray, const Bounds& bounds) const;
 
     PreviewFrame frame_;
     std::vector<PreviewTriangle> stair_triangles_;

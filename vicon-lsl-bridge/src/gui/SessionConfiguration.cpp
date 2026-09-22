@@ -1,6 +1,6 @@
 #include "gui/SessionConfiguration.h"
 
-#include "StreamDefaults.h"
+#include "StreamDefaults.generated.h"
 #include "HoloLensGazeSchema.h"
 #include "HoloLensModelTargetSchema.h"
 
@@ -51,16 +51,16 @@ bool readFile(const QString& path, QByteArray& bytes, QString* error) {
     return true;
 }
 
-StreamBinding makeBinding(const QString& role, const QString& name, bool req,
-                          int ch = 0, double rate = 0.0, const QString& frame = {}) {
-    StreamBinding b;
-    b.role = role;
-    b.name = name;
-    b.required = req;
-    b.expected_channels = ch;
-    b.expected_nominal_rate = rate;
-    b.expected_coordinate_frame = frame;
-    return b;
+StreamBinding makeBinding(const QString& role, const QString& name, bool required,
+                          int channels = 0, double rate = 0.0, const QString& frame = {}) {
+    StreamBinding binding;
+    binding.role = role;
+    binding.name = name;
+    binding.required = required;
+    binding.expected_channels = channels;
+    binding.expected_nominal_rate = rate;
+    binding.expected_coordinate_frame = frame;
+    return binding;
 }
 
 } // namespace
@@ -276,66 +276,66 @@ QJsonObject SessionConfiguration::toJson() const {
 }
 
 SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QString* error) {
-    SessionConfiguration res;
-    const int ver = o.value("version").toInt();
-    if (ver != CurrentVersion) {
-        if (error) *error = "Unsupported session configuration version " + QString::number(ver);
-        return res;
+    SessionConfiguration config;
+    const int version = o.value("version").toInt();
+    if (version != CurrentVersion) {
+        if (error) *error = "Unsupported session configuration version " + QString::number(version);
+        return config;
     }
     const auto vicon = o.value("vicon").toObject();
-    res.vicon_endpoint = vicon.value("endpoint").toString(res.vicon_endpoint);
-    res.marker_output_name = vicon.value("markerOutput").toString(res.marker_output_name);
-    res.segment_output_name = vicon.value("segmentOutput").toString(res.segment_output_name);
+    config.vicon_endpoint = vicon.value("endpoint").toString(config.vicon_endpoint);
+    config.marker_output_name = vicon.value("markerOutput").toString(config.marker_output_name);
+    config.segment_output_name = vicon.value("segmentOutput").toString(config.segment_output_name);
 
-    const auto prev = o.value("preview").toObject();
-    res.preview_external_streams = prev.value("externalStreams").toBool(res.preview_external_streams);
-    if (prev.value("markers").isObject()) res.preview_markers = StreamBinding::fromJson(prev.value("markers").toObject());
-    if (prev.value("segments").isObject()) res.preview_segments = StreamBinding::fromJson(prev.value("segments").toObject());
-    if (prev.value("gaze").isObject()) res.preview_gaze = StreamBinding::fromJson(prev.value("gaze").toObject());
-    if (prev.value("calibration").isObject()) res.preview_calibration = StreamBinding::fromJson(prev.value("calibration").toObject());
-    res.preview_match_tolerance = readFiniteDouble(prev, "matchTolerance", res.preview_match_tolerance);
-    res.preview_render_hz = std::clamp(prev.value("renderHz").toInt(res.preview_render_hz), 1, 60);
-    res.preview_cache_megabytes = std::clamp(prev.value("cacheMegabytes").toInt(res.preview_cache_megabytes), 16, 2048);
-    res.preview_trail_points = std::clamp(prev.value("trailPoints").toInt(res.preview_trail_points), 2, 500);
-    res.preview_playback_speed = std::clamp(readFiniteDouble(prev, "playbackSpeed", res.preview_playback_speed), 0.1, 4.0);
-    res.preview_loop_playback = prev.value("loopPlayback").toBool(res.preview_loop_playback);
+    const auto preview = o.value("preview").toObject();
+    config.preview_external_streams = preview.value("externalStreams").toBool(config.preview_external_streams);
+    if (preview.value("markers").isObject()) config.preview_markers = StreamBinding::fromJson(preview.value("markers").toObject());
+    if (preview.value("segments").isObject()) config.preview_segments = StreamBinding::fromJson(preview.value("segments").toObject());
+    if (preview.value("gaze").isObject()) config.preview_gaze = StreamBinding::fromJson(preview.value("gaze").toObject());
+    if (preview.value("calibration").isObject()) config.preview_calibration = StreamBinding::fromJson(preview.value("calibration").toObject());
+    config.preview_match_tolerance = readFiniteDouble(preview, "matchTolerance", config.preview_match_tolerance);
+    config.preview_render_hz = std::clamp(preview.value("renderHz").toInt(config.preview_render_hz), 1, 60);
+    config.preview_cache_megabytes = std::clamp(preview.value("cacheMegabytes").toInt(config.preview_cache_megabytes), 16, 2048);
+    config.preview_trail_points = std::clamp(preview.value("trailPoints").toInt(config.preview_trail_points), 2, 500);
+    config.preview_playback_speed = std::clamp(readFiniteDouble(preview, "playbackSpeed", config.preview_playback_speed), 0.1, 4.0);
+    config.preview_loop_playback = preview.value("loopPlayback").toBool(config.preview_loop_playback);
 
-    const auto rec = o.value("recorder").toObject();
-    res.recorder_host = rec.value("host").toString(res.recorder_host);
-    res.recorder_port = std::clamp(rec.value("port").toInt(res.recorder_port), 1, 65535);
-    res.recorder_executable = rec.value("executable").toString();
-    res.recorder_automatic_launch = rec.value("automaticLaunch").toBool(res.recorder_automatic_launch);
-    res.record_every_visible_stream = rec.value("recordEveryVisible").toBool(res.record_every_visible_stream);
-    if (rec.value("streams").isArray()) {
-        res.recording_streams.clear();
-        for (const auto& val : rec.value("streams").toArray()) {
-            if (val.isObject()) res.recording_streams.push_back(StreamBinding::fromJson(val.toObject()));
+    const auto recorder = o.value("recorder").toObject();
+    config.recorder_host = recorder.value("host").toString(config.recorder_host);
+    config.recorder_port = std::clamp(recorder.value("port").toInt(config.recorder_port), 1, 65535);
+    config.recorder_executable = recorder.value("executable").toString();
+    config.recorder_automatic_launch = recorder.value("automaticLaunch").toBool(config.recorder_automatic_launch);
+    config.record_every_visible_stream = recorder.value("recordEveryVisible").toBool(config.record_every_visible_stream);
+    if (recorder.value("streams").isArray()) {
+        config.recording_streams.clear();
+        for (const auto& value : recorder.value("streams").toArray()) {
+            if (value.isObject()) config.recording_streams.push_back(StreamBinding::fromJson(value.toObject()));
         }
     }
 
-    const auto recing = o.value("recording").toObject();
-    res.recording_root = recing.value("root").toString(res.recording_root);
-    res.recording_template = recing.value("template").toString(res.recording_template);
-    res.participant = recing.value("participant").toString(res.participant);
-    res.session = recing.value("session").toString(res.session);
-    res.task = recing.value("task").toString(res.task);
-    res.run = std::clamp(recing.value("run").toInt(res.run), 1, 999999);
-    res.acquisition = recing.value("acquisition").toString(res.acquisition);
-    res.modality = recing.value("modality").toString(res.modality);
-    res.storage_warning_gib = (std::max)(0.0, readFiniteDouble(recing, "storageWarningGiB", res.storage_warning_gib));
-    res.automatic_run_increment = recing.value("automaticRunIncrement").toBool(res.automatic_run_increment);
-    res.allow_overwrite = recing.value("allowOverwrite").toBool(res.allow_overwrite);
-    res.allow_outside_study_root = recing.value("allowOutsideStudyRoot").toBool(res.allow_outside_study_root);
+    const auto recording = o.value("recording").toObject();
+    config.recording_root = recording.value("root").toString(config.recording_root);
+    config.recording_template = recording.value("template").toString(config.recording_template);
+    config.participant = recording.value("participant").toString(config.participant);
+    config.session = recording.value("session").toString(config.session);
+    config.task = recording.value("task").toString(config.task);
+    config.run = std::clamp(recording.value("run").toInt(config.run), 1, 999999);
+    config.acquisition = recording.value("acquisition").toString(config.acquisition);
+    config.modality = recording.value("modality").toString(config.modality);
+    config.storage_warning_gib = (std::max)(0.0, readFiniteDouble(recording, "storageWarningGiB", config.storage_warning_gib));
+    config.automatic_run_increment = recording.value("automaticRunIncrement").toBool(config.automatic_run_increment);
+    config.allow_overwrite = recording.value("allowOverwrite").toBool(config.allow_overwrite);
+    config.allow_outside_study_root = recording.value("allowOutsideStudyRoot").toBool(config.allow_outside_study_root);
 
-    const auto cal = o.value("calibration").toObject();
-    res.stair_model_path = cal.value("stairModel").toString();
-    res.calibration_profile_id = cal.value("profileId").toString();
-    res.calibration_required = cal.value("required").toBool(res.calibration_required);
-    res.recorder_only_mode = o.value("workflow").toObject().value("recorderOnly").toBool(res.recorder_only_mode);
-    res.version = CurrentVersion;
-    res.bindPreviewOutputs();
+    const auto calibration = o.value("calibration").toObject();
+    config.stair_model_path = calibration.value("stairModel").toString();
+    config.calibration_profile_id = calibration.value("profileId").toString();
+    config.calibration_required = calibration.value("required").toBool(config.calibration_required);
+    config.recorder_only_mode = o.value("workflow").toObject().value("recorderOnly").toBool(config.recorder_only_mode);
+    config.version = CurrentVersion;
+    config.bindPreviewOutputs();
     if (error) error->clear();
-    return res;
+    return config;
 }
 
 SessionConfiguration SessionConfigurationStore::load(QSettings& settings) {

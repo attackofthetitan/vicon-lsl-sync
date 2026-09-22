@@ -1,5 +1,7 @@
 #include "preview/PreviewXdfMapping.h"
 
+#include "preview/PreviewParsing.h"
+
 #include <algorithm>
 #include <map>
 #include <queue>
@@ -11,24 +13,6 @@
 namespace vicon_lsl {
 namespace {
 
-bool supportedRole(PreviewStreamRole role) {
-    return role == PreviewStreamRole::ViconMarkers ||
-           role == PreviewStreamRole::ViconSegments ||
-           role == PreviewStreamRole::HoloLensGaze ||
-           role == PreviewStreamRole::HoloLensCalibrationTarget;
-}
-
-std::string roleName(PreviewStreamRole role) {
-    switch (role) {
-        case PreviewStreamRole::ViconMarkers: return "markers";
-        case PreviewStreamRole::ViconSegments: return "segments";
-        case PreviewStreamRole::HoloLensGaze: return "gaze";
-        case PreviewStreamRole::HoloLensCalibrationTarget: return "calibration";
-        case PreviewStreamRole::Unknown: return "unknown";
-    }
-    return "unknown";
-}
-
 std::string schemaKey(const XdfStreamData& stream) {
     std::ostringstream key;
     key << stream.channel_count << '|' << stream.channel_format << '|'
@@ -37,9 +21,10 @@ std::string schemaKey(const XdfStreamData& stream) {
     return key.str();
 }
 
+// Streams with the same key are pieces of one restarted stream and can be joined.
 std::string groupKey(const XdfStreamData& stream) {
     std::ostringstream key;
-    key << roleName(stream.role) << '|';
+    key << previewStreamRoleName(stream.role) << '|';
     if (!stream.source_id.empty()) {
         key << "source:" << stream.source_id << "|name:" << stream.name
             << "|host:" << stream.hostname;
@@ -60,7 +45,9 @@ struct Group {
 std::vector<Group> groupsFor(const XdfLoadResult& xdf) {
     std::map<std::pair<PreviewStreamRole, std::string>, Group> groups;
     for (const XdfStreamData& stream : xdf.streams) {
-        if (!stream.numeric || stream.samples.empty() || !supportedRole(stream.role)) continue;
+        if (!stream.numeric || stream.samples.empty() || stream.role == PreviewStreamRole::Unknown) {
+            continue;
+        }
         const std::string key = groupKey(stream);
         Group& group = groups[{stream.role, key}];
         group.key = key;
@@ -85,6 +72,7 @@ std::size_t groupSampleCount(const Group& group) {
     return count;
 }
 
+// The group with the most samples for a role.
 const Group* chooseSuggestedGroup(const std::vector<Group>& groups, PreviewStreamRole role) {
     const Group* best = nullptr;
     for (const Group& group : groups) {
@@ -97,9 +85,10 @@ const Group* chooseSuggestedGroup(const std::vector<Group>& groups, PreviewStrea
     return best;
 }
 
+// Joins the pieces of a restarted stream in time order. Past the sample limit it
+// keeps every other sample, but always keeps the last one.
 XdfStreamData stitchGroup(const Group& group, std::size_t maximum_samples) {
     XdfStreamData result = *group.streams.front();
-    result.stream_id = group.streams.front()->stream_id;
     result.timestamps.clear();
     result.samples.clear();
     result.clock_offsets.clear();
@@ -195,18 +184,15 @@ XdfMappingAnalysis analyzeXdfStreamMapping(const XdfLoadResult& xdf) {
     const std::vector<Group> groups = groupsFor(xdf);
     std::map<PreviewStreamRole, int> group_counts;
     for (const Group& group : groups) {
-        ++group_counts[group.role];
+        // Two different groups for one role means the user has to choose.
+        if (++group_counts[group.role] > 1) analysis.requires_explicit_mapping = true;
         for (const XdfStreamData* stream : group.streams) {
             analysis.candidates.push_back({
                 stream->stream_id, stream->role, group.key,
                 stream->name.empty() ? "stream_" + std::to_string(stream->stream_id) : stream->name,
-                stream->source_id, stream->hostname, stream->session_id,
-                stream->sample_count, stream->start_timestamp, stream->end_timestamp,
+                stream->source_id, stream->hostname, stream->sample_count,
             });
         }
-    }
-    for (const auto& item : group_counts) {
-        if (item.second > 1) analysis.requires_explicit_mapping = true;
     }
 
     const PreviewStreamRole roles[] = {
@@ -263,7 +249,8 @@ XdfLoadResult applyXdfStreamMapping(const XdfLoadResult& xdf,
         }
         if (!selected) {
             if (item.second.size() > 1) {
-                throw std::runtime_error("Recorded-stream mapping required for " + roleName(item.first));
+                throw std::runtime_error(std::string("Recorded-stream mapping required for ") +
+                                         previewStreamRoleName(item.first));
             }
             selected = item.second.front();
         }

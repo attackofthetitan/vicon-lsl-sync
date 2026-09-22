@@ -1,16 +1,9 @@
 #include "gui/PreviewPanel.h"
 #include "gui/FlowLayout.h"
-#include "gui/PreviewFileLoader.h"
 #include "gui/WidgetHelpers.h"
 
 #include "preview/ObjMesh.h"
-#include "preview/PreviewCsv.h"
-#include "preview/PreviewCalibration.h"
-#include "preview/PreviewMath.h"
-#include "preview/PreviewXdf.h"
-#include "StreamDefaults.h"
-
-#include <exception>
+#include "StreamDefaults.generated.h"
 
 #include <QCoreApplication>
 #include <QAbstractButton>
@@ -47,6 +40,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <exception>
 #include <map>
 #include <optional>
 #include <utility>
@@ -60,7 +54,6 @@ constexpr int kDefaultRenderHz = 30;
 constexpr int kMaximumLivePreviewDelayMs = 100;
 constexpr int kMaximumRenderHz = 60;
 
-QDoubleSpinBox* makeDistanceSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 3, 0.01, val); }
 QDoubleSpinBox* makePoseSpin(double val = 0.0) { return makeDoubleSpin(-100.0, 100.0, 6, 0.001, val); }
 QDoubleSpinBox* makeQuaternionSpin(double val = 0.0) { return makeDoubleSpin(-1.0, 1.0, 6, 0.01, val); }
 
@@ -68,6 +61,18 @@ std::optional<PreviewFileType> recordingFileType(const QString& path) {
     if (path.endsWith(".xdf", Qt::CaseInsensitive)) return PreviewFileType::Xdf;
     if (path.endsWith(".csv", Qt::CaseInsensitive)) return PreviewFileType::Csv;
     return std::nullopt;
+}
+
+// Vicon sends millimetres; the preview draws metres.
+PreviewTransformProfile viconPreviewTransform() {
+    PreviewTransformProfile transform;
+    transform.scale = 0.001;
+    return transform;
+}
+
+QString errorText(const CalibrationQuality& quality) {
+    return "position error " + QString::number(quality.translation_rms_m * 1000.0, 'f', 1) +
+           " mm, angle error " + QString::number(quality.rotation_rms_degrees, 'f', 2) + " deg";
 }
 
 } // namespace
@@ -82,10 +87,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
     widget_ = new PreviewWidget();
-    // The drawing area takes whatever is left rather than competing for height:
-    // it is useful at any size, while a control row cut in half is not. Without
-    // this the controls were the ones squeezed, and the last row lost a few
-    // pixels to a scroll bar on an ordinary window.
+    // The drawing works at any size, so it gets whatever height the controls leave.
     widget_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     layout->addWidget(widget_, 1);
 
@@ -120,8 +122,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     trail_points_spin_ = makeSpin(2, 500, 24);
     playback_speed_spin_ = makeDoubleSpin(0.1, 4.0, 1, 0.1, 1.0);
 
-    // Eight label/field pairs reflow from two per row to one as the panel
-    // narrows. As grid cells they could not, and the tab scrolled sideways.
+    // The fields wrap onto more rows when the panel is narrow.
     auto* stream_fields = new FlowLayout(10, 4);
     stream_fields->addWidget(makeFieldChip("Markers:", marker_stream_edit_, "LSL stream containing Vicon marker samples for the preview."));
     stream_fields->addWidget(makeFieldChip("Segments:", segment_stream_edit_, "LSL stream containing Vicon segment samples for the preview."));
@@ -174,19 +175,18 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     stair_qz_spin_ = makeQuaternionSpin();
     stair_qw_spin_ = makeQuaternionSpin(1.0);
     const QString pose_tooltip = "Measured rigid pose of the stair target in Vicon coordinates. Translation is metres; rotation is a quaternion.\nFixed for this setup and shown for reference; it is read from the saved calibration, not from this display.";
-    // A caption above a wrapping run of spin boxes. Keeping the caption beside
-    // them made the quaternion row about 490 px wide with no way to shrink,
-    // which was most of the preview panel's sideways overflow.
-    const auto addPoseRow = [&](const QString& text, std::initializer_list<QDoubleSpinBox*> spins) {
+    // The caption sits above the spin boxes so the row can wrap when narrow.
+    const auto addPoseRow = [layout = profiles_layout, &pose_tooltip](
+                                const QString& text, std::initializer_list<QDoubleSpinBox*> spins) {
         auto* caption = new QLabel(text);
         caption->setToolTip(pose_tooltip);
-        profiles_layout->addWidget(caption);
+        layout->addWidget(caption);
         auto* row = new FlowLayout();
         for (QDoubleSpinBox* spin : spins) {
             spin->setToolTip(pose_tooltip);
             row->addWidget(spin);
         }
-        profiles_layout->addLayout(row);
+        layout->addLayout(row);
     };
     addPoseRow("Measured stair T (m):", {stair_tx_spin_, stair_ty_spin_, stair_tz_spin_});
     addPoseRow("Measured stair Q:", {stair_qx_spin_, stair_qy_spin_, stair_qz_spin_, stair_qw_spin_});
@@ -229,9 +229,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     sources_layout->addLayout(stair_row);
     sources_layout->addStretch(1);
 
-    // Each page scrolls on its own and the tab strip is bounded, so a tall
-    // settings page can no longer push the action buttons, transport and
-    // timeline out of view. Those are the controls used during a session.
+    // Each settings page scrolls on its own and the tabs have a height limit, so
+    // the buttons and playback controls below always stay in view.
     settings_tabs->addTab(scrollable(sources_page), "Sources");
     settings_tabs->addTab(scrollable(alignment_page), "Alignment");
     settings_tabs->setMaximumHeight(fontMetrics().height() * 13);
@@ -246,7 +245,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     play_recording_button_->setEnabled(false);
     status_label_ = new ElidingLabel("Preview stopped");
     auto* delivery_metrics = new ElidingLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
-    // The explanation is worth more here than a copy of the numbers already shown.
+    // Explain the numbers rather than repeat them in the tooltip.
     delivery_metrics->setAutomaticToolTip(false);
     delivery_metrics->setToolTip("Older preview updates are skipped so the display stays current.");
     delivery_metrics_label_ = delivery_metrics;
@@ -259,8 +258,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     }
     controls_layout->addLayout(button_row);
 
-    // One line each, stacked. Sharing a row meant the delivery text wrapped to
-    // two lines and ran straight through the status text beside it.
+    // One line each, so the two texts never overlap.
     controls_layout->addWidget(status_label_);
     controls_layout->addWidget(delivery_metrics_label_);
 
@@ -312,17 +310,14 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     playback_row->addWidget(jump_end_button);
     playback_row->addWidget(loop_playback_check_);
     playback_row->addWidget(playback_position_label_);
-    // Left at the default command-button width, six one-glyph buttons wrapped
-    // across four rows of a narrow panel.
+    // Keep the one-symbol buttons narrow so the row does not wrap.
     for (QPushButton* glyph : {jump_start_button, step_back_button,
                                step_forward_button, jump_end_button}) {
         glyph->setFixedWidth(34);
     }
     playback_controls_ = {jump_start_button, step_back_button, jump_back_button,
                           jump_forward_button, step_forward_button, jump_end_button};
-    // Transport and timeline are only usable once a recording is loaded, and
-    // they cost about ninety pixels. Kept on screen while disabled, they pushed
-    // the live controls into a scroll area on a perfectly ordinary window.
+    // Playback controls stay hidden until a recording is loaded, to save space.
     playback_area_ = new QWidget();
     auto* playback_area_layout = new QVBoxLayout(playback_area_);
     playback_area_layout->setContentsMargins(0, 0, 0, 0);
@@ -334,8 +329,7 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     recording_calibration_warning_->setVisible(false);
     playback_area_layout->addWidget(recording_calibration_warning_);
     playback_area_layout->addLayout(playback_row);
-    // The timeline needs the full width to be usable, so it sits below the
-    // transport controls rather than competing with them for space.
+    // The timeline gets its own full-width row.
     playback_area_layout->addWidget(timeline_slider_);
     playback_area_->setVisible(false);
     controls_layout->addWidget(playback_area_);
@@ -343,9 +337,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     controls_scroll_ = new ContentSizedScrollArea();
     controls_scroll_->setWidgetResizable(true);
     controls_scroll_->setFrameShape(QFrame::NoFrame);
-    // Its preferred height follows the controls it holds, so a panel with room
-    // to spare gives them their full height and shows no scroll bar at all.
-    // The cap set in resizeEvent is what makes them scroll on a short panel.
+    // Sized to fit the controls. resizeEvent() caps its height, so the controls
+    // scroll only when the panel is short.
     controls_scroll_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     controls_scroll_->setAccessibleName("Scrollable preview controls");
     controls_scroll_->setWidget(controls_group);
@@ -524,18 +517,13 @@ void PreviewPanel::openRecording(const QString& path) {
 void PreviewPanel::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (!controls_scroll_) return;
-    // Only a ceiling, never a floor: a floor here would become the window's own
-    // minimum height and stop it being made short at all. The ceiling is what is
-    // left once the drawing area keeps its share, so the controls take the rows
-    // they need while the panel can afford them, and scroll once it cannot.
-    // That share is a little over half the panel rather than only the rows the
-    // controls leave over, so the view is not the part squeezed once the
-    // controls no longer fit; a panel with room for both is unaffected, and a
-    // short one falls back to the drawing area's minimum.
+    // Keep a little over half the panel for the drawing and cap the controls at
+    // the rest. Only a maximum is set: a minimum would stop the window from
+    // getting shorter.
     const int reserved = (std::max)(widget_->minimumHeight(),
                                     static_cast<int>(height() * 0.55));
     const int cap = (std::max)(0, height() - reserved - layout()->spacing());
-    // Only when it changes: setting it re-enters this handler.
+    // Setting it calls this handler again, so only set it when it changes.
     if (controls_scroll_->maximumHeight() != cap) controls_scroll_->setMaximumHeight(cap);
 }
 
@@ -566,22 +554,18 @@ void PreviewPanel::startPreview() {
     widget_->resetForNewSource();
     calibration_samples_.clear();
 
+    // The stream names come from the text fields; the rest from the bindings.
+    const auto named = [](gui::StreamBinding binding, const QLineEdit* edit) {
+        binding.name = edit->text().trimmed();
+        return binding;
+    };
     PreviewWorkerConfig config;
-    config.marker_stream_name = marker_stream_edit_->text().trimmed();
-    config.segment_stream_name = segment_stream_edit_->text().trimmed();
-    config.gaze_stream_name = gaze_stream_edit_->text().trimmed();
-    config.calibration_stream_name = calibration_stream_edit_->text().trimmed();
+    config.markers = named(marker_binding_, marker_stream_edit_);
+    config.segments = named(segment_binding_, segment_stream_edit_);
+    config.gaze = named(gaze_binding_, gaze_stream_edit_);
+    config.calibration = named(calibration_binding_, calibration_stream_edit_);
     config.match_tolerance_seconds = tolerance_spin_->value();
-    config.marker_source_id = marker_binding_.source_id;
-    config.segment_source_id = segment_binding_.source_id;
-    config.gaze_source_id = gaze_binding_.source_id;
-    config.calibration_source_id = calibration_binding_.source_id;
-    config.marker_follow_by_name = (marker_binding_.reconnection == gui::StreamReconnectionMode::FollowName);
-    config.segment_follow_by_name = (segment_binding_.reconnection == gui::StreamReconnectionMode::FollowName);
-    config.gaze_follow_by_name = (gaze_binding_.reconnection == gui::StreamReconnectionMode::FollowName);
-    config.calibration_follow_by_name = (calibration_binding_.reconnection == gui::StreamReconnectionMode::FollowName);
-    config.vicon_transform.name = "Vicon";
-    config.vicon_transform.scale = 0.001;
+    config.vicon_transform = viconPreviewTransform();
     config.gaze_transform = gazeTransform();
 
     worker_ = new PreviewStreamWorker(std::move(config), this);
@@ -610,10 +594,7 @@ void PreviewPanel::startPreview() {
         QString gaze_frame, target_frame;
         for (const gui::StreamIdentity& s : latest_stream_inventory_) {
             if (s.role == "gaze") gaze_frame = s.coordinate_frame;
-            if (s.role == "calibration") {
-                target_frame = s.coordinate_frame;
-                calibration_publisher_sdk_ = s.publisher_sdk;
-            }
+            if (s.role == "calibration") target_frame = s.coordinate_frame;
         }
         calibration_metadata_compatible_ = !gaze_frame.isEmpty() && !target_frame.isEmpty() &&
             calibrationCoordinateFramesCompatible(gaze_frame.toStdString(), target_frame.toStdString());
@@ -750,8 +731,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     calibration_samples_.clear();
     if (!solution) {
         calibration_rejection_reason_ = "Position or angle error exceeded the selected limits";
-        // Nothing survives a rejected solve, so drop the preview back to the
-        // uncalibrated transform instead of leaving an earlier one in place.
+        // A rejected solve leaves no calibration, so draw gaze uncalibrated again.
         calibration_quality_ = {};
         if (worker_) worker_->setGazeTransform(gazeTransform());
         widget_->requestViewRefit();
@@ -762,10 +742,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
         return;
     }
 
-    automatic_gaze_transform_ = gazeTransformFromTargetCalibration(
-        profile,
-        solution->holo_from_target,
-        gazeTargetBasisFromPublisherSdk(calibration_publisher_sdk_.toStdString()));
+    automatic_gaze_transform_ = gazeTransformFromTargetCalibration(profile, solution->holo_from_target);
     calibration_state_ = gui::SessionCalibrationState::AutomaticSession;
     calibration_quality_ = solution->quality;
     if (worker_) worker_->setGazeTransform(gazeTransform());
@@ -774,15 +751,13 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     refreshControlStates();
     setStatus(solution->uses_frozen_reference
         ? "Calibration applied from the frozen stair reference (Vuforia paused)"
-        : "Stair-target calibration applied for this session (position error " +
-              QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) + " mm, angle error " +
-              QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg)");
+        : "Stair-target calibration applied for this session (" + errorText(solution->quality) + ")");
     updateCalibrationPersistentStatus(gui::SessionCalibrationState::AutomaticSession,
         solution->uses_frozen_reference
             ? "Quality: frozen stair reference; repeated samples are not new tracking measurements"
-            : "Quality: " + QString::number(solution->quality.sample_count) + " samples, position error " +
-            QString::number(solution->quality.translation_rms_m * 1000.0, 'f', 1) + " mm, angle error " +
-            QString::number(solution->quality.rotation_rms_degrees, 'f', 2) + " deg", calibration_metadata_compatible_);
+            : "Quality: " + QString::number(solution->quality.sample_count) + " samples, " +
+                  errorText(solution->quality),
+        calibration_metadata_compatible_);
 }
 
 void PreviewPanel::openMergedCsv() { browseRecording("Open merged preview CSV", "CSV files (*.csv);;All files (*)"); }
@@ -798,13 +773,11 @@ void PreviewPanel::startFileLoad(PreviewFileType type, const QString& path) {
         setStatus("A recording is already loading; cancel it before opening another file");
         return;
     }
-    PreviewTransformProfile vicon_xform;
-    vicon_xform.name = "Vicon";
-    vicon_xform.scale = 0.001;
     PreviewLoadOptions opt;
     opt.maximum_memory_bytes = static_cast<std::size_t>(cache_megabytes_spin_->value()) * 1024ULL * 1024ULL;
 
-    auto* loader = new PreviewFileLoader(type, path, vicon_xform, gazeTransform(), tolerance_spin_->value(), opt, this);
+    auto* loader = new PreviewFileLoader(type, path, viconPreviewTransform(), gazeTransform(),
+                                         tolerance_spin_->value(), opt, this);
     file_loader_ = loader;
     refreshControlStates();
     setFileState("Loading " + QFileInfo(path).fileName());
@@ -1088,17 +1061,15 @@ void PreviewPanel::reloadStairModel() {
     }
 }
 
+bool PreviewPanel::calibrationInUse() const {
+    return calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
+           calibration_state_ == gui::SessionCalibrationState::SavedProfile;
+}
+
+// Without a calibration, gaze is drawn in its own HoloLens coordinates rather
+// than in a guessed Vicon position.
 PreviewTransformProfile PreviewPanel::gazeTransform() const {
-    if (calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
-        calibration_state_ == gui::SessionCalibrationState::SavedProfile) {
-        return automatic_gaze_transform_;
-    }
-    // The HoloLens pose in Vicon coordinates cannot be known before it is
-    // measured, so an uncalibrated session draws gaze in its published frame
-    // rather than in a guessed one.
-    PreviewTransformProfile identity;
-    identity.name = "HoloLens";
-    return identity;
+    return calibrationInUse() ? automatic_gaze_transform_ : PreviewTransformProfile{};
 }
 
 void PreviewPanel::refreshControlStates() {
@@ -1107,8 +1078,7 @@ void PreviewPanel::refreshControlStates() {
     const bool can_open = !worker_stopping_ && !file_loader_;
     open_csv_button_->setEnabled(can_open);
     open_xdf_button_->setEnabled(can_open);
-    const bool calibrated = calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
-                            calibration_state_ == gui::SessionCalibrationState::SavedProfile;
+    const bool calibrated = calibrationInUse();
     const bool collecting = calibration_state_ == gui::SessionCalibrationState::Collecting;
     const bool live_preview = worker_ != nullptr && !worker_stopping_;
     if (calibrate_button_) calibrate_button_->setEnabled(live_preview && !collecting);
@@ -1131,7 +1101,7 @@ void PreviewPanel::resetCalibrationSession() {
 }
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
-    PreviewTransformProfile t = transformProfileFromRigid(activeSolverProfile().vicon_from_target, "Stair");
+    PreviewTransformProfile t = transformProfileFromRigid(activeSolverProfile().vicon_from_target);
     t.scale = 0.001;
     return t;
 }
@@ -1188,30 +1158,21 @@ void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
     stair_qy_spin_->setValue(p->vicon_from_target.rotation.y);
     stair_qz_spin_->setValue(p->vicon_from_target.rotation.z);
     stair_qw_spin_->setValue(p->vicon_from_target.rotation.w);
-    // Selecting an entry only browses it; it does not apply it. Overwriting the
-    // quality text here made the panel report a calibration that was not in use.
-    const bool calibration_in_use = calibration_state_ == gui::SessionCalibrationState::AutomaticSession ||
-                                    calibration_state_ == gui::SessionCalibrationState::SavedProfile;
-    if (!calibration_in_use) {
+    // Selecting an entry only shows it. While a calibration is in use, the
+    // quality text keeps describing that one.
+    if (!calibrationInUse()) {
         calibration_quality_label_->setText(
             p->quality.sample_count > 0
                 ? "Selected calibration: " + QString::number(p->quality.sample_count) +
-                      " samples, position error " +
-                      QString::number(p->quality.translation_rms_m * 1000.0, 'f', 1) +
-                      " mm, angle error " +
-                      QString::number(p->quality.rotation_rms_degrees, 'f', 2) + " deg (not applied)"
+                      " samples, " + errorText(p->quality) + " (not applied)"
                 : "Selected calibration has no measured error values (not applied)");
     }
     refreshControlStates();
 }
 
 gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() {
-    if (!calibration_profile_combo_) return nullptr;
-    const QString id = calibration_profile_combo_->currentData().toString();
-    for (gui::ManagedCalibrationProfile& p : calibration_profiles_) {
-        if (p.id == id) return &p;
-    }
-    return nullptr;
+    return const_cast<gui::ManagedCalibrationProfile*>(
+        std::as_const(*this).selectedCalibrationProfile());
 }
 
 const gui::ManagedCalibrationProfile* PreviewPanel::selectedCalibrationProfile() const {
@@ -1266,8 +1227,7 @@ void PreviewPanel::applySelectedCalibrationProfile() {
     updateCalibrationPersistentStatus(
         gui::SessionCalibrationState::SavedProfile,
         profile->quality.sample_count > 0
-            ? "Quality: saved position error " + QString::number(profile->quality.translation_rms_m * 1000.0, 'f', 1) +
-              " mm, angle error " + QString::number(profile->quality.rotation_rms_degrees, 'f', 2) + " deg"
+            ? "Quality: saved " + errorText(profile->quality)
             : "Quality: saved calibration has no measured error values",
         calibration_metadata_compatible_ && metadata_matches);
     refreshControlStates();
@@ -1275,8 +1235,7 @@ void PreviewPanel::applySelectedCalibrationProfile() {
 }
 
 void PreviewPanel::saveSessionCalibrationProfile() {
-    if (calibration_state_ != gui::SessionCalibrationState::AutomaticSession &&
-        calibration_state_ != gui::SessionCalibrationState::SavedProfile) {
+    if (!calibrationInUse()) {
         setStatus("Complete or apply a calibration before saving it");
         return;
     }

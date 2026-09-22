@@ -18,7 +18,6 @@ struct CommandLineResult {
     CommandLineAction action = CommandLineAction::Run;
     Config config{};
     std::string message;
-
 };
 
 CommandLineResult parseCommandLine(int argc, const char* const argv[]);

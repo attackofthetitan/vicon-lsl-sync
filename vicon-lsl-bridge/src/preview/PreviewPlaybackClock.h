@@ -7,11 +7,13 @@
 
 namespace vicon_lsl {
 
+// Maps wall-clock time to a position in a recording. Every call takes the
+// current time in seconds from a clock that never goes backward.
 class PreviewPlaybackClock {
 public:
+    // Times must not go backward. Playback starts paused at zero.
     void setTimeline(const std::vector<double>& timestamps);
     void setFrameTimeline(const std::vector<PreviewFrame>& frames);
-    void reset();
     void play(double monotonic_seconds);
     void pause(double monotonic_seconds);
     void setSpeed(double speed, double monotonic_seconds);
@@ -24,6 +26,9 @@ public:
     bool atEnd(double monotonic_seconds) const;
 
 private:
+    // Restarts the running position from `monotonic_seconds`.
+    void reanchor(double monotonic_seconds);
+
     std::vector<double> timeline_;
     bool playing_ = false;
     double speed_ = 1.0;

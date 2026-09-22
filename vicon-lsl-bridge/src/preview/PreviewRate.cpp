@@ -26,9 +26,8 @@ bool PreviewRateTracker::addTimestamp(double corrected_timestamp) {
 
     timestamps_.push_back(corrected_timestamp);
     const double cutoff = corrected_timestamp - window_seconds_;
-    // Keep the most recent sample at or before the cutoff.  Retaining that
-    // boundary sample makes a full window measurable even when timestamps
-    // are jittered and no sample lands exactly on cutoff.
+    // Keep the last sample at or before the start of the window, so a full
+    // window can be measured even when no sample lands exactly on its start.
     while (timestamps_.size() > 2 && timestamps_[1] <= cutoff) {
         timestamps_.pop_front();
     }
@@ -48,10 +47,7 @@ double PreviewRateTracker::effectiveRateHz() const {
     if (!std::isfinite(elapsed) || elapsed <= 0.0) {
         return 0.0;
     }
-    // There are N-1 intervals between N timestamped samples.  This keeps a
-    // regular stream at its advertised rate when the window endpoints are
-    // both included (for example, 181 samples over exactly two seconds at
-    // 90 Hz).
+    // N samples span N-1 intervals, so 181 samples over two seconds is 90 Hz.
     return static_cast<double>(timestamps_.size() - 1) / elapsed;
 }
 
