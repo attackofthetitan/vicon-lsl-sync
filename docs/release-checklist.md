@@ -5,8 +5,10 @@
 - Version: `1.14.6`
 - Previous release: `v1.14.5`
 - Target date: 2026-09-22
-- Pull requests: none; releasing directly from `main`
-- Status: prepared; publication pending tagged CI
+- Pull requests: none; released directly from `main`
+- Status: completed
+- Release: https://github.com/attackofthetitan/vicon-lsl-sync/releases/tag/v1.14.6
+- Tagged build: https://github.com/attackofthetitan/vicon-lsl-sync/actions/runs/35684669525
 - Scope: correct left/right-inverted HoloLens gaze in desktop stair calibration
   and target-aligned XDF playback
 
@@ -32,11 +34,12 @@ update remains necessary for frozen-reference recording.
 
 ## Publication
 
-- [ ] Release commit pushed to `main`; tag `v1.14.6` points to that commit.
-- [ ] Tagged CI passes the logic matrix, HoloLens checks, and full desktop build,
+- [x] Release commit `10b4305` pushed to `main`; tag `v1.14.6` points to that commit.
+- [x] Tagged CI passes the logic matrix, HoloLens checks, and full desktop build,
   tests, and packaging on Linux x64, Windows x64, and macOS arm64.
-- [ ] Five platform payloads and `SHA256SUMS.txt` are published and verified.
-- [ ] Release notes explain how to replace saved mirrored calibrations.
+- [x] Five platform payloads and `SHA256SUMS.txt` are published; downloaded all
+  five payloads and verified them with `shasum -a 256 -c SHA256SUMS.txt`.
+- [x] Published release notes explain how to replace saved mirrored calibrations.
 
 ## Device checks not run
 
