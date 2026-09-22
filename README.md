@@ -105,6 +105,12 @@ and angle error. Saved calibrations can be applied, copied, hidden, imported,
 and exported. Confirm missing coordinate details deliberately; quality and
 compatibility remain visible as stream status changes.
 
+If a saved Vuforia calibration reverses left and right, run **Calibrate from
+Stair Target** and **Save Session Calibration** again with this build. Saved
+calibrations retain their stored transforms; a fresh solve uses the corrected
+stair basis. XDF playback that aligns from recorded target poses also uses the
+correction.
+
 The stairs are permanently fixed. Their bottom front-left corner is 120.5 cm
 straight ahead and 21.3 cm left of the Vicon origin, at floor height:
 `(-1.205, -0.213, 0)` metres when facing up the stairs. The built-in

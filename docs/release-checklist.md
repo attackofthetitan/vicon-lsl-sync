@@ -1,47 +1,49 @@
-# v1.14.5 release checklist
+# v1.14.6 release checklist
 
 ## Release details
 
-- Version: `1.14.5`
-- Previous release: `v1.14.4`
-- Target date: 2026-09-18
+- Version: `1.14.6`
+- Previous release: `v1.14.5`
+- Target date: 2026-09-22
 - Pull requests: none; releasing directly from `main`
 - Status: prepared; publication pending tagged CI
-- Scope: preserve a stable stair reference in recordings started after Vuforia
-  is paused, and identify missing or frozen calibration during desktop playback
+- Scope: correct left/right-inverted HoloLens gaze in desktop stair calibration
+  and target-aligned XDF playback
 
-The target stream keeps eight channels. Its final `Tracked` channel now has unit
-`state`: 0 invalid, 1 live tracked, and 2 frozen reference. The updated HoloLens
-publisher must be deployed; desktop binaries alone cannot supply missing target
-poses. The XDF contains the frozen target pose, not the final desktop transform.
+A patch release. Vuforia calibration now uses the same conversion from the
+Unity-imported stair basis to the OBJ as manual registration, preserving
+lateral movement, forward alignment, and height. Stream schemas, recorded
+samples, manual registration's conversion, and fixed stair placement are
+unchanged. This correction requires only a desktop update; the v1.14.5 HoloLens
+update remains necessary for frozen-reference recording.
 
 ## Pre-publication checks
 
-- [x] The CMake version and dated changelog section use `1.14.5`.
-- [x] Platform-neutral HoloLens checks pass locally: 34 test cases, including
-  stable acquisition, intentional pause, tracking loss, resume, reset, invalid
-  poses, position jumps, and quaternion averaging.
-- [x] Desktop logic checks pass locally: 78 test cases, including an XDF recorded
-  entirely with frozen target poses and the original all-invalid pattern.
-- [x] Desktop GUI checks pass locally at normal and 1.5x scale: five cases each.
-- [x] All six desktop CTest suites pass, including recorder, lifecycle, and
-  stream recovery; the v1.14.5 desktop executable builds successfully.
+- [x] The CMake version and dated changelog section use `1.14.6`.
+- [x] Desktop logic checks pass locally on the current main branch: 79 test cases.
+- [x] The new left/right regression fails against the old Vuforia conversion.
+- [x] Regression coverage includes gaze origins and directions, rotated
+  HoloLens and stair poses, preserved handedness, and target-aligned XDF playback.
 - [x] Generated stream contracts pass `tools/generate_stream_contracts.py --check`.
+- [x] Release version passes `.github/scripts/verify-release-version.sh`.
 - [x] `git diff --check` is clean.
-- [x] Behavior, timing, recording instructions, and the hardware runbook describe
-  frozen-reference semantics and the required HoloLens deployment.
+- [x] Coordinate documentation and README explain the correction and replacing
+  existing saved Vuforia solutions by recalibrating and saving again.
 
 ## Publication
 
-- [ ] Release commit pushed to `main`; tag `v1.14.5` points to that commit.
+- [ ] Release commit pushed to `main`; tag `v1.14.6` points to that commit.
 - [ ] Tagged CI passes the logic matrix, HoloLens checks, and full desktop build,
   tests, and packaging on Linux x64, Windows x64, and macOS arm64.
 - [ ] Five platform payloads and `SHA256SUMS.txt` are published and verified.
-- [ ] Release notes explain the HoloLens upgrade and reference-pose semantics.
+- [ ] Release notes explain how to replace saved mirrored calibrations.
 
 ## Device checks not run
 
 - Physical Unity/OpenXR/Vuforia, HoloLens, and Vicon checks were not run locally.
-- Follow **Recording after deliberately pausing Vuforia** in
-  `docs/device-parity-runbook.md`: record after pausing, reopen in a fresh desktop
-  session, then check resume, reacquisition, and ordinary tracking loss.
+- On the study machine, run **Calibrate from Stair Target**, look left and
+  right while facing upstairs, and confirm the gaze follows the same side
+  without changing forward or vertical alignment. Then **Save Session
+  Calibration** to replace the old stored transform.
+- HoloLens core, full desktop, and package checks run in tagged CI. This local
+  environment does not have the .NET SDK or a configured desktop runtime build.

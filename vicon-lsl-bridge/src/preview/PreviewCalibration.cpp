@@ -270,7 +270,7 @@ GazeTargetBasis gazeTargetBasisFromPublisherSdk(const std::string& sdk) {
 PreviewTransformProfile gazeTransformFromTargetCalibration(
     const CalibrationProfile& profile,
     const PreviewRigidTransform& holo_from_target,
-    GazeTargetBasis basis) {
+    GazeTargetBasis /*basis*/) {
     const PreviewQuaternion target_from_holo_rotation =
         inverseQuaternion(holo_from_target.rotation);
     const PreviewVec3 target_from_holo_translation = rotateByQuaternion(
@@ -281,38 +281,18 @@ PreviewTransformProfile gazeTransformFromTargetCalibration(
     transform.name = "HoloLens";
     transform.use_quaternion_rotation = true;
 
-    if (basis == GazeTargetBasis::ManualStairRegistration) {
-        transform.rotation = normalizeQuaternion(multiplyQuaternions(
-            profile.vicon_from_target.rotation,
-            reflectXBasis(reflectZBasis(target_from_holo_rotation))));
-        transform.translation = applyRigidTransformPoint(
-            profile.vicon_from_target,
-            reflectX(reflectZ(target_from_holo_translation)));
-        transform.input_axis_sign.x = -1.0;
-        transform.input_axis_sign.z = -1.0;
-        return transform;
-    }
-
-    // The fixed stair OBJ ascends from +X toward -X, while the Vuforia target's
-    // Unity-local forward basis is reversed. Reface gaze around the target
-    // origin without changing the already Vicon-aligned stair transform.
-    const PreviewRigidTransform stair_model_from_target_basis{
-        {0.0, 0.0, 0.0},
-        {0.0, 0.0, 1.0, 0.0},
-    };
-    const PreviewRigidTransform vicon_from_gaze_target = composeRigidTransforms(
-        profile.vicon_from_target,
-        stair_model_from_target_basis);
-
+    // Both publishers locate the Unity-imported stair model. Undo the shared
+    // world's Z reflection, then the model import's X reflection to reach the
+    // OBJ basis. A 180-degree Z turn also negates lateral Y, mirroring gaze.
+    // Convert the inverse pose and input together so this works for rotated
+    // HoloLens worlds and keeps the target origin fixed in Vicon.
     transform.rotation = normalizeQuaternion(multiplyQuaternions(
-        vicon_from_gaze_target.rotation,
-        reflectZBasis(target_from_holo_rotation)));
+        profile.vicon_from_target.rotation,
+        reflectXBasis(reflectZBasis(target_from_holo_rotation))));
     transform.translation = applyRigidTransformPoint(
-        vicon_from_gaze_target,
-        reflectZ(target_from_holo_translation));
-    // The target pose and gaze are published in a right-handed world frame,
-    // but the Vicon-aligned stair model keeps its original Unity target-local
-    // basis. Apply that basis conversion to gaze only.
+        profile.vicon_from_target,
+        reflectX(reflectZ(target_from_holo_translation)));
+    transform.input_axis_sign.x = -1.0;
     transform.input_axis_sign.z = -1.0;
     return transform;
 }

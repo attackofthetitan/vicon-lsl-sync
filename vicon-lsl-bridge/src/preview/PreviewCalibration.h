@@ -70,6 +70,8 @@ enum class GazeTargetBasis {
 };
 
 GazeTargetBasis gazeTargetBasisFromPublisherSdk(const std::string& sdk);
+// Both supported publishers use the Unity-imported stair basis. Keep the basis
+// argument for existing callers; both now use the same conversion to the OBJ.
 PreviewTransformProfile gazeTransformFromTargetCalibration(
     const CalibrationProfile& profile,
     const PreviewRigidTransform& holo_from_target,

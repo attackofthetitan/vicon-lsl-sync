@@ -2,6 +2,28 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.14.6] - 2026-09-22
+
+### Fixed
+
+- Corrected left/right-inverted HoloLens gaze after Vuforia stair calibration.
+  The preview now converts the Unity-imported stair basis without negating its
+  lateral axis, preserving forward and vertical alignment. The correction
+  applies to fresh desktop calibrations and XDF playback aligned from target
+  poses, including rotated HoloLens worlds.
+
+### Compatibility
+
+- Existing saved Vuforia calibrations retain their stored transforms. Run
+  **Calibrate from Stair Target**, then **Save Session Calibration** again to
+  replace an inverted solution.
+- Manual registration's conversion, stair placement, stream schemas, and
+  recorded samples are unchanged. This fix requires only a desktop update;
+  the v1.14.5 HoloLens update is still required for frozen-reference recording.
+- Regression checks cover left, combined, and right gaze origins, lateral
+  directions, rotated calibrations, and XDF playback. Physical HoloLens,
+  Vuforia, and Vicon checks have not been run.
+
 ## [1.14.5] - 2026-09-18
 
 ### Fixed
@@ -620,7 +642,8 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.5...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.6...HEAD
+[1.14.6]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.5...v1.14.6
 [1.14.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.4...v1.14.5
 [1.14.4]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.3...v1.14.4
 [1.12.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.11.0...v1.12.0

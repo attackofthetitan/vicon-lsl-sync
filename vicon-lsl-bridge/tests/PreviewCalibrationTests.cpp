@@ -81,15 +81,16 @@ TEST_CASE("Preview leaves uncalibrated gaze in its published frame") {
     REQUIRE(near(direction.z, 1.0));
 }
 
-TEST_CASE("Preview refaces calibrated gaze without changing the stair model") {
+TEST_CASE("Preview maps Vuforia gaze into the stair model basis without a lateral mirror") {
     const auto& calibration = vicon_lsl::defaultStairCalibrationProfile();
     const double half_sqrt_two = std::sqrt(0.5);
     const vicon_lsl::PreviewRigidTransform holo_from_target{
         {1.0, 2.0, 3.0}, {0.0, half_sqrt_two, 0.0, half_sqrt_two}};
     const vicon_lsl::PreviewVec3 target_model_point{0.25, 0.5, 1.0};
-    const vicon_lsl::PreviewVec3 target_model_direction{0.0, 0.0, 1.0};
+    const vicon_lsl::PreviewVec3 target_model_direction = vicon_lsl::normalize({1.0, 0.5, 0.25});
     const vicon_lsl::PreviewVec3 target_rh_point{0.25, 0.5, -1.0};
-    const vicon_lsl::PreviewVec3 target_rh_direction{0.0, 0.0, -1.0};
+    const vicon_lsl::PreviewVec3 target_rh_direction{
+        target_model_direction.x, target_model_direction.y, -target_model_direction.z};
     const auto holo_point =
         vicon_lsl::applyRigidTransformPoint(holo_from_target, target_rh_point);
     const auto holo_direction = vicon_lsl::rotateByQuaternion(
@@ -101,15 +102,14 @@ TEST_CASE("Preview refaces calibrated gaze without changing the stair model") {
         holo_from_target);
     const auto point = vicon_lsl::applyTransformPoint(transform, holo_point);
     const auto direction = vicon_lsl::applyTransformDirection(transform, holo_direction);
-    const vicon_lsl::PreviewQuaternion stair_facing_rotation{0.0, 0.0, 1.0, 0.0};
     const auto expected_point = vicon_lsl::applyRigidTransformPoint(
         calibration.vicon_from_target,
-        vicon_lsl::rotateByQuaternion(target_model_point, stair_facing_rotation));
+        {-target_model_point.x, target_model_point.y, target_model_point.z});
     const auto expected_direction = vicon_lsl::rotateByQuaternion(
-        vicon_lsl::rotateByQuaternion(target_model_direction, stair_facing_rotation),
+        {-target_model_direction.x, target_model_direction.y, target_model_direction.z},
         calibration.vicon_from_target.rotation);
 
-    REQUIRE(near(transform.input_axis_sign.x, 1.0));
+    REQUIRE(near(transform.input_axis_sign.x, -1.0));
     REQUIRE(near(transform.input_axis_sign.y, 1.0));
     REQUIRE(near(transform.input_axis_sign.z, -1.0));
     REQUIRE(near(point.x, expected_point.x));
@@ -194,6 +194,52 @@ TEST_CASE("Preview calibrated gaze follows the fixed stair ascent direction") {
 
     REQUIRE(upper.x < bottom.x);
     REQUIRE(upper.z > bottom.z);
+}
+
+TEST_CASE("Preview stair calibration preserves left and right for rotated worlds") {
+    // Both the published world and Vicon are right-handed. Facing upstairs,
+    // forward is -X, right is +Y, and up is +Z in the drawn stair model.
+    const std::vector<vicon_lsl::PreviewRigidTransform> holo_poses{
+        {},
+        {{1.0, 2.0, 3.0}, vicon_lsl::normalizeQuaternion({0.2, -0.3, 0.4, 0.5})},
+    };
+    for (const auto basis : {vicon_lsl::GazeTargetBasis::VuforiaModelTarget,
+                             vicon_lsl::GazeTargetBasis::ManualStairRegistration}) {
+        for (const auto& holo_from_target : holo_poses) {
+            auto calibration = vicon_lsl::defaultStairCalibrationProfile();
+            for (const auto rotation : {vicon_lsl::PreviewQuaternion{},
+                    vicon_lsl::normalizeQuaternion({-0.3, 0.4, 0.1, 0.8})}) {
+                calibration.vicon_from_target.rotation = rotation;
+                const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(
+                    calibration, holo_from_target, basis);
+                // Check left, combined, and right origins with gaze sweeping
+                // to either side. Published target-local +X faces upstairs
+                // and -Z points up; its lateral +Y must stay +Y.
+                for (const double side : {-1.0, 0.0, 1.0}) {
+                    const auto published_origin = vicon_lsl::applyRigidTransformPoint(
+                        holo_from_target, {-3.0, side * 0.032, -1.6});
+                    const auto published_direction = vicon_lsl::rotateByQuaternion(
+                        {1.0, side * 0.4, -0.2}, holo_from_target.rotation);
+                    const auto origin = vicon_lsl::applyTransformPoint(transform, published_origin);
+                    const auto direction = vicon_lsl::applyTransformDirection(transform, published_direction);
+                    const auto expected_origin = vicon_lsl::applyRigidTransformPoint(
+                        calibration.vicon_from_target, {3.0, side * 0.032, 1.6});
+                    const auto expected_direction = vicon_lsl::rotateByQuaternion(
+                        vicon_lsl::normalize({-1.0, side * 0.4, 0.2}), rotation);
+                    REQUIRE(near(origin.x, expected_origin.x));
+                    REQUIRE(near(origin.y, expected_origin.y));
+                    REQUIRE(near(origin.z, expected_origin.z));
+                    REQUIRE(near(direction.x, expected_direction.x));
+                    REQUIRE(near(direction.y, expected_direction.y));
+                    REQUIRE(near(direction.z, expected_direction.z));
+                }
+                const auto x = vicon_lsl::applyTransformDirection(transform, {1.0, 0.0, 0.0});
+                const auto y = vicon_lsl::applyTransformDirection(transform, {0.0, 1.0, 0.0});
+                const auto z = vicon_lsl::applyTransformDirection(transform, {0.0, 0.0, 1.0});
+                REQUIRE(near(vicon_lsl::dot(vicon_lsl::cross(x, y), z), 1.0));
+            }
+        }
+    }
 }
 
 TEST_CASE("Preview calibration parser rejects invalid and averages tracked poses") {

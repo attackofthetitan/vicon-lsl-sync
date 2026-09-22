@@ -187,7 +187,7 @@ TEST_CASE("Preview XDF playback calibrates shared Unity-world gaze from the stai
     const vicon_lsl::PreviewRigidTransform holo_from_target{
         {1.0, 2.0, 3.0}, {0.0, half_sqrt_two, 0.0, half_sqrt_two}};
     const vicon_lsl::PreviewVec3 target_space_origin{0.25, 0.5, 1.0};
-    const vicon_lsl::PreviewVec3 target_space_direction{0.0, 0.0, 1.0};
+    const vicon_lsl::PreviewVec3 target_space_direction = vicon_lsl::normalize({1.0, 0.5, 0.25});
     const vicon_lsl::PreviewVec3 target_rh_origin{
         target_space_origin.x, target_space_origin.y, -target_space_origin.z};
     const vicon_lsl::PreviewVec3 target_rh_direction{
@@ -233,21 +233,19 @@ TEST_CASE("Preview XDF playback calibrates shared Unity-world gaze from the stai
 
     vicon_lsl::XdfLoadResult xdf;
     xdf.streams = {std::move(target), std::move(gaze)};
-    const auto recording = vicon_lsl::buildXdfPreviewRecording(xdf, {}, {}, 0.05);
-
-    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
-    const auto& ray = recording.frames.front().gaze_rays.front();
-    REQUIRE(ray.valid);
-    const vicon_lsl::PreviewQuaternion stair_facing_rotation{0.0, 0.0, 1.0, 0.0};
     const auto expected_origin =
         vicon_lsl::applyRigidTransformPoint(
             profile.vicon_from_target,
-            vicon_lsl::rotateByQuaternion(target_space_origin, stair_facing_rotation));
+            {-target_space_origin.x, target_space_origin.y, target_space_origin.z});
     const auto expected_direction =
         vicon_lsl::rotateByQuaternion(
-            vicon_lsl::rotateByQuaternion(target_space_direction,
-                                          stair_facing_rotation),
+            {-target_space_direction.x, target_space_direction.y, target_space_direction.z},
             profile.vicon_from_target.rotation);
+    const auto recording = vicon_lsl::buildXdfPreviewRecording(xdf, {}, {}, 0.05);
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+    REQUIRE(!recording.frames.front().gaze_rays.empty());
+    const auto& ray = recording.frames.front().gaze_rays.front();
+    REQUIRE(ray.valid);
     REQUIRE(near(ray.origin.x, expected_origin.x));
     REQUIRE(near(ray.origin.y, expected_origin.y));
     REQUIRE(near(ray.origin.z, expected_origin.z));

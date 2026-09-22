@@ -511,37 +511,36 @@ gaze-to-Vicon calibration.
 
 ### Build the gaze-to-Vicon transform
 
-Which basis the published target pose uses decides the calculation. The target
-stream's `acquisition/sdk` value selects it: `Unity.XR.manual_stair_registration`
-means a manual three-point registration of the Unity CAD root, and every other
-value, including a missing one, means the Vuforia model target.
+The target stream's `acquisition/sdk` value identifies the publisher:
+`Unity.XR.manual_stair_registration` means a manual three-point registration of
+the Unity CAD root, and every other value, including a missing one, means the
+Vuforia model target. Both publishers locate the Unity-imported stair model and
+use the same conversion to the preview's OBJ basis.
 
-For the Vuforia model target the calculation is:
-
-1. Inverts the averaged `holo_from_target` pose.
-2. Combines the fixed `vicon_from_target` pose with a 180-degree rotation around target Z, stored as quaternion `(0, 0, 1, 0)`.
-3. Reflects the target-to-HoloLens position and rotation as implemented in `gazeTransformFromTargetCalibration`.
-4. Creates a quaternion-based HoloLens preview transform.
-5. Sets the gaze input Z sign to `-1` to keep the stair model's current target-local direction rule.
-
-The fixed pose, extra Z rotation, reflection, and input Z sign work as one set. Removing only one can mirror or reverse gaze relative to the stairs.
-
-For a manual stair registration the target-basis rotation does not apply, and the
-mirror it used to carry has to be stated outright. The preview draws the stair
-OBJ in the file's own coordinates, while Unity's model import negates X, so the
-registration root publishes a pose in a basis mirrored from the drawn model. The
-calculation is:
+The preview draws the stair OBJ in the file's own coordinates, while Unity's
+model import negates X. After undoing the published world's Z reflection, undo
+that X reflection to reach the drawn model. The calculation is:
 
 1. Inverts the averaged `holo_from_target` pose.
-2. Reflects the target-to-HoloLens position and rotation across Z, as above, reaching the registration root's Unity basis.
+2. Reflects the target-to-HoloLens position and rotation across Z, reaching the target's Unity basis.
 3. Reflects that position and rotation across X, reaching the drawn stair model's basis.
-4. Applies the fixed `vicon_from_target` pose, with no extra target-basis rotation.
+4. Applies the fixed `vicon_from_target` pose.
 5. Sets the gaze input signs to `(-1, 1, -1)`, which is the X mirror composed with the Z reflection of step 2.
 
-Both calculations are orientation-reversing overall, because the published
-right-handed gaze frame and the drawn stair model have opposite handedness. Only
-the preview applies either one: a recording holds the published stream, so a
-change here never alters recorded data.
+The two reflections preserve handedness overall, as required when mapping the
+right-handed published gaze frame to Vicon. In target-local coordinates the
+conversion is `(x, y, z) -> (-x, y, -z)`: forward and height align with the stairs,
+while lateral Y is preserved. The previous Vuforia path used a 180-degree Z
+rotation instead of the X reflection, which also negated lateral Y and mirrored
+left/right gaze.
+
+The inverse pose and the input signs must be converted together. Flipping a
+single world-axis input sign fails when the target is rotated. Only the preview
+applies this conversion; recordings retain the published data. XDF playback
+that solves from target poses uses the corrected conversion automatically.
+Previously saved Vuforia calibrations retain their stored transforms: run
+**Calibrate from Stair Target**, then **Save Session Calibration** to replace
+the mirrored solution.
 
 Automatic alignment lasts only for the current preview session. It is not saved.
 There is no fallback transform: clearing a calibration, or a solve that fails its
