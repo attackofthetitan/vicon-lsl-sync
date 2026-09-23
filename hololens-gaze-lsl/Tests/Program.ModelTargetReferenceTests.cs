@@ -28,13 +28,13 @@ internal static partial class Program
         True(double.IsNaN(lost[0]), "Ordinary tracking loss must remain invalid.");
         for (int i = 0; i < 90; ++i)
         {
-            // A disabled target's current transform is never the saved pose.
+            // A turned-off target's current position is never the saved one.
             double[] paused = TargetSample(x: 999.0);
             reference.Update(true, paused);
             Equal(2.0, paused[7]);
             Near(1.0, paused[0]);
             Near(2.0, paused[1]);
-            Near(-3.0, paused[2]); // Reflection must happen exactly once.
+            Near(-3.0, paused[2]); // Z must be flipped exactly once.
             Near(1.0, paused[6]);
         }
     }

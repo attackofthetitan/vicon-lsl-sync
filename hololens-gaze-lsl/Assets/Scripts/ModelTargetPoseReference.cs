@@ -3,8 +3,8 @@ using System.Collections.Generic;
 
 namespace GazeLSL
 {
-    // A fixed stair reference remains useful in the same Unity world after
-    // Vuforia is deliberately disabled. Tracking loss alone never publishes it.
+    // Keeps a steady stair position to send while Vuforia is turned off on
+    // purpose, in the same Unity world. Normal tracking loss never sends it.
     public sealed class ModelTargetPoseReference
     {
         public const int RequiredSamples = 20;
@@ -25,8 +25,8 @@ namespace GazeLSL
             wasPaused = false;
         }
 
-        // sample is already encoded in the shared right-handed world. Never
-        // reflect the saved pose again, or use a disabled target's current pose.
+        // sample is already in the shared right-handed world. Never flip the saved
+        // pose again, or use a turned-off target's current pose.
         public void Update(bool paused, double[] sample)
         {
             if (sample == null || sample.Length < ModelTargetPoseEncoder.ChannelCount)
@@ -47,7 +47,7 @@ namespace GazeLSL
                 }
                 return;
             }
-            if (wasPaused) Reset(); // Resuming requires a new stable acquisition.
+            if (wasPaused) Reset(); // After resuming, a new steady reference is needed.
             if (sample[7] != 1.0)
             {
                 window.Clear();

@@ -1,6 +1,6 @@
 # Changelog
 
-Notable user-facing, compatibility, build, and maintenance changes are recorded here.
+This file lists what changed in each release.
 
 ## [1.15.0] - 2026-09-23
 

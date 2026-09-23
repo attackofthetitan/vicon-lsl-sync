@@ -80,9 +80,9 @@ void testNormalizedPathPolicy() {
         LabRecorderFilenamePolicy::filenameCommand(valid.normalized_fields);
     expect(valid_command.contains("{root:" + valid.normalized_fields.root + "}"),
            "filename command uses the canonical normalized root");
-    // The recorder writes root + its own expansion of the template. Carrying the
-    // checked relative path in the case-preserving %b field is what keeps the
-    // written file equal to the destination the app previewed and verified.
+    // LabRecorder writes the root plus its own version of the template. Putting
+    // the checked path in %b, which it copies unchanged, makes it write exactly
+    // the file the app showed and checked.
     expect(valid_command.contains("{template:%b}") &&
                valid_command.contains("{task:" + valid.relative_path + "}"),
            "filename command sends the checked destination the recorder will write");

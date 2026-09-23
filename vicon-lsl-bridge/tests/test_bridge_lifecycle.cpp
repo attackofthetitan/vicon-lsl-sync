@@ -235,9 +235,9 @@ void testInitialFrameFailureReconnectsWithoutDelay() {
            "initial-frame failure never creates an outlet");
 }
 
-// A server that accepts connections but never produces a frame must not turn
-// the immediate first retry into an unthrottled connect/getFrame/disconnect
-// loop, so every failure after the first waits the reconnect interval.
+// A server that accepts connections but never sends a frame must not turn the
+// quick first retry into a nonstop connect/GetFrame/disconnect loop, so every
+// failure after the first waits the reconnect interval.
 void testRepeatedInitialFrameFailuresBackOff() {
     auto client = std::make_shared<FakeViconClient>();
     client->available_frames = 0;

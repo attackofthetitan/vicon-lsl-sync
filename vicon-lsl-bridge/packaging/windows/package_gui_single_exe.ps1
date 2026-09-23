@@ -188,8 +188,8 @@ function Invoke-NativePackage {
         Compress-Archive -Path @($payloadEntries.FullName) -DestinationPath $payload -Force
         Copy-Item -LiteralPath $LauncherPath -Destination $ExpectedOutput -Force
 
-        # Bind the overlay payload to bytes inside the launcher image so the
-        # extracted package can be checked independently of the PE image.
+        # Write the ZIP's checksum into the launcher in place of a placeholder,
+        # so the launcher can check the ZIP it carries before unpacking it.
         $payloadHash = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
         $digestPlaceholder = [System.Text.Encoding]::ASCII.GetBytes(
             "VICONLSL_PAYLOAD_SHA256=" + ('0' * 64))
@@ -530,9 +530,9 @@ if ($UseExistingLicenseBundle) {
     Validate-PackageManifest $deployPath
 }
 
-# Keep deployment inputs in the same directory layout used by both the
-# regular zip and the single-file payload.  The recorder is deliberately
-# isolated so its Qt/LSL runtime cannot collide with the bridge runtime.
+# Use the same folder layout for the normal ZIP and the single-file package.
+# The recorder gets its own folder on purpose, so its Qt and LSL libraries
+# cannot clash with the bridge's.
 if ($LabRecorderDeployDir) {
     $labRecorderPath = Join-Path $deployPath "labrecorder"
     Remove-TreeSafe $labRecorderPath "LabRecorder deployment directory" `
@@ -608,8 +608,8 @@ Assert-X64PeFile $recorderLsl.FullName "LabRecorder liblsl runtime"
 Assert-X64PeFile (Join-Path $labRecorderPath "platforms\qwindows.dll") "LabRecorder Qt platform plugin"
 Assert-MsvcRuntime $labRecorderPath "LabRecorder deployment"
 
-# License collection is mandatory for a fresh package. Reusing an existing
-# bundle requires validating its immutable inventory before packaging.
+# A new package must collect its licenses. An existing license bundle can only
+# be reused after checking it against its file list.
 if ($UseExistingLicenseBundle) {
     Validate-LicenseBundle $deployPath
 } else {

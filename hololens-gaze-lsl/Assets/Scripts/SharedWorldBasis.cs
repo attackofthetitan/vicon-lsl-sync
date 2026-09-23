@@ -2,9 +2,9 @@ using System.Numerics;
 
 namespace GazeLSL
 {
-    // Shared HoloLens/Vicon output uses the right-handed reflection of Unity
-    // world space across Z. Keep the polar-vector and rotation rules together
-    // so every publisher applies the same basis change.
+    // The shared HoloLens/Vicon output is the Unity world with Z flipped, which
+    // makes it right-handed. Keep the position and rotation rules together so
+    // every publisher flips the same way.
     internal static class SharedWorldBasis
     {
         internal static Vector3 ReflectPolarVector(Vector3 value)
@@ -35,8 +35,8 @@ namespace GazeLSL
             out double reflectedZ,
             out double reflectedW)
         {
-            // For F = diag(1, 1, -1), F * R * F maps quaternion vector
-            // components as an axial vector while preserving the scalar part.
+            // Flipping Z on a rotation (F * R * F with F = diag(1, 1, -1)) negates
+            // the quaternion's X and Y and keeps Z and W.
             reflectedX = -x;
             reflectedY = -y;
             reflectedZ = z;

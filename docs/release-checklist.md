@@ -5,51 +5,52 @@
 - Version: `1.15.0`
 - Previous release: `v1.14.7`
 - Target date: 2026-09-23
-- Pull requests: none; releasing directly from `main`
-- Status: prepared; publication pending tagged CI
-- Scope: an easier macOS install, working bundled recorders on macOS, and a
-  path check that tests the study folder
+- Pull requests: none; released straight from `main`
+- Status: ready; waiting for the tagged build to publish
+- Scope: an easier Mac install, bundled recorders that work on any Mac, and a
+  path check that looks at the study folder
 
-A minor release. The macOS disk image now holds one app with LabRecorder
-inside it. The app ejects its disk image, offers to move itself to Applications,
-and explains the macOS folder permissions it asks for. The bundled recorders
-start on any Mac, and the path check tests the study folder instead of the
-app's working folder.
+A minor release. The Mac disk image now holds one app with LabRecorder inside it.
+The app ejects its disk image, offers to move itself to Applications, and explains
+the Mac folder permissions it asks for. The bundled recorders start on any Mac,
+and the path check looks at the study folder instead of the folder the app was
+started from.
 
-## Pre-publication checks
+## Before publishing
 
-- [x] The CMake version and dated changelog section use `1.15.0`.
-- [x] The full desktop build and all six test programs pass locally on macOS
-  arm64, including the GUI checks at normal and 1.5x scale and the new macOS
-  installation checks.
-- [x] A locally built package passes `.github/scripts/test-package-macos.sh`,
-  with one local exception: Homebrew Qt gives a bundled `libbrotlicommon` an
-  absolute install name, which the CI Qt build does not. The check also fails
-  for a v1.14.7 package built on this machine.
-- [x] The packaged LabRecorder loads Qt and `lsl` from its own bundle with the
-  build folders hidden. The v1.14.7 package could not load `lsl` that way.
-- [x] The app ejected a mounted disk image of its version, left other versions
-  alone, retried an image in use, and reported the result.
-- [x] The move copies the app with a valid signature and without the quarantine
-  flag, and the reopen step waits for the old process to exit.
-- [x] Generated stream contracts pass `tools/generate_stream_contracts.py --check`.
-- [x] Release version passes `.github/scripts/verify-release-version.sh`.
-- [x] `git diff --check` is clean.
+- [x] The CMake version and the dated changelog section both say `1.15.0`.
+- [x] The full desktop build and all six test programs pass on an Apple Silicon
+  Mac, including the window tests at normal and 1.5x scale and the new Mac
+  install tests.
+- [x] A package built on this Mac passes `.github/scripts/test-package-macos.sh`,
+  with one local exception: Homebrew's Qt gives the bundled `libbrotlicommon` a
+  fixed full path to where it was installed, which the Qt used by the release
+  build does not. A v1.14.7 package built on this Mac fails the same check.
+- [x] The packaged LabRecorder loads Qt and `lsl` from inside its own bundle, with
+  the build folders hidden. The v1.14.7 package could not load `lsl` that way.
+- [x] The app ejected a disk image of its own version, left other versions alone,
+  tried again when the image was busy, and reported the result.
+- [x] Moving the app copies it with a valid signature and without the "downloaded
+  from the internet" flag, and reopening waits for the old copy to quit.
+- [x] Generated stream files pass `tools/generate_stream_contracts.py --check`.
+- [x] The release version passes `.github/scripts/verify-release-version.sh`.
+- [x] `git diff --check` finds nothing.
 
-## Publication
+## Publishing
 
-- [ ] Release commit pushed to `main` and its CI passes before tagging.
-- [ ] Tag `v1.15.0` points to the release commit.
-- [ ] Tagged CI passes the logic matrix, HoloLens checks, and full desktop build,
-  tests, and packaging on Linux x64, Windows x64, and macOS arm64.
-- [ ] Five platform payloads and `SHA256SUMS.txt` are published and verified.
+- [ ] The release commit is pushed to `main` and its build passes before tagging.
+- [ ] Tag `v1.15.0` points at the release commit.
+- [ ] The tagged build passes the logic tests, HoloLens tests, and the full
+  desktop build, tests, and packaging on Linux x64, Windows x64, and Apple
+  Silicon Mac.
+- [ ] Five platform downloads and `SHA256SUMS.txt` are published and checked.
 
-## Checks not run
+## Not tested
 
-- The Move to Applications dialog, the Gatekeeper **Open Anyway** step, and the
-  macOS folder and local network prompts need a Mac that has never run the app.
-  Download the disk image, open the app from it, and record once.
-- Physical Unity/OpenXR/Vuforia, HoloLens, and Vicon checks were not run.
-  No device behavior changed.
-- Windows and Linux builds, Windows packaging, and the HoloLens core tests run
-  only in CI.
+- The Move to Applications prompt, the **Open Anyway** step, and the Mac folder
+  and local network prompts need a Mac that has never run the app. Download the
+  disk image, open the app from it, and record once.
+- Real Unity/OpenXR/Vuforia, HoloLens, and Vicon tests were not run. Nothing
+  about the devices changed.
+- Windows and Linux builds, Windows packaging, and the HoloLens tests only run on
+  the build server.

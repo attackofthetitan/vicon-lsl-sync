@@ -20,8 +20,8 @@ namespace GazeLSL
         internal Vector3 WorldFromPlayspaceScale;
     }
 
-    // Platform-neutral validation, projection, and flat-sample assembly. Unity
-    // and WinRT adapters only need to supply System.Numerics values.
+    // Checks gaze rays, moves them into the world, and packs them into a flat
+    // sample, without needing Unity or Windows. Callers pass System.Numerics values.
     internal static class GazeSampleProjection
     {
         private const float MinimumDirectionMagnitudeSquared = 0.000001f;

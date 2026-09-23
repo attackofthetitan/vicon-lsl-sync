@@ -25,7 +25,7 @@ fail() {
   exit 1
 }
 
-# The rpaths a Mach-O file searches for its @rpath libraries.
+# Lists the folders (rpaths) a program searches for its @rpath libraries.
 rpaths() {
   otool -l "$1" | awk '/cmd LC_RPATH/ { found = 1; next }
     found && $1 == "path" { sub(/^ *path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; found = 0 }'
@@ -63,8 +63,8 @@ assert_arm64_signed_macho_payload() {
   (( count > 0 )) || fail "No Mach-O files found in $root"
 }
 
-# A program must find every library it links inside the package, the way dyld
-# looks for it, or it does not start on a computer without the build folders.
+# A program must find every library it links inside the package, the way macOS
+# looks for it, or it will not start on a computer without the build folders.
 assert_libraries_resolve() {
   local executable="$1"
   local directory
@@ -164,8 +164,8 @@ verify_disk_image() {
   local recorder_app="$bridge_app/Contents/Helpers/LabRecorder.app"
   local tools="$root/Command Line Tools"
 
-  # Drag-install layout: one app beside a link to /Applications. The recorders
-  # travel inside it, so macOS approves them together with the app.
+  # Drag-to-install layout: one app next to a link to /Applications. The
+  # recorders are inside it, so macOS approves them along with the app.
   test -d "$bridge_app"
   test ! -e "$root/LabRecorder.app"
   test -L "$root/Applications"
@@ -193,7 +193,7 @@ verify_disk_image() {
     fail "The LabRecorderCLI inside the app did not start"
   fi
 
-  # The command line payload stays on the image, out of the drag target's way.
+  # The command-line tools stay on the image, out of the way of the app to drag.
   test -x "$tools/vicon-lsl-bridge"
   test -x "$tools/LabRecorderCLI"
   test -f "$tools/LabRecorder.cfg"

@@ -4,10 +4,8 @@ using UnityEngine;
 
 namespace GazeLSL
 {
-    /*
-    Publishes HoloLens 2 Extended Eye Tracking readings to LSL from a dedicated
-    worker thread so gaze publishing is not limited by the Unity render frame rate.
-    */
+    // Sends HoloLens 2 gaze to LSL from its own thread, so it is not held back by
+    // Unity's frame rate.
     public sealed class GazeLSLOutlet : MonoBehaviour
     {
         private const int ChannelCount = GazeStreamContract.ChannelCount;
@@ -17,7 +15,7 @@ namespace GazeLSL
         private const float DeliveryStateReportIntervalSeconds = 5f;
         private const float FirstDeliveryStateReportDelaySeconds = 1f;
 
-        // Matches the low-rate line the preview and the runbook already use.
+        // The same low-rate line the desktop preview and hardware test guide use.
         private const double LowRateFraction = 0.8;
 
         [SerializeField] private GazeLSLConfig config;
@@ -85,8 +83,8 @@ namespace GazeLSL
             bool reminderDue = now >= nextDeliveryStateReportTime &&
                                snapshot.State != GazeDeliveryState.PublishingValidGaze;
 
-            // Give a healthy tracker a short chance to deliver its first reading before
-            // reporting the normal startup state. Any stronger state is reported at once.
+            // Give a working tracker a moment to send its first reading before
+            // logging the normal "waiting" state. Other states are logged at once.
             if (!deliveryStateReported &&
                 snapshot.State == GazeDeliveryState.WaitingForProviderSample &&
                 now < nextDeliveryStateReportTime)
@@ -135,9 +133,9 @@ namespace GazeLSL
             }
         }
 
-        // Delivery state names the stage the outlet can see. This names the three
-        // inside the provider, each of which can discard every reading and leave
-        // the same "pushed 0 samples" line behind it.
+        // The delivery state only shows what the outlet can see. This shows the
+        // three steps inside the gaze reader, any of which could lose every reading
+        // and leave the same "pushed 0 samples" line behind.
         private void ReportAcquisitionCounters()
         {
             GazeAcquisitionSnapshot acquisition;
@@ -170,8 +168,8 @@ namespace GazeLSL
                 $"after capturing it.");
         }
 
-        // Never restarts the outlet: the declared rate is fixed in the stream header,
-        // and tearing the stream down mid-recording costs more than the low rate.
+        // Never restarts the outlet: the declared rate is fixed in the stream
+        // header, and closing the stream mid-recording loses more than the low rate.
         private void ReportMeasuredRate()
         {
             if (nominalRate == 0u || Time.realtimeSinceStartup < nextRateCheckTime)
@@ -211,7 +209,7 @@ namespace GazeLSL
             }
         }
 
-        // Names the cause, so a low-rate report is a diagnosis and not a symptom.
+        // Says why the rate is low, not just that it is.
         private string DescribeCaptureIntervals()
         {
             double minMilliseconds;
@@ -406,7 +404,7 @@ namespace GazeLSL
                 nextDeliveryStateReportTime =
                     Time.realtimeSinceStartup + FirstDeliveryStateReportDelaySeconds;
                 nextLowRateWarningTime = 0f;
-                // Give the estimator a window to fill before judging the rate.
+                // Let the rate window fill before judging the rate.
                 nextRateCheckTime =
                     Time.realtimeSinceStartup + RateCheckIntervalSeconds;
             }

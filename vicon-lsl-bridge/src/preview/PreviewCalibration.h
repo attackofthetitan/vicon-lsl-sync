@@ -44,8 +44,6 @@ struct CalibrationSolution {
 };
 
 const CalibrationProfile& defaultStairCalibrationProfile();
-// True when the candidate is within the profile's distance and angle limits of
-// the reference.
 bool targetPoseWithinTolerance(const CalibrationTargetPose& reference,
                                const CalibrationTargetPose& candidate,
                                const CalibrationProfile& profile);

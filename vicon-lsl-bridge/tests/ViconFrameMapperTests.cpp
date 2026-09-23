@@ -182,8 +182,8 @@ TEST_CASE("Vicon timestamp policy clamps regressions without dropping frames") {
     REQUIRE(!adjusted);
     REQUIRE(std::abs(timestamp - 12.0) < 1e-12);
 
-    // The same state is retained when the bridge recreates its outlets after
-    // a Vicon reconnect.
+    // The bridge keeps this same state when it reopens its streams after a
+    // Vicon reconnect.
     REQUIRE(vicon_lsl::enforceViconTimestamp(5.0, 13.0, state, timestamp, &adjusted));
     REQUIRE(adjusted);
     REQUIRE(std::abs(timestamp - 13.0) < 1e-12);
@@ -293,8 +293,8 @@ TEST_CASE("Vicon marker frame mapping preserves status and context before LSL co
     REQUIRE_EQ(frame.markers[1].status, vicon_lsl::ViconReadStatus::Occluded);
     REQUIRE_EQ(frame.markers[2].status, vicon_lsl::ViconReadStatus::SdkError);
 
-    // The subject, object, and operation that identify a failed read are
-    // carried by its diagnostic rather than repeated on every read.
+    // The subject, object, and action of a failed read are kept in its error
+    // report instead of being repeated on every read.
     REQUIRE_EQ(frame.diagnostics.size(), static_cast<std::size_t>(2));
     REQUIRE_EQ(frame.diagnostics[0].frame_number, 7U);
     REQUIRE_EQ(frame.diagnostics[0].subject, std::string("S"));

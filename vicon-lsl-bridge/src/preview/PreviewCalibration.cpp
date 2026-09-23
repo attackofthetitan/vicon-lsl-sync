@@ -25,7 +25,6 @@ bool usablePose(const CalibrationTargetPose& pose) {
            usableQuaternion(pose.holo_from_target.rotation);
 }
 
-// Angle between two unit quaternions, in degrees.
 double angleBetweenDegrees(const PreviewQuaternion& left, const PreviewQuaternion& right) {
     const double orientation_dot = std::clamp(
         std::abs(left.x * right.x + left.y * right.y + left.z * right.z + left.w * right.w),

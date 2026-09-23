@@ -9,7 +9,6 @@
 namespace vicon_lsl {
 
 PreviewStreamRole inferPreviewStreamRole(const PreviewStreamSchema& schema);
-// Short name for a role: markers, segments, gaze, calibration, or unknown.
 const char* previewStreamRoleName(PreviewStreamRole role);
 // The fixed HoloLens labels for a gaze or target stream of the expected size,
 // or nothing for any other stream.

@@ -376,8 +376,8 @@ TEST_CASE("Preview XDF loader fits changing clock offsets in source stream time"
                          {{1.0, 0.0, 0.0, 1.0},
                           {2.0, 0.0, 0.0, 1.0},
                           {3.0, 0.0, 0.0, 1.0}});
-        // XDF ClockOffset CollectionTime is already in the source stream's
-        // clock domain, matching the raw sample timestamps.
+        // A ClockOffset's CollectionTime is already on the source stream's
+        // clock, like the raw sample times.
         writeClockOffsetChunk(output, stream_id, 20.0, -10.0);
         writeClockOffsetChunk(output, stream_id, 20.2, -10.1);
     }
@@ -421,7 +421,7 @@ TEST_CASE("Preview XDF loader uses a centered offset fit without zeroing absolut
                          stream_id,
                          {source_start + 5.0, source_start + 15.0},
                          {{1.0}, {2.0}});
-        // Small measurement noise exercises the full-history least-squares fit.
+        // A little noise checks that the line is fitted through every offset.
         writeClockOffsetChunk(output, stream_id, source_start,
                               100.2);
         writeClockOffsetChunk(output, stream_id, source_start + 10.0,

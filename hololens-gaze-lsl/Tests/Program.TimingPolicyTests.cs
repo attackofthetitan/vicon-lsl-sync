@@ -7,11 +7,10 @@ internal static partial class Program
 {
     private static void GazeTimingTakesDurationsInOneDomain()
     {
-        // A duration must never be taken from SystemRelativeTime ticks. Their rate
-        // is not the rate of any timer this runtime offers: on a HoloLens 2 the age
-        // of one reading came out as 0.020 s on the SDK's own clock and -231 s
-        // against Stopwatch, and the two drifted apart by seconds over seconds.
-        // Every member that made that conversion available is gone.
+        // Never turn SystemRelativeTime ticks into seconds. On a HoloLens 2 they
+        // do not match Stopwatch: one reading was 0.020 s old by the SDK's clock
+        // and -231 s by Stopwatch, and the gap kept growing. Everything that
+        // allowed that conversion has been removed.
         foreach (string name in new[]
                  {
                      "SystemRelativeTicksPerSecond",
@@ -28,9 +27,8 @@ internal static partial class Program
                 $"GazeTiming.{name} turns SDK ticks into a duration.");
         }
 
-        // A drained batch must fit the span budget, or acquisition would recover
-        // readings only for the queue policy to throw them away again. In seconds
-        // this is the plain arithmetic it always read as: 32 readings at 90 Hz.
+        // A full catch-up batch (32 readings at 90 Hz) must fit in the queue's
+        // time limit, or the queue would throw away readings just caught up.
         True(
             GazeTiming.MaxReadingsPerAcquire / 90.0 < GazeTiming.MaxBacklogSpanSeconds,
             "A full 90 Hz drain batch must fit inside the backlog span budget.");
@@ -38,9 +36,9 @@ internal static partial class Program
 
     private static void GazeTimingJudgesSeedAgeOnOneClock()
     {
-        // The age must be taken in the SDK's own wall-clock domain. Comparing the
-        // reading's tick count against a timer of ours rejected every reading the
-        // tracker offered, on a device where nothing was wrong with the readings.
+        // The age must come from the SDK's own clock. Comparing the reading's
+        // ticks with one of our timers refused every reading, even though
+        // nothing was wrong with them.
         foreach (string name in new[] { "IsFreshCaptureTimestamp", "MaxSeedCaptureAgeTicks" })
         {
             True(
@@ -61,8 +59,8 @@ internal static partial class Program
             GazeTiming.IsFreshSeedAge(GazeTiming.MaxSeedCaptureAgeSeconds + 0.001),
             "A stalled tracker reading beyond the boundary should be rejected.");
 
-        // The reading returned for "now" can be captured a frame either side of the
-        // query, so a small lead must not be read as a broken clock.
+        // The reading for "now" can be taken one frame before or after we ask, so
+        // being slightly ahead does not mean the clock is broken.
         True(
             GazeTiming.IsFreshSeedAge(-0.011),
             "A reading one 90 Hz frame ahead of the query should be accepted.");
@@ -113,16 +111,15 @@ internal static partial class Program
         double framePeriod = 1.0 / 90.0;
         double latency = 0.020;
 
-        // A punctual step lands between tracker frames. Asking then costs a failed
-        // SDK read on the device and returns nothing, so it must not ask at all.
+        // A step that runs on time lands between tracker frames. Asking then only
+        // fails inside the SDK on the device, so it must not ask at all.
         False(
             GazeDrainPolicy.CouldHaveNewerReading(1000.005, 1000.0, framePeriod, latency),
             "A step inside one frame of the last capture should not ask.");
 
-        // The stop rule that matters. A reading the drain has just taken is already
-        // as old as the delay the tracker publishes at, so measured against the
-        // frame period alone it always looked stale enough to justify one more ask
-        // -- the ask that cannot be answered, thrown and leaked once per drain step
+        // The key stop rule. A reading just taken is already as old as the
+        // tracker's delivery delay, so checking against the frame time alone
+        // always allowed one more ask. That ask failed and leaked on every step
         // for a whole session.
         False(
             GazeDrainPolicy.CouldHaveNewerReading(
@@ -133,10 +130,9 @@ internal static partial class Program
                 1000.0 + latency, 1000.0, framePeriod, 0.0),
             "Without the delay that same step asks, which is the regression.");
 
-        // Not tested exactly at the boundary: capture times are LSL clock values
-        // large enough that adding a frame period and subtracting it again lands a
-        // hair either side. A step that misses by that much simply asks on the
-        // next one, about 9 ms later.
+        // Not tested exactly at the edge: capture times are large numbers, so
+        // adding and then subtracting a frame can land very slightly either side.
+        // A step that just misses simply asks on the next one, about 9 ms later.
         True(
             GazeDrainPolicy.CouldHaveNewerReading(
                 1000.0 + (framePeriod + latency) * 1.01, 1000.0, framePeriod, latency),
@@ -145,9 +141,9 @@ internal static partial class Program
             GazeDrainPolicy.CouldHaveNewerReading(1000.5, 1000.0, framePeriod, latency),
             "A late step should ask, and keep asking while it catches up.");
 
-        // Nothing usable to reason from must not stall acquisition. An unusable
-        // delay leaves the frame period on its own, which asks too eagerly rather
-        // than not at all.
+        // Broken input must not stop readings being fetched. Without a usable
+        // delay, the frame time alone is used, which asks too often rather than
+        // not at all.
         True(
             GazeDrainPolicy.CouldHaveNewerReading(1000.005, 1000.0, 0.0, latency),
             "An unknown frame period should not block the drain.");
@@ -177,8 +173,8 @@ internal static partial class Program
         policy.NoteReadingAge(0.020);
         Near(0.020, policy.PublicationLatencySeconds);
 
-        // A reading recovered by a drain that is catching up is arbitrarily old and
-        // says nothing about how quickly the tracker parts with a new one.
+        // A reading picked up while catching up can be any age, and says nothing
+        // about how quickly the tracker hands over a new one.
         policy.NoteReadingAge(0.200);
         Near(0.020, policy.PublicationLatencySeconds);
 
@@ -189,8 +185,8 @@ internal static partial class Program
         policy.NoteReadingAge(double.PositiveInfinity);
         Near(0.012, policy.PublicationLatencySeconds);
 
-        // A reading offered a hair ahead of the query is jitter between the two
-        // wall clocks behind a capture time, not a negative delay.
+        // A reading very slightly newer than the ask is clock jitter, not a
+        // negative delay.
         policy.NoteReadingAge(-0.001);
         Equal(0.0, policy.PublicationLatencySeconds);
 
@@ -219,7 +215,7 @@ internal static partial class Program
         True(policy.IsSuspended(now), "The drain should be suspended.");
         Equal(1, policy.Suspensions);
 
-        // Announced once, not on every failure while it stays down.
+        // Reported once, not on every failure while paused.
         False(
             policy.NoteFailedEmptyResult(now),
             "A suspended drain should not report itself suspended again.");
@@ -229,14 +225,14 @@ internal static partial class Program
             policy.IsSuspended(now + GazeDrainPolicy.SuspensionSeconds - 0.001),
             "The drain should stay down for the whole suspension.");
 
-        // The tracker publishing nothing yet is exactly when empty results happen,
-        // and it starts publishing later. Giving the drain up for the session would
-        // leave the run on a fallback that cannot keep up.
+        // Empty results happen while the tracker is not making readings yet, and
+        // it may start later. Giving up for the whole session would leave the run
+        // on a fallback that cannot keep up.
         False(
             policy.IsSuspended(now + GazeDrainPolicy.SuspensionSeconds),
             "The drain should be tried again once the suspension is over.");
 
-        // The budget starts over, so one failure after recovery does not re-suspend.
+        // The count starts over, so one failure after resuming does not pause again.
         False(
             policy.NoteFailedEmptyResult(now + 20.0),
             "A single failure after recovery should not suspend the drain.");
@@ -248,11 +244,10 @@ internal static partial class Program
 
     private static void GazeDrainReadingsDoNotForgiveSdkFailures()
     {
-        // A drain that reads one reading and then fails never accumulates two
-        // failures in a row. Counting consecutively, a session took thousands of
-        // failures -- each one a leaked SDK object whose finalizer throws -- and
-        // suspended the drain eleven times. The budget runs to the next suspension,
-        // not to the next reading.
+        // A step that gets one reading and then fails never has two failures in a
+        // row. Counting only failures in a row let one session leak thousands of
+        // SDK objects and pause just eleven times. The count lasts until the next
+        // pause, not until the next reading.
         var policy = new GazeDrainPolicy();
         double now = 1000.0;
 
@@ -278,8 +273,8 @@ internal static partial class Program
 
         False(estimator.TryGetRate(out rate), "An empty estimator has no rate.");
 
-        // Fewer readings than the minimum must not produce a rate, or a run would
-        // be judged low the instant it starts.
+        // Too few readings must not give a rate, or every run would look slow the
+        // moment it starts.
         double captureTime = 1000.0;
         for (int i = 0; i < 8; i++)
         {
@@ -298,8 +293,8 @@ internal static partial class Program
         True(estimator.TryGetRate(out rate), "A full window should produce a rate.");
         True(Math.Abs(rate - 90.0) < 0.5, $"Expected about 90 Hz, got {rate}.");
 
-        // The window must slide, so a collapse to 10 Hz is visible without waiting
-        // for the tracker session to restart.
+        // The window must move with time, so a drop to 10 Hz shows up without
+        // waiting for the tracker to restart.
         for (int i = 0; i < GazeRateEstimator.WindowSize; i++)
         {
             estimator.Add(captureTime);
@@ -329,8 +324,8 @@ internal static partial class Program
         True(Math.Abs(minMilliseconds - 100.0) < 1.0, $"Expected a 100 ms floor, got {minMilliseconds}.");
         True(Math.Abs(maxMilliseconds - 100.0) < 1.0, $"Expected a 100 ms ceiling, got {maxMilliseconds}.");
 
-        // Full-rate captures with every ninth reading missing must not look like a
-        // tracker that is genuinely publishing at 10 Hz.
+        // Full speed with every ninth reading missing must not look like a
+        // tracker that really runs at 10 Hz.
         var lossy = new GazeRateEstimator();
         captureTime = 1000.0;
         for (int i = 0; i < GazeRateEstimator.WindowSize; i++)
@@ -346,7 +341,8 @@ internal static partial class Program
 
     private static void GazeBacklogKeepsDrainedBatch()
     {
-        // A recovered batch must survive the queue policy, or draining is pointless.
+        // A caught-up batch must survive the queue limits, or catching up is
+// pointless.
         double step = 1.0 / 90.0;
         var queue = new Queue<double>();
 
@@ -403,10 +399,9 @@ internal static partial class Program
 
     private static void GazeBacklogToleratesJitterButNotAnUnusableSpan()
     {
-        // Capture times come from the LSL clock read to fetch a reading and the
-        // wall clock the SDK stamped it with, so consecutive batches can land a
-        // hair out of order. That is not a backlog, and dropping one for it would
-        // discard readings that are perfectly fresh.
+        // Capture times mix our LSL clock with the SDK's clock, so batches can
+        // land very slightly out of order. That is not a backlog, and dropping
+        // them would throw away perfectly fresh readings.
         var jittery = new Queue<double>();
         jittery.Enqueue(1000.010);
         jittery.Enqueue(1000.009);
@@ -418,8 +413,8 @@ internal static partial class Program
             "A capture time a hair out of order is within budget.");
         Equal(2, jittery.Count);
 
-        // A span that cannot be judged at all is treated as over budget: one stale
-        // batch is the cost of dropping it, an unbounded backlog the cost of not.
+        // A span that cannot be worked out counts as over the limit: dropping one
+        // old batch is better than a backlog that never ends.
         var unusable = new Queue<double>();
         unusable.Enqueue(1000.0);
         unusable.Enqueue(double.NaN);

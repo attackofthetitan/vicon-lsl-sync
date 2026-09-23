@@ -11,10 +11,9 @@ $packagingSafetyModule = (Resolve-Path -LiteralPath (
 Import-Module -Name $packagingSafetyModule -Scope Local -Force `
     -DisableNameChecking -ErrorAction Stop
 
-# The CRT is deployed from the x64 VC143 redist directory that belongs to the
-# installed Visual Studio toolchain.  Keep this allow-list explicit: it covers
-# the split CRT components emitted by current MSVC builds without copying
-# unrelated files from the redist directory.
+# The C++ runtime DLLs come from the x64 VC143 redistributable folder of the
+# installed Visual Studio. Keep this list explicit: it names every runtime DLL
+# that current MSVC builds need, without copying anything else from that folder.
 $mandatoryDlls = @(Get-MandatoryMsvcRuntimeDllNames)
 $requiredDlls = @(
     $mandatoryDlls
@@ -95,7 +94,7 @@ function Get-CrtCandidates {
         try {
             $version = [version](Split-Path -Leaf $versionDirectory)
         } catch {
-            # Keep an unparseable version below parseable VC143 versions.
+            # A version that cannot be read sorts below every one that can.
         }
         [pscustomobject]@{
             Path = $directory

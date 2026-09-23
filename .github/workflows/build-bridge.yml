@@ -235,7 +235,7 @@ jobs:
             Write-Host "Boost 1.83.0 is already installed from cache."
           }
 
-          # Locate Boost Software License text
+          # Put the Boost license where the license checks look for it.
           $licenseFile = Join-Path $boostRoot "LICENSE_1_0.txt"
           if (-not (Test-Path -LiteralPath $licenseFile)) {
             $foundLicense = Get-ChildItem -LiteralPath $boostRoot -Recurse -File -Filter "LICENSE_1_0.txt" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -244,13 +244,13 @@ jobs:
             }
           }
 
-          # Resolve library directory
           $libDir = Get-ChildItem -LiteralPath $boostRoot -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^lib64' } |
             Select-Object -First 1
           $libPath = if ($libDir) { $libDir.FullName } else { Join-Path $boostRoot "lib64-msvc-14.3" }
 
-          # Setup lightweight compatibility shim for packaging and licensing safety checks
+          # The packaging and license checks expect a vcpkg folder, so make a small
+          # stand-in that holds the Boost license.
           $vcpkgRoot = Join-Path $env:RUNNER_TEMP "vcpkg-shim"
           $tripletDir = Join-Path $vcpkgRoot "installed\${{ matrix.triplet }}"
           New-Item -ItemType Directory -Path $tripletDir -Force | Out-Null

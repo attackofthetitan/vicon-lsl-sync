@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the native and managed HoloLens stream-contract facades."""
+"""Write the C++ and C# HoloLens stream definitions from the JSON in stream-contracts."""
 
 import argparse
 import json

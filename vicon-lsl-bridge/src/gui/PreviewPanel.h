@@ -123,7 +123,6 @@ private:
     void updateCalibrationPersistentStatus(gui::SessionCalibrationState state,
                                            const QString& text,
                                            bool metadata_compatible);
-    // Enables each control only when its action can do something.
     void refreshControlStates();
 
     PreviewWidget* widget_ = nullptr;

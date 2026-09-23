@@ -16,8 +16,8 @@ TEST_CASE("Preview places the stair mesh at the measured permanent corner") {
     const auto mesh = vicon_lsl::loadObjMesh(
         std::string(VICON_LSL_TEST_ASSET_DIR) + "/stair_model/stair_model1.obj");
     REQUIRE(!mesh.vertices.empty());
-    // The stairs ascend toward -X; the front-left floor corner is the
-    // vertex with greatest X, least Y, then least Z.
+    // The stairs go up toward -X, so the front-left floor corner is the
+    // point with the largest X, then the smallest Y, then the smallest Z.
     const auto corner = std::max_element(mesh.vertices.begin(), mesh.vertices.end(),
         [](const auto& a, const auto& b) {
             if (a.x != b.x) return a.x < b.x;
@@ -59,9 +59,9 @@ TEST_CASE("Preview calibration composes and inverts rigid transforms") {
 }
 
 TEST_CASE("Preview leaves uncalibrated gaze in its published frame") {
-    // The preview uses a default profile until a calibration is solved or
-    // applied, because the HoloLens pose in Vicon coordinates is not knowable
-    // beforehand. It must move nothing rather than guess an alignment.
+    // Until a calibration is worked out or applied, the preview cannot know
+    // where the HoloLens sits in Vicon, so it must leave gaze where it is
+    // instead of guessing.
     vicon_lsl::PreviewTransformProfile uncalibrated;
     uncalibrated.name = "HoloLens";
     REQUIRE(near(uncalibrated.scale, 1.0));
@@ -189,8 +189,8 @@ TEST_CASE("Preview stair calibration preserves left and right for rotated worlds
             const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(
                 calibration, holo_from_target);
             // Check left, combined, and right origins with gaze sweeping
-            // to either side. Published target-local +X faces upstairs
-            // and -Z points up; its lateral +Y must stay +Y.
+            // to either side. In the target's own coordinates, +X faces up
+            // the stairs and -Z points up; sideways +Y must stay +Y.
             for (const double side : {-1.0, 0.0, 1.0}) {
                 const auto published_origin = vicon_lsl::applyRigidTransformPoint(
                     holo_from_target, {-3.0, side * 0.032, -1.6});

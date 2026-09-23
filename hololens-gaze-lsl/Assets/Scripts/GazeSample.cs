@@ -2,9 +2,8 @@ namespace GazeLSL
 {
     public struct GazeSample
     {
-        // Capture timestamp in the QPC-derived system-relative domain shared by
-        // Windows steady_clock and LSL local_clock. This metadata is carried
-        // alongside the fixed channel payload and is not an LSL channel.
+        // Capture time in seconds on the LSL clock. It travels with the sample but
+        // is not one of the LSL channels.
         public double Timestamp;
 
         public double CombinedOriginX;

@@ -296,8 +296,8 @@ void testInvalidNominalRatesAndMetadata() {
            "marker and segment synchronization metadata remain exact and identical");
 }
 
-// The streams flatten reads into channels themselves, so the order the schema
-// advertises is asserted against what actually reaches the outlet.
+// The streams turn reads into channel values themselves, so check that the
+// order the schema lists matches what is actually sent.
 void testFlattenedSampleOrder() {
     auto marker_state = std::make_shared<OutletState>();
     MarkerStream markers(fakeFactory(marker_state));

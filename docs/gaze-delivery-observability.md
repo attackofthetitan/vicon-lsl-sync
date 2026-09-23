@@ -1,54 +1,66 @@
-# Gaze delivery observability
+# Reading the gaze delivery log
 
-The HoloLens gaze LSL outlet can exist before the first gaze sample is available. The Unity log therefore reports the delivery state separately from outlet creation.
+The HoloLens gaze stream can be open before any gaze has arrived. So the Unity log reports how gaze is flowing separately from whether the stream was opened.
 
-The publisher exposes four states:
+The publisher is always in one of four states:
 
-- `WaitingForProviderSample`: the worker is polling, but the provider has not returned a gaze sample yet.
-- `RejectingInvalidTimestamp`: provider samples are arriving, but the latest sample had an invalid capture timestamp and was not pushed to LSL.
-- `PublishingSamplesWithoutValidRays`: LSL samples are being pushed, but the latest published sample had no valid combined, left-eye, or right-eye ray.
-- `PublishingValidGaze`: the latest published sample contained at least one valid gaze ray.
+- `WaitingForProviderSample`: the worker is asking for gaze, but none has arrived yet.
+- `RejectingInvalidTimestamp`: gaze is arriving, but the latest sample had a bad capture time and was not sent.
+- `PublishingSamplesWithoutValidRays`: samples are being sent, but the latest one had no usable ray for either eye or both eyes combined.
+- `PublishingValidGaze`: the latest sample sent had at least one usable ray.
 
-Empty provider polls are counted but do not overwrite the last real sample classification, because the publisher intentionally polls faster than the nominal tracker rate to drain backlog.
+When the worker asks and gets nothing, that is counted, but it does not change the state. The worker asks more often than the tracker makes readings on purpose, so it can clear any backlog, and many of those asks will come back empty.
 
-Unity reports state transitions immediately, except that the normal initial waiting state gets a one-second grace period. Non-healthy states repeat every five seconds with cumulative counters. A valid-gaze transition is logged once.
+Unity logs a change of state straight away. The one exception is the normal "waiting" state at startup, which gets one second to clear first. Any state other than `PublishingValidGaze` is logged again every five seconds, with running totals. Reaching `PublishingValidGaze` is logged once.
 
-## Acquisition counters
+## Reading counters
 
-Delivery state names the stage the outlet can see. It cannot name which stage
-inside the provider lost the reading, and there are three, each able to discard
-every reading while leaving the same `pushed 0 samples` line behind it: taking a
-reading from the SDK, converting it to world space on the Unity main thread, and
-handing it to the publisher.
+The state only tells you what the stream can see. It cannot tell you where
+inside the gaze reader a reading was lost. There are three places where every
+reading could be thrown away, and each would leave the same `pushed 0 samples`
+line in the log:
 
-So every report of a state other than `PublishingValidGaze` is followed by a
-second line counting all three:
+1. getting a reading from the SDK,
+2. moving it into the Unity world on Unity's main thread,
+3. handing it to the publisher.
 
-- Reading at the current time: asked, empty, too old. This is how a session starts
-  and how it acquires while the drain is suspended.
-- Drain: asked, read, empty, failed inside the SDK, skipped as too soon, whether
-  it is currently suspended, and how many times it has been.
-- Accepted, not newer than the last accepted reading, and waiting to convert.
-- Conversion: passes, converted, locate failures, dropped as a stale tracker
-  session, and waiting to publish.
-- The age of the last reading the SDK offered, on the SDK's own wall clock. A
-  reading captured moments ago and one captured minutes ago are the same rejection
-  from outside.
-- The publication delay: how long after capturing a reading the tracker parts with
-  it, as the freshest age any reading has been offered at this session. The drain
-  waits this out on top of a frame period before asking again, so a delay that
-  reads as zero for a long time is why a drain would be failing on every step.
+So whenever the state is anything other than `PublishingValidGaze`, a second log
+line follows with counts for all three:
 
-The device timer no longer appears in this line. It was there to test whether
-`Stopwatch` is the clock behind `SystemRelativeTime`; it is not, in rate as well
-as epoch, and nothing on the gaze path measures a duration from those ticks any
-more.
+- **Reading at the current time**: how many times it asked, how many came back
+  empty, and how many were too old. This is how a session starts, and how the app
+  gets readings while catching up is paused.
+- **Catching up** ("Drain" in the log): how many times it asked, how many readings it got, how many
+  were empty, how many failed inside the SDK, how many steps were skipped as too
+  soon, whether catching up is paused right now, and how many times it has been
+  paused.
+- **Accepted**: how many readings were accepted, how many were refused for not
+  being newer than the last one, and how many are waiting to be converted.
+- **Conversion**: how many passes Unity made, how many readings it converted,
+  how many times it could not find the headset position, how many were dropped
+  for belonging to an old tracker session, and how many are waiting to be sent.
+- **Age of the last reading** the SDK offered, on the SDK's own clock. From the
+  outside, a reading taken a moment ago and one taken minutes ago get refused the
+  same way, so this tells them apart.
+- **Delivery delay**: how long after taking a reading the tracker hands it over,
+  measured as the youngest age any reading has been offered at in this session.
+  Catching up waits this long plus one frame before asking again. So if the delay
+  shows zero for a long time, that explains why catching up would fail on every
+  step.
 
-Read them as a chain. Nothing accepted means the SDK is not handing over readings.
-Readings accepted with nothing converted means the Unity main thread is not
-converting them, and a conversion pass count of zero means `Update` is not running
-on the provider at all. Samples converted and waiting to publish means the
-publisher is not taking them.
+The headset's own timer is no longer in this line. It was there to test whether
+`Stopwatch` is the clock behind `SystemRelativeTime`. It is not: the two tick at
+different speeds and start from different points. Nothing on the gaze path
+measures time with those ticks any more.
 
-The counters follow the tracker session: re-enumerating the tracker resets them
-along with the queues and the reading gate.
+Read the counters in order:
+
+- Nothing accepted means the SDK is not handing over readings.
+- Readings accepted but nothing converted means Unity's main thread is not
+  converting them. If the conversion pass count is zero, `Update` is not running
+  on the gaze reader at all.
+- Samples converted and waiting to be sent means the publisher is not picking
+  them up.
+
+The counters belong to the tracker session. When the tracker is found again, they
+reset along with the queues and the reading-time check.

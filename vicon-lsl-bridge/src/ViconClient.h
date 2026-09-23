@@ -6,7 +6,6 @@
 
 #include <string>
 
-// Reads frames and names from the Vicon DataStream SDK.
 class ViconClient final : public vicon_lsl::bridge_internal::ViconClient {
 public:
     explicit ViconClient(const std::string& server_address);

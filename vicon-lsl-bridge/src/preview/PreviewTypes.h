@@ -25,8 +25,8 @@ struct PreviewTransformProfile {
     double scale = 1.0;
     // Multiplies each input axis before rotating, for example to flip Z.
     PreviewVec3 input_axis_sign{1.0, 1.0, 1.0};
-    // Fixed transforms rotate with Euler angles. Solved calibrations use the
-    // quaternion instead, so converting to angles and back cannot lose accuracy.
+    // Fixed transforms use these angles. Solved calibrations use the quaternion
+    // instead, so no accuracy is lost converting to angles and back.
     PreviewVec3 rotation_degrees{};
     bool use_quaternion_rotation = false;
     PreviewQuaternion rotation{};

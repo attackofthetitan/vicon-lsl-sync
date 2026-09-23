@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-// The LSL stream of Vicon segments. An empty layout creates no LSL stream.
+// An empty layout creates no LSL stream.
 class SegmentStream {
 public:
     explicit SegmentStream(StreamOutletFactory outlet_factory = createLslStreamOutlet);

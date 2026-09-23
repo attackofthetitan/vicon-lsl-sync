@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-// The LSL stream of Vicon markers. An empty layout creates no LSL stream.
+// An empty layout creates no LSL stream.
 class MarkerStream {
 public:
     explicit MarkerStream(StreamOutletFactory outlet_factory = createLslStreamOutlet);

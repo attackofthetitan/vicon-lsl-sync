@@ -22,9 +22,9 @@ $ErrorActionPreference = "Stop"
 
 $packagingSafetyModule = (Resolve-Path -LiteralPath (
     Join-Path $PSScriptRoot "PackagingSafety.psm1") -ErrorAction Stop).Path
-# This script is invoked from package_gui_single_exe.ps1 in the same process.
-# Reuse its module instance so the child scope cannot invalidate the parent's
-# exported commands by force-reloading the module.
+# package_gui_single_exe.ps1 runs this script in the same process. Reuse its
+# copy of the module: reloading it here would break the commands the calling
+# script already imported.
 Import-Module -Name $packagingSafetyModule -Scope Local `
     -DisableNameChecking -ErrorAction Stop
 
@@ -123,8 +123,8 @@ Assert-GitRevision $liblslPath $expectedRevisions.liblsl "liblsl"
 $noticeSource = Require-File (Join-Path $PSScriptRoot "THIRD_PARTY_NOTICES.txt") "third-party notice"
 Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $outputPath "THIRD_PARTY_NOTICES.txt") -Force
 
-# These are copied from the exact source trees used by the build.  Do not
-# replace them with summaries: the release must contain the upstream text.
+# Copy these from the exact sources the build used. Do not replace them with
+# summaries: the release must include the original license text.
 $viconLicense = Require-File (Join-Path $viconSdkPath "LICENSE") "Vicon DataStream SDK license"
 Copy-Item -LiteralPath $viconLicense -Destination (Join-Path $outputPath "VICON-DATASTREAM-SDK-LICENSE.txt") -Force
 Copy-License $viconLicense "Vicon-DataStream-SDK\LICENSE"
@@ -161,8 +161,8 @@ if ((Get-Content -LiteralPath $boostLicense.FullName -Raw) -notmatch
 }
 Copy-License $boostLicense.FullName "Boost\LICENSE_1_0.txt"
 
-# install-qt-action installs all Qt and plugin notices beneath LICENSES.
-# Copy every file so plugin-specific notices are retained, not just LGPL.txt.
+# install-qt-action puts every Qt and plugin notice under LICENSES. Copy them
+# all, not just LGPL.txt, so the plugin notices are kept.
 $qtLicenses = Join-Path $qtRootPath "LICENSES"
 if (-not (Test-Path -LiteralPath $qtLicenses -PathType Container)) {
     $qtLicenses = Get-ChildItem -LiteralPath $qtRootPath -Directory -Filter "LICENSES" -Recurse |
@@ -180,7 +180,8 @@ foreach ($qtFile in $qtLicenseFiles) {
     Copy-License $qtFile.FullName (Join-Path "Qt" $relative)
 }
 
-# A sorted hash inventory makes the license bundle auditable and reproducible.
+# A sorted list of file hashes makes the license bundle easy to check and the
+# same on every build.
 $inventory = New-Object System.Collections.Generic.List[string]
 foreach ($licenseFile in @(Get-ChildItem -LiteralPath $licensesDirectory -Recurse -File | Sort-Object FullName)) {
     $relative = Relative-Path $licensesDirectory $licenseFile.FullName

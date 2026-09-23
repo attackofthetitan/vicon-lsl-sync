@@ -7,7 +7,6 @@
 
 namespace vicon_lsl {
 
-// Finds every visible LSL stream on its own thread.
 class StreamDiscoveryWorker : public QThread {
     Q_OBJECT
 

@@ -5,11 +5,9 @@ using Vuforia;
 
 namespace GazeLSL
 {
-    /*
-    Publishes the Vuforia stair model target pose as an independent LSL stream.
-    The target and GazeDataProvider must run in the same Unity/XR world. Output
-    coordinates use the existing gaze convention: metres, with Unity Z flipped.
-    */
+    // Sends the Vuforia stair target position as its own LSL stream. It must run
+    // in the same Unity world as GazeDataProvider, and uses the same coordinates
+    // as gaze: metres, with Unity's Z flipped.
     public sealed class VuforiaModelTargetPoseOutlet : MonoBehaviour
     {
         private const int ChannelCount = ModelTargetStreamContract.ChannelCount;
@@ -134,8 +132,8 @@ namespace GazeLSL
                 return;
             }
 
-            // Inspect the actual behaviour so disabling Vuforia outside the M
-            // key path has the same retention policy.
+            // Check Vuforia itself, so turning it off some way other than the M key
+            // still keeps the reference.
             if (vuforiaBehaviour == null) vuforiaBehaviour = VuforiaBehaviour.Instance;
             bool paused = vuforiaBehaviour != null && !vuforiaBehaviour.enabled;
             bool tracked = !paused && vuforiaBehaviour != null &&

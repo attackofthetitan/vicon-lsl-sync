@@ -52,7 +52,6 @@ void reportPreviewLoadProgress(const PreviewLoadOptions& options,
                                std::uint64_t total,
                                const std::string& detail = {});
 
-// Progress as a whole percentage from 0 to 100.
 int previewLoadPercent(const PreviewLoadProgress& progress);
 
 // Halves a list by keeping every other item, starting with the first. With

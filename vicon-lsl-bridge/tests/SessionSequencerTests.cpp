@@ -49,8 +49,8 @@ void testShutdownWaitsForEachComponent() {
                "Closing: waiting for bridge, preview, file loading, file check, recorder",
            "the wait list is reported as one readable line");
 
-    // A recorder this app owns keeps closing open even after the connection
-    // settled, because its process is still up.
+    // A recorder this app started still holds up closing after the connection
+    // is done, because its process is still running.
     ShutdownInputs owned = settledShutdown();
     owned.owns_running_process = true;
     expect(shutdownWaitingOn(owned) == QStringList({"recorder"}),

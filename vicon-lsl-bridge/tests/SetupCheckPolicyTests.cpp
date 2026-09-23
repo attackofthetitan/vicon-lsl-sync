@@ -13,7 +13,7 @@ namespace {
 
 using vicon_lsl::gui::SetupCheckInputs;
 
-// Every prerequisite satisfied: bridge streaming, recorder connected and idle.
+// Everything ready: bridge streaming, recorder connected and idle.
 SetupCheckInputs readyInputs() {
     SetupCheckInputs inputs;
     inputs.recorder_only = false;

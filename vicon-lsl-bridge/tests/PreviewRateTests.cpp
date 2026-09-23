@@ -35,14 +35,14 @@ TEST_CASE("Preview rate reports the effective rate over corrected timestamps") {
     REQUIRE(tracker.hasFullWindow());
     REQUIRE(near(tracker.effectiveRateHz(), 90.0));
 
-    // A gap is reflected in the effective rate while the current two-second
-    // window remains measurable.
+    // A gap lowers the rate, and the current two-second window can still be
+    // measured.
     REQUIRE(tracker.addTimestamp(2.5));
     REQUIRE(tracker.hasFullWindow());
     REQUIRE(near(tracker.effectiveRateHz(), 68.0));
 
-    // A later gap rolls the old history out while preserving the boundary
-    // sample needed to measure the current window.
+    // A later gap drops old samples but keeps the one at the start of the
+    // window, which is needed to measure it.
     REQUIRE(tracker.addTimestamp(5.0));
     REQUIRE(tracker.hasFullWindow());
     REQUIRE_EQ(tracker.sampleCount(), static_cast<std::size_t>(2));

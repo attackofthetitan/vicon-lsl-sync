@@ -1,6 +1,6 @@
 #pragma once
 
-// Turns Vicon reads into LSL samples: layout discovery, per-frame reads,
+// Turns Vicon reads into LSL samples: reading the layout, reading each frame,
 // timestamps, and error reporting.
 
 #include "ViconFrameTypes.h"
@@ -75,7 +75,7 @@ std::string formatDiagnostic(const ViconDiagnostic& diagnostic);
 std::string diagnosticKey(const ViconDiagnostic& diagnostic);
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics);
 
-// Uses the SDK error when available. Hidden items are warnings.
+// Uses the SDK's error text when there is one. Hidden items are warnings.
 template <class Read>
 ViconDiagnostic readFailure(const Read& read,
                             unsigned int frame_number,
@@ -166,7 +166,6 @@ ViconDiscoveryResult discoverLayout(Client& client, unsigned int frame_number) {
     return result;
 }
 
-// The client can be the Vicon SDK wrapper or a test fake.
 template <class Client>
 ViconFrameResult buildViconFrame(Client& client,
                                  const ViconLayout& layout,

@@ -48,7 +48,6 @@ inline ElidingLabel* makeStateValue(const QString& text, const QString& accessib
     return label;
 }
 
-// A vertical divider between related controls.
 inline QFrame* makeSeparator() {
     auto* line = new QFrame();
     line->setFrameShape(QFrame::VLine);

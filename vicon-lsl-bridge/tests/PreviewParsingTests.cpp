@@ -65,7 +65,7 @@ TEST_CASE("Marker lookup prefers plain labels and the first duplicate") {
 
     markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88, 3, 1, 0}, {});
     REQUIRE(!markers[0].valid);
-    // A missing validity value has always allowed a finite marker position.
+    // With no Valid value, a finite marker position has always counted as valid.
     markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88, 3}, {});
     REQUIRE(markers[0].valid);
     markers = vicon_lsl::parseMarkerSample(labels, {1, 99, 2, 88}, {});

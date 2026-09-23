@@ -315,7 +315,6 @@ bool ViconClient::getFrame() {
         return false;
     }
 
-    // Subtract Vicon's latency from the time the frame arrived.
     const double receipt_timestamp = lsl::local_clock();
     const auto latency = client_.GetLatencyTotal();
     frame_timestamp_ = vicon_lsl::viconFrameTimestamp(

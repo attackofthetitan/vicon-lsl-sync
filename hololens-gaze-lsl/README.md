@@ -1,12 +1,12 @@
 # HoloLens Gaze LSL
 
-This folder contains the Unity scripts that send HoloLens 2 gaze to LSL. It also contains the build script for the ARM64 UWP version of `liblsl` used by the Unity app.
+This folder has the Unity scripts that send HoloLens 2 gaze to LSL. It also has the script that builds the HoloLens version of `liblsl` (ARM64 UWP) that the Unity app needs.
 
-The `external/liblsl` folder is a Git submodule: a separate repository pinned to one revision. It points to [`attackofthetitan/liblsl-uwp-arm64`](https://github.com/attackofthetitan/liblsl-uwp-arm64). That repository is based on `sccn/liblsl` release `v1.16.2` and includes the changes needed for UWP on ARM64.
+The `external/liblsl` folder is a Git submodule: a copy of another repository, pinned to one version. It points to [`attackofthetitan/liblsl-uwp-arm64`](https://github.com/attackofthetitan/liblsl-uwp-arm64), which is `sccn/liblsl` release `v1.16.2` with the changes needed to run on HoloLens.
 
-## Build liblsl for UWP ARM64
+## Build liblsl for HoloLens
 
-First, download the linked repository:
+First, download the submodule:
 
 ```powershell
 git submodule update --init --recursive hololens-gaze-lsl/external/liblsl
@@ -18,86 +18,91 @@ Then run:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\hololens-gaze-lsl\build-liblsl-uwp-arm64.ps1 -Config Release
 ```
 
-The build creates:
+This makes:
 
 ```text
 hololens-gaze-lsl/build/liblsl-uwp-arm64-install/bin/lsl.dll
 hololens-gaze-lsl/build/liblsl-uwp-arm64-install/lib/lsl.lib
 ```
 
-Both files come from `liblsl` release `v1.16.2`.
+Both come from `liblsl` release `v1.16.2`.
 
 ## Set up Unity
 
-1. Add `GazeDataProvider` and `GazeLSLOutlet` to a scene object.
-2. Create or choose a `GazeLSLConfig` asset.
-3. Assign that asset to `GazeLSLOutlet`.
+1. Add `GazeDataProvider` and `GazeLSLOutlet` to an object in the scene.
+2. Make or pick a `GazeLSLConfig` asset.
+3. Give that asset to `GazeLSLOutlet`.
 4. Add the Microsoft Extended Eye Tracking SDK.
 5. Use Microsoft Mixed Reality OpenXR 1.5.1 or later.
 
-The app asks the user for eye-gaze permission. It starts publishing only when the eye tracker supports exactly 90 Hz.
+The app asks the user for permission to track their eyes. It only starts sending once the eye tracker says it can run at exactly 90 Hz.
 
-The tracking work is split between two threads:
+The work is split across two threads:
 
-- A worker drains gaze from the eye-tracking SDK. It steps at 1.25 times the
-  90 Hz nominal rate, because a step sends at most one sample and a queue built
-  during a stall can only shrink if steps outpace the tracker.
-- Unity's main thread converts each reading into the current Unity/OpenXR world at the time when the device captured it.
+- A background worker collects gaze readings from the eye-tracking SDK. It runs
+  1.25 times as often as the tracker's 90 Hz, because each step sends at most one
+  sample, and a backlog built up during a pause can only shrink if steps run
+  faster than the tracker.
+- Unity's main thread moves each reading into the Unity world, using where the headset was at the moment the reading was taken.
 
-This keeps the gaze ray in the same stationary world as the optional Vuforia model-target stream.
+This keeps gaze in the same fixed world as the optional Vuforia stair target stream.
 
 ## Record with Vuforia paused
 
-Keep `VuforiaModelTargetPoseOutlet` enabled and record `HoloLensModelTargetPose`
-alongside gaze. While tracking, the outlet collects a stable 20-pose stair
-reference (within 2 cm and 3 degrees). Press **M** to pause Vuforia after the
-stairs have been acquired. The outlet continues sending that reference with
-`Tracked = 2`, including when recording starts after the pause. Playback can
-then align gaze using the reference stored in the XDF.
+Keep `VuforiaModelTargetPoseOutlet` turned on and record `HoloLensModelTargetPose`
+along with gaze. While it can see the stairs, the outlet builds a steady
+reference from 20 positions that stay within 2 cm and 3 degrees of each other.
+Once the stairs have been found, press **M** to pause Vuforia. The outlet keeps
+sending that reference with `Tracked = 2`, even for recordings started after the
+pause. Playback can then line up gaze using the reference saved in the XDF.
 
-`Tracked = 1` means a live pose, and `0` means invalid (seven NaNs). Ordinary
-tracking loss still sends invalid poses; only deliberately disabling Vuforia
-publishes the frozen reference. If no stable reference exists, pausing leaves
-the samples invalid and logs a warning. Resume tracking to acquire a reference.
-Resuming clears the previous reference; disabling the outlet also clears it.
+`Tracked = 1` means a live position, and `0` means invalid (seven NaNs). Normal
+tracking loss still sends invalid positions; only turning Vuforia off on purpose
+sends the frozen reference. If there is no steady reference yet, pausing leaves
+the samples invalid and logs a warning. Turn tracking back on to get one. Turning
+Vuforia back on, or turning the outlet off, clears the old reference.
 
-Keep the stairs and Unity world unchanged while using a frozen reference.
-Reacquire after moving the stairs or changing/restarting the world. Frozen
-samples have current publication timestamps but are not new measurements, and
-their repeated values do not establish a new zero-error calibration.
+Do not move the stairs or reset the Unity world while using a frozen reference.
+If you do, find the stairs again. Frozen samples carry the current time but are
+not new measurements, and the fact that they never change does not mean the
+calibration is perfect.
 
-## How timestamps are handled
+## How timestamps work
 
-Each eye-tracking reading includes `SystemRelativeTime`. The app treats that value as an opaque monotonic count: it orders readings against each other and locates the device pose at the moment of capture, and it is never turned into a duration. The rate behind it is not the fixed .NET `TimeSpan` rate, and it is not `Stopwatch.Frequency` either -- on this device the same reading read 0.020 s old on the SDK's own clock and 231 s in the future against `Stopwatch`, with the gap widening as the session ran.
+Each eye-tracking reading has a `SystemRelativeTime`. The app only uses it to put readings in order and to look up where the headset was when the reading was taken. It never turns it into seconds, because we do not know how fast it ticks. It is not the standard .NET `TimeSpan` speed, and it is not `Stopwatch.Frequency` either: on this headset, the same reading was 0.020 s old by the SDK's own clock and 231 s in the future by `Stopwatch`, and the gap grew as the session went on.
 
-So every duration on the gaze path is measured on the LSL clock, which each reading already carries as its capture time. The app does not replace capture time with the time when Unity happened to read the sample.
+So every length of time on the gaze path is measured on the LSL clock, which each reading already carries as its capture time. The app never replaces the capture time with the time Unity happened to read the sample.
 
-Each step walks forward from the last accepted capture time, taking up to 32 readings, rather than asking for the reading at the current time. Asking for the reading at "now" returns one reading per call, so a poll that lands late loses every frame in between.
+Instead of asking for the reading at the current time, each step works forward from the last capture time it accepted, taking up to 32 readings. Asking for "now" only gives one reading, so if the ask comes late, every reading in between is lost.
 
-The app drops a reading when its timestamp is:
+The app drops a reading when its time is:
 
 - Missing or not positive.
-- A duplicate of the last reading.
+- The same as the last reading.
 - Earlier than the last reading.
 
-Age is judged only on a reading fetched for the current time, which must be no more than 50 ms old. Once a cursor exists, an old reading means the step is catching up rather than that the tracker stalled.
+Only a reading fetched for the current time is judged on age, and it must be no more than 50 ms old. Once there is a last capture time, an old reading just means the step is catching up, not that the tracker has stalled.
 
-The SDK on this device cannot report that it has no newer reading: its projection of that empty result throws inside the SDK instead of returning nothing, and leaves an object whose finalizer throws again, which crashes the app within seconds if it happens on every step. So the app asks for a newer reading only when one can exist, which is once a frame period has passed since the last capture *and* the tracker has had time to part with it, and stops draining as soon as the cursor reaches the newest published reading. That second term matters: readings arrive about 20 ms after capture against an 11 ms frame period, so without it every step made one further ask that could not be answered. The delay is measured as the freshest age any reading has been offered at, not assumed. If the SDK still fails that way three times since the drain last resumed, the app suspends draining for ten seconds and reads at the current time meanwhile, which takes at most one reading per step and may not keep up with the tracker. The suspension is temporary on purpose: empty results happen while the tracker has nothing newer to give, which is while it is not publishing, and a tracker that starts publishing later would otherwise spend the rest of the session on a fallback that cannot keep up. The first suspension is logged; the count is in the acquisition counters.
+On this headset, the SDK cannot say "there is nothing newer" cleanly. It throws an error inside the SDK instead of returning nothing, and leaves behind an object that throws again later. If that happens on every step, the app crashes within seconds. So the app only asks for a newer reading when one can exist: once one frame has passed since the last capture, *and* the tracker has had time to hand it over. It stops as soon as it has the newest reading.
 
-A read that fails inside the SDK never withholds gaze that is already converted and waiting. The queued sample is published, and the failure is reported once the queue is empty.
+The second part matters. Readings arrive about 20 ms after they are taken, while one frame is about 11 ms, so without it every step would make one more ask that could not be answered. The delay is measured, not guessed: it is the youngest age any reading has been offered at.
 
-The raw and converted queues may hold a normal small batch. If either queue spans more than 500 ms, the app drops the older queued readings and keeps only the newest sample. This creates a time gap instead of sending delayed gaze after the matching Vicon motion. Both numbers are seconds on the LSL clock, so the budget stays above one full drained batch, which spans 355 ms at 90 Hz, and the queue does not discard the readings draining just recovered.
+If the SDK still fails this way three times since catching up last resumed, the app stops catching up for ten seconds and asks for the reading at the current time instead. That takes at most one reading per step and may fall behind the tracker. The pause is short on purpose. The SDK only says "nothing newer" while the tracker has nothing new to give, which is when it is not making readings. A tracker that starts later would otherwise be stuck on the slower method for the rest of the session. The first pause is logged, and the total is in the reading counters.
 
-LSL and LabRecorder still handle clock differences between the HoloLens and the recording computer.
+A read that fails inside the SDK never holds back gaze that is already converted and waiting. The waiting sample is sent, and the failure is only reported once the queue is empty.
 
-## Published stream
+The raw and converted queues can hold a normal small batch. If either queue covers more than 500 ms, the app drops the older readings and keeps only the newest. This leaves a gap in time instead of sending gaze late, after the matching Vicon movement. Both numbers are seconds on the LSL clock, so the limit stays above one full batch (355 ms at 90 Hz) and the queue does not throw away readings the app just caught up on.
 
-`GazeLSLOutlet` creates the LSL stream directly on the HoloLens. It does not send gaze through the desktop bridge.
+LSL and LabRecorder still handle the clock difference between the HoloLens and the recording computer.
 
-If `liblsl.dll` cannot load, or if the LSL stream cannot start, Unity logs an error and gaze publishing stops. There is no fallback relay.
+## The stream
 
-The stream always has 21 values. They describe combined, left-eye, and right-eye origins and directions, plus one valid flag for each ray. HoloLens 2 vergence is not included.
+`GazeLSLOutlet` opens the LSL stream on the HoloLens itself. Gaze does not go through the desktop bridge.
 
-The stream layout stays fixed even when one eye is unavailable. In that case, the values for that eye are marked invalid.
+If `liblsl.dll` cannot load, or the LSL stream cannot start, Unity logs an error and gaze stops being sent. There is no backup route.
+
+The stream always has 21 values: the start point and direction for both eyes combined, the left eye, and the right eye, plus one valid flag for each. HoloLens 2 vergence (where the two eyes meet) is not included.
+
+The layout stays the same even when one eye is not available. That eye's values are just marked invalid.
 
 For the full stream layout and timing rules, see [Behavior that must stay the same](../docs/behavior-contract.md) and [How time and coordinates work](../docs/time-and-coordinate-semantics.md).

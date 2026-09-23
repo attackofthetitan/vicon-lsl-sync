@@ -169,11 +169,11 @@ bool handleContentsEqual(HANDLE handle, const char* expected, std::size_t expect
     return true;
 }
 
-// Open a directory without FILE_SHARE_DELETE. Keeping this handle open for
-// the lifetime of extraction prevents another process from deleting or
-// renaming the extraction root while Expand-Archive is populating it. A
-// same-user process can still race individual child entries; the launcher
-// rejects reparse points and only extracts into a newly-created root.
+// Opens a folder without FILE_SHARE_DELETE. Holding it open while unpacking
+// stops other programs from deleting or renaming the folder while
+// Expand-Archive fills it. A program run by the same user could still swap
+// single items inside it, so the launcher also refuses links (reparse points)
+// and only unpacks into a brand-new folder.
 ScopedHandle openDirectoryNoDelete(const std::filesystem::path& directory) {
     if (directory.empty() || hasReparsePointInAncestors(directory)) {
         return {};
@@ -222,9 +222,9 @@ std::filesystem::path createTempDirectory() {
         }
         if (CreateDirectoryW(candidate.c_str(), nullptr)) {
             if (hasReparsePointInAncestors(candidate)) {
-                // An ancestor changed after the pre-check. Do not follow the
-                // path again for cleanup; leaving an empty random directory is
-                // safer than deleting through a substituted reparse point.
+                // A parent folder changed after we checked it. Do not use the
+                // path again to clean up: leaving an empty folder behind is
+                // safer than deleting through a link someone swapped in.
                 return {};
             }
             return candidate;
@@ -236,10 +236,9 @@ std::filesystem::path createTempDirectory() {
     return {};
 }
 
-// A destination is safe only when neither it nor any existing ancestor is a
-// reparse point. Checking the entire chain matters for TEMP as well as for
-// user-provided --extract paths: a junction higher in the chain could redirect
-// extraction outside the path the user selected.
+// A destination is only safe if neither it nor any parent folder that exists is
+// a link (reparse point). Check every level, for TEMP and --extract paths alike:
+// a junction further up could send the files somewhere the user did not choose.
 bool hasReparsePointInAncestors(const std::filesystem::path& requested) {
     std::error_code absolute_error;
     auto current = std::filesystem::absolute(requested, absolute_error);
@@ -271,10 +270,10 @@ bool removeTreeIfSafe(const std::filesystem::path& path) {
         return !status_error && !std::filesystem::exists(absolute, status_error);
     }
 
-    // Hold the root without delete sharing while enumerating and deleting its
-    // children. This prevents a parent process from swapping the root for a
-    // junction during cleanup. Child-entry races remain contained by the
-    // reparse checks below and never follow a reparse target.
+    // Keep the folder open without delete sharing while listing and deleting
+    // what is inside, so no other program can swap it for a junction during
+    // cleanup. Items swapped inside it are caught by the link checks below,
+    // which never follow a link.
     ScopedHandle root_handle = openDirectoryNoDelete(absolute);
     if (!root_handle.valid()) {
         return false;
@@ -337,9 +336,9 @@ bool removeTreeIfSafe(const std::filesystem::path& path) {
         }
     }
 
-    // The root handle must be closed before removing the root itself. Recheck
-    // the parent immediately; if it is no longer trustworthy, leave the empty
-    // directory in place rather than deleting through a substituted ancestor.
+    // Close the folder before removing it. Check its parent again straight
+    // away; if it can no longer be trusted, leave the empty folder rather than
+    // delete through a swapped-in parent.
     root_handle.reset();
     if (hasReparsePointInAncestors(absolute) || hasReparsePoint(absolute)) {
         return false;
@@ -372,20 +371,21 @@ bool createFreshExtractionDirectory(const std::filesystem::path& requested,
         return false;
     }
 
-    // CreateDirectoryW is the atomic no-stale-content operation. A race that
-    // creates the target after the exists check is treated as failure.
+    // CreateDirectoryW fails if the folder already exists, so a folder it makes
+    // is always empty. If something else made it after our check, that counts
+    // as a failure.
     if (!CreateDirectoryW(absolute.c_str(), nullptr)) {
         return false;
     }
     if (hasReparsePointInAncestors(absolute)) {
-        // An ancestor changed after the pre-check. Avoid any cleanup through
-        // the now-untrusted path.
+        // A parent folder changed after we checked it. Do not clean up through
+        // a path we can no longer trust.
         return false;
     }
     directory_handle = openDirectoryNoDelete(absolute);
     if (!directory_handle.valid()) {
-        // The root was just created, but do not clean it up through a path
-        // whose identity could no longer be trusted.
+        // We just made this folder, but do not clean it up through a path we
+        // can no longer trust.
         return false;
     }
     return true;

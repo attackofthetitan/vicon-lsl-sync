@@ -60,7 +60,7 @@ namespace GazeLSL
 
     public sealed class GazePublisherWorker
     {
-        // Poll faster than the tracker so queued readings drain after a brief delay.
+        // Run faster than the tracker so a backlog can clear after a short delay.
         private const double PublishOversample = 1.25;
 
         private readonly object lifecycleLock = new object();
@@ -125,8 +125,8 @@ namespace GazeLSL
                 try
                 {
 #if ENABLE_WINMD_SUPPORT
-                    // The Extended Eye Tracking SDK is WinRT. Unity's raw worker thread
-                    // must enter an MTA before it touches EyeGazeTracker objects.
+                    // The eye tracking SDK is a Windows Runtime API, so this thread must
+                    // be set to MTA before it touches EyeGazeTracker objects.
                     thread.SetApartmentState(ApartmentState.MTA);
 #endif
                     Volatile.Write(ref running, 1);
@@ -162,8 +162,8 @@ namespace GazeLSL
             signal.Set();
             if (!threadToJoin.Join(timeoutMilliseconds))
             {
-                // The worker may still be inside a provider or outlet call. Retain every
-                // dependency and the stop signal until that call returns.
+                // The worker may still be inside a gaze reader or outlet call. Keep
+                // everything it uses, and the stop signal, until that call returns.
                 return false;
             }
 
@@ -210,8 +210,8 @@ namespace GazeLSL
                         consecutiveProviderFailures = 0;
                         if (!hasSample)
                         {
-                            // Empty polls between tracker readings leave the last
-                            // delivery state unchanged.
+                            // Asking between tracker readings and getting nothing
+                            // does not change the delivery state.
                             Interlocked.Increment(ref providerEmptyCount);
                         }
                     }

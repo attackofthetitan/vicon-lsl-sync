@@ -57,8 +57,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR command_line, int) {
         }
         LocalFree(arguments);
     } else if (command_line != nullptr) {
-        // CommandLineToArgvW should be available on supported Windows, but do
-        // not silently lose --test if argument parsing ever fails.
+        // CommandLineToArgvW should always work on supported Windows, but if it
+        // ever fails, still notice --test instead of quietly dropping it.
         test_mode = std::wstring(command_line).find(L"--test") != std::wstring::npos;
     }
     const auto executable = executablePath();

@@ -54,7 +54,6 @@ std::vector<std::string> channelLabels(lsl::stream_info& info, PreviewStreamRole
     return labels;
 }
 
-// Milliseconds on a clock that never goes backward.
 qint64 steadyNowMs() {
     QElapsedTimer timer;
     timer.start();

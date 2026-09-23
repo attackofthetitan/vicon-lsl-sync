@@ -13,8 +13,8 @@ using vicon_lsl::gui::reconcileDiscoveredStreams;
 using vicon_lsl::gui::selectedStreams;
 using vicon_lsl::gui::visibleStreamCount;
 
-// StreamIdentity::selected defaults to true, so the fixture clears it and each
-// test says for itself which streams the operator chose.
+// StreamIdentity::selected defaults to true, so this helper clears it and each
+// test says which streams the user picked.
 StreamIdentity stream(const QString& name, const QString& source_id) {
     StreamIdentity identity;
     identity.name = name;
@@ -51,8 +51,8 @@ void testStreamInventoryMerge() {
     inventory[0].selected = true;
     inventory[0].required = true;
 
-    // The same stream seen again brings fresh details, but the operator's
-    // record and required choices must survive.
+    // The same stream seen again brings fresh details, but the user's Record
+    // and Required choices must be kept.
     StreamIdentity refreshed = stream("Markers", "a");
     refreshed.channel_count = 12;
     mergeStreamInventory(inventory, {refreshed});
@@ -93,8 +93,8 @@ void testReconcileKeepsChoicesAndFlagsMissingStreams() {
     expect(segments != nullptr && !segments->selected,
            "a newly seen stream is not recorded unless something asks for it");
 
-    // "Unwanted" was known but neither selected nor required, so a discovery
-    // pass that no longer sees it simply drops it.
+    // "Unwanted" was known but neither selected nor required, so a stream
+    // search that no longer sees it simply drops it.
     expect(findStream(reconciled, "Unwanted") == nullptr,
            "an unselected stream that disappeared is dropped");
 }

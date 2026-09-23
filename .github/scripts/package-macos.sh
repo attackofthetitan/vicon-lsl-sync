@@ -3,7 +3,7 @@ set -euo pipefail
 
 artifact_name="$1"
 
-# The rpaths a Mach-O file searches for its @rpath libraries.
+# Lists the folders (rpaths) a program searches for its @rpath libraries.
 rpaths() {
   otool -l "$1" | awk '/cmd LC_RPATH/ { found = 1; next }
     found && $1 == "path" { sub(/^ *path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; found = 0 }'
@@ -35,7 +35,7 @@ fi
 cp -- vicon-lsl-bridge/build/vicon-lsl-bridge package/
 cp -- build-labrecorder/LabRecorderCLI package/
 
-# Package vicon-lsl-bridge-gui as macOS application bundle
+# The desktop app, with Qt copied inside it.
 cp -R -- vicon-lsl-bridge/build/vicon-lsl-bridge-gui.app package/
 "$macdeployqt" package/vicon-lsl-bridge-gui.app -libpath=vicon-lsl-bridge/build/_deps/liblsl-build 2>/dev/null || \
   "$macdeployqt" package/vicon-lsl-bridge-gui.app
@@ -58,7 +58,7 @@ cp -- vicon-lsl-bridge/assets/stair_model/stair_model1.obj \
       vicon-lsl-bridge/assets/stair_model/stair_model1.mtl \
       package/vicon-lsl-bridge-gui.app/Contents/Resources/stair_model/
 
-# Package LabRecorder as macOS application bundle
+# LabRecorder, with Qt copied inside it.
 cp -R -- build-labrecorder/LabRecorder.app package/
 "$macdeployqt" package/LabRecorder.app -libpath=build-labrecorder/_deps/liblsl-build 2>/dev/null || \
   "$macdeployqt" package/LabRecorder.app
@@ -71,7 +71,7 @@ fi
 EOF
 chmod +x package/LabRecorder
 
-# Ensure configuration files and resources are placed correctly
+# Put LabRecorder.cfg where LabRecorder looks for it.
 mkdir -p package/LabRecorder.app/Contents/Resources
 if [[ -f package/LabRecorder.app/Contents/MacOS/LabRecorder.cfg ]]; then
   mv package/LabRecorder.app/Contents/MacOS/LabRecorder.cfg package/LabRecorder.app/Contents/Resources/
@@ -83,7 +83,7 @@ if [[ -f labrecorder/LabRecorder.cfg ]]; then
   fi
 fi
 
-# Gather liblsl shared libraries and frameworks
+# Copy liblsl next to every program that uses it.
 mkdir -p package/Frameworks
 find vicon-lsl-bridge/build -name 'liblsl*.dylib' -exec cp -P {} package/ \; || true
 find vicon-lsl-bridge/build -name 'liblsl*.dylib' -exec cp -P {} package/Frameworks/ \; || true
@@ -104,17 +104,17 @@ if [[ -d package/LabRecorder.app ]]; then
   find build-labrecorder -name 'lsl.framework' -exec cp -R {} package/LabRecorder.app/Contents/Frameworks/ \; || true
 fi
 
-# Verify shared library presence
+# Fail if no liblsl was found.
 find package -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
-# Thin fat binaries to arm64 architecture
+# Keep only the Apple Silicon (arm64) part of any universal binary.
 while IFS= read -r binary; do
   [[ "$(lipo -archs "$binary" 2>/dev/null)" == *" "* ]] || continue
   lipo -thin arm64 "$binary" -output "$binary.arm64"
   mv "$binary.arm64" "$binary"
 done < <(find package -type f \( -perm -u+x -o -name '*.dylib' \))
 
-# Set portable RPATHs on all standalone binaries
+# Let the command-line programs find libraries next to them.
 for bin in package/vicon-lsl-bridge package/LabRecorderCLI; do
   if [[ -f "$bin" ]]; then
     install_name_tool -add_rpath "@executable_path" "$bin" 2>/dev/null || true
@@ -154,14 +154,13 @@ for key in NSDocumentsFolderUsageDescription NSDesktopFolderUsageDescription \
     "$recorder_plist"
 done
 
-# Codesign macOS application bundles
+# Sign everything with an ad hoc signature (no Apple developer ID).
 for app in package/vicon-lsl-bridge-gui.app package/LabRecorder.app; do
   if [[ -d "$app" ]]; then
     codesign --force --deep --sign - "$app"
   fi
 done
 
-# Codesign standalone Mach-O files and frameworks
 if [[ -d package/Frameworks/lsl.framework ]]; then
   codesign --force --deep --sign - package/Frameworks/lsl.framework
 fi
@@ -173,18 +172,16 @@ find package/Frameworks -maxdepth 1 -type f -name 'liblsl*.dylib' -exec codesign
 codesign --force --sign - package/vicon-lsl-bridge
 codesign --force --sign - package/LabRecorderCLI
 
-# Create tar.gz archive from the flat layout
 tar -czf "${artifact_name}.tar.gz" -C package .
 
-# The disk image is arranged for drag installation instead of being a copy of
-# the flat layout. Running the app from the mounted image gives it a different
-# path on every mount, so macOS cannot recognise it between launches and any
-# permission the user grants is asked for again. Dragging the app to
-# /Applications gives it one stable location.
+# The disk image is set up for drag-to-install, not as a copy of the tar.gz
+# layout. An app run from the mounted image has a different path each time, so
+# macOS forgets it between launches and asks for permissions again. Dragging it
+# to /Applications gives it one fixed place.
 #
-# There is one app to drag. LabRecorder and LabRecorderCLI travel inside it, so
-# macOS approves them together with the app instead of blocking the recorder
-# the first time the app starts it, and the app finds them wherever it is put.
+# There is one app to drag. LabRecorder and LabRecorderCLI are inside it, so
+# macOS approves them along with the app instead of blocking the recorder the
+# first time the app starts it, and the app finds them wherever it is put.
 dmg_root=dmg-root
 rm -rf "$dmg_root"
 mkdir -p "$dmg_root"
@@ -203,9 +200,9 @@ ln -s /Applications "$dmg_root/Applications"
 plutil -extract CFBundleShortVersionString raw package/vicon-lsl-bridge-gui.app/Contents/Info.plist \
   > "$dmg_root/.vicon-lsl-bridge-installer"
 
-# Everything that is not an application bundle stays available, but out of the
-# way of the drag target. The launcher wrappers are omitted: they expect the
-# flat layout of the tar.gz and would not resolve here.
+# Everything that is not an app goes in its own folder, out of the way of the
+# app to drag. The small launcher scripts are left out: they expect the tar.gz
+# layout and would not work here.
 mkdir -p "$dmg_root/Command Line Tools"
 for entry in package/*; do
   name="$(basename "$entry")"

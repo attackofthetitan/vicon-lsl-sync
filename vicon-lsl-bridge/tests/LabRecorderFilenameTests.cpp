@@ -21,8 +21,8 @@ void testFilenameCommand() {
                       "{run:2} {acquisition:vicon} {modality:beh}",
            "formats and sanitizes filename command");
 
-    // Exercise the actual recorder's legacy semantics: template/modality are
-    // lowercased, %r is unavailable, and %n is padded to three digits.
+    // Copy what LabRecorder itself does: it lowercases the template and
+    // modality, has no %r, and pads %n to three digits.
     for (const QString& run : {QString("1"), QString("007")}) {
         fields.root = "/tmp/Study Root";
         fields.templ = "Upper/sub-%p/ses-%s/%m/Task-%b_Run-%r_Legacy-%n.xdf";

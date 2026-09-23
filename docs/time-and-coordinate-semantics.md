@@ -1,65 +1,65 @@
 # How time and coordinates work
 
-## Why this guide exists
+## What this guide is for
 
-Time and coordinate changes can make streams look valid while placing samples at the wrong moment or in the wrong place. This guide records the current formulas, units, backup rules, and alignment steps.
+A mistake with time or coordinates can leave a stream looking fine while its samples sit at the wrong moment or in the wrong place. This guide writes down the formulas, units, fallbacks, and alignment steps the code uses today.
 
-Changing a formula or metadata value here is a behavior change. Review it separately from code cleanup.
+Changing a formula or stream detail here changes behavior. Review it separately from any code tidy-up.
 
-## Time terms
+## Time words
 
-| Term | Meaning in this project |
+| Word | What it means here |
 | --- | --- |
-| LSL local clock | The steady timer returned by `lsl::local_clock()` or `LSL.LSL.local_clock()` on the computer or device that sends the stream |
-| Vicon receipt time | The desktop LSL clock read just after a successful `GetFrame()` |
-| Vicon pipeline delay | `GetLatencyTotal().Total`; Vicon's estimate of processing delay, not network delay or an exact hardware capture time |
-| HoloLens system-relative time | `SystemRelativeTime.Ticks` from the gaze reading, treated here as an opaque monotonic count whose rate is not established for this runtime |
-| Gaze publication delay | How long after capturing a reading the eye-tracking SDK will part with it, measured as the freshest age any reading has been offered at |
-| Corrected live time | A live input timestamp after LSL corrects the clock difference between computers |
-| XDF stream time | The time written by the source before the recorder's saved clock correction |
-| XDF recorder time | Stream time plus the fitted clock correction saved in XDF |
-| Playback time | Corrected time from the chosen main stream, starting at zero |
+| LSL local clock | The steady clock from `lsl::local_clock()` or `LSL.LSL.local_clock()` on the computer or headset sending the stream |
+| Vicon receipt time | The desktop's LSL clock, read just after `GetFrame()` succeeds |
+| Vicon processing delay | `GetLatencyTotal().Total`: Vicon's guess at how long it took to process the frame. It does not include network delay and is not an exact capture time |
+| HoloLens system-relative time | `SystemRelativeTime.Ticks` from a gaze reading. We only use it to put readings in order, because we do not know how fast it ticks on this device |
+| Gaze delivery delay | How long after capturing a reading the eye-tracking SDK hands it over, measured as the youngest age any reading has been offered at |
+| Corrected live time | A live sample's time after LSL corrects for the clock difference between computers |
+| XDF stream time | The time the sender wrote, before the recorder's saved clock correction |
+| XDF recorder time | Stream time plus the clock correction saved in the XDF |
+| Playback time | Corrected time of the main stream, starting at zero |
 
 ## Vicon timestamps
 
-### Choose a candidate time
+### Pick a time
 
-After a successful Vicon `GetFrame()`:
+After Vicon's `GetFrame()` succeeds:
 
-1. Read `receipt = lsl::local_clock()` at once.
+1. Read `receipt = lsl::local_clock()` straight away.
 2. Read `GetLatencyTotal()`.
-3. If the delay read succeeds and the value is finite and not negative, use:
+3. If that works and the value is finite and not negative, use:
 
    `candidate = receipt - latency_seconds`
 
-4. If the delay is invalid, negative, not finite, or makes a non-finite result, use:
+4. If the delay is missing, negative, not finite, or gives a result that is not finite, use:
 
    `candidate = receipt`
 
-5. If `receipt` is not finite, the candidate is `NaN`. The next step can recover only when its separate backup receipt is finite.
+5. If `receipt` itself is not finite, the candidate is `NaN`. The next step can only rescue it if its own backup receipt time is finite.
 
-This is only an estimate of acquisition time. It does not include `ServerPush` transport or network delay. Do not describe it as an exact capture timestamp.
+This is only a best guess at when Vicon captured the frame. It leaves out the time the data spent on the network. Do not call it an exact capture time.
 
 ### Keep time moving forward
 
 `enforceViconTimestamp` follows these rules:
 
-1. If the candidate is not finite, replace it with the supplied receipt time.
-2. If the result is still not finite, reject the frame.
-3. If there is no earlier timestamp, accept it.
-4. If the new value is equal to or earlier than the last value:
-   - Use a finite receipt time when it is later than the last value.
-   - Otherwise, use the next possible floating-point number after the last value with `nextafter(previous, +infinity)`.
-5. Reject the frame only if the repaired value is not finite.
-6. Save the accepted value and report whether it needed repair.
+1. If the candidate is not finite, use the receipt time instead.
+2. If that is still not finite, drop the frame.
+3. If there is no earlier time, accept it.
+4. If the new time is the same as or earlier than the last one:
+   - Use the receipt time if it is finite and later than the last one.
+   - Otherwise, use the smallest possible step after the last one, `nextafter(previous, +infinity)`.
+5. Drop the frame only if the fixed time is not finite.
+6. Save the accepted time and report whether it had to be fixed.
 
-The timestamp state stays outside the reconnect loop. The Vicon source IDs also stay the same. Together, these rules stop time from moving backward when LabRecorder joins a recreated stream to its earlier copy.
+The timestamp record lives outside the reconnect loop, and the Vicon source IDs stay the same. Together, these stop time from going backward when LabRecorder joins a reopened stream onto its earlier copy.
 
-### Keep markers and segments together
+### Markers and segments share a time
 
-Marker and segment samples from one Vicon frame use the same accepted timestamp. Individual objects do not get separate times. A hidden or failed object keeps the frame time but uses an invalid fixed-size value.
+Marker and segment samples from the same Vicon frame use the same accepted time. Single objects never get their own times. A hidden or failed object keeps the frame's time but sends a fixed-size "missing" value.
 
-### Vicon time metadata
+### Vicon time details
 
 Both Vicon streams use these exact values:
 
@@ -71,168 +71,172 @@ Both Vicon streams use these exact values:
 - `timestamp_accuracy = acquisition_estimate_not_capture_accurate`
 - `synchronization/timestamp_origin = local_receipt_minus_valid_vicon_pipeline_latency`
 
-Keep the code, emitted LSL metadata, and documentation in agreement.
+Keep the code, the stream details it sends, and this guide in step.
 
 ## HoloLens gaze timestamps
 
-### Convert the device time
+### The headset's own time value
 
-`EyeGazeTrackerReading.SystemRelativeTime.Ticks` is an opaque monotonic count.
-Its rate is not established for this runtime, so it is never converted to a
-duration. It has exactly two uses:
+`EyeGazeTrackerReading.SystemRelativeTime.Ticks` is a count that only goes up.
+We do not know how fast it ticks on this device, so it is never turned into
+seconds. It has exactly two uses:
 
-- ordering readings against each other, and standing as the drain cursor;
-- the argument `SpatialGraphNode.TryLocate` expects, where the SDK defines the
+- putting readings in order, and marking the last reading taken;
+- as the value `SpatialGraphNode.TryLocate` expects, where the SDK sets the
   unit on both sides.
 
-Every duration on the gaze path -- the queue span budget, the delivered-rate
-estimate, the publication delay, a reading's age -- is taken in the LSL clock
-domain instead, which every reading already carries as `GazeSample.Timestamp`.
-Do not divide those ticks by `Stopwatch.Frequency`, and do not use
+Every length of time on the gaze path (the queue's time limit, the measured
+rate, the delivery delay, how old a reading is) is measured on the LSL clock
+instead. Each reading already carries that time as `GazeSample.Timestamp`. Do
+not divide those ticks by `Stopwatch.Frequency`, and do not use
 `TimeSpan.TicksPerSecond`.
 
-The published capture time is not derived from them. Each acquisition reads
-`DateTime.Now` and `LSL.local_clock()` once as a pair, and every reading it takes
-keeps its own time from the age the SDK reports for it:
+The capture time we publish does not come from those ticks either. Each time the
+app asks for readings, it reads `DateTime.Now` and `LSL.local_clock()` once,
+together. Every reading it gets then works out its own time from how old the SDK
+says it is:
 
 `lsl_timestamp_seconds = query_lsl_clock - (query_time - reading.Timestamp)`
 
-Do not replace that with Unity frame time, or with `LSL.local_clock()` read at the
-moment the sample is published.
+Do not replace this with Unity's frame time, or with `LSL.local_clock()` read at
+the moment the sample is sent.
 
-### Ask for a current reading
+### Getting every reading
 
-The publishing side does not ask for the reading at the current time. Asking for
-the reading at "now" returns exactly one reading per call, so a poll that lands
-more than one tracker frame after the previous one loses every frame in between.
-The publishing step runs at the same rate the tracker publishes, so ordinary
-thread jitter was enough to drop about one reading in six.
+The publisher does not simply ask for the reading at the current time. Asking
+for "now" gives back exactly one reading, so if the ask comes more than one
+tracker frame after the last, every frame in between is lost. The publisher
+runs at the same speed the tracker makes readings, so normal timing jitter was
+enough to lose about one reading in six.
 
-Instead each step drains forward from the last accepted capture time:
+Instead, each step works forward from the last capture time it accepted:
 
 `TryGetReadingAfterSystemRelativeTime(TimeSpan.FromTicks(last_accepted_ticks))`
 
-The step repeats until the SDK has no newer reading, or until it has taken 32
-readings. Capture rate is then independent of how punctually the step runs.
+It keeps going until the SDK has nothing newer, or until it has taken 32
+readings. That way, how many readings we capture does not depend on the step
+running on time.
 
-On this device the SDK cannot report "no newer reading". Its projection marshals
-that empty result without checking it, so the ordinary end of a drain arrives as a
-`NullReferenceException` thrown inside the SDK, and leaves behind an object whose
-finalizer throws again on the GC thread. One of those per publishing step crashes
-the app within seconds. So the drain never asks for a reading that should not
-exist yet:
+On this device, the SDK cannot say "nothing newer" cleanly. Its C# wrapper does
+not check for that empty result, so the normal end of a catch-up shows up as a
+`NullReferenceException` thrown inside the SDK. It also leaves behind an object
+that throws again later, when .NET cleans it up. One of those per step crashes
+the app within seconds. So the app never asks for a reading that cannot exist
+yet:
 
-- It does not ask at all until a frame period **plus the publication delay** has
+- It does not ask at all until one frame period **plus the delivery delay** has
   passed since the last accepted capture time.
-- It stops after any reading that brings the cursor back to the newest reading the
-  tracker has published, because the step has then caught up.
+- It stops as soon as a reading brings it up to the newest reading the tracker
+  has made, because it has then caught up.
 
-Both tests are made on capture times in LSL seconds. The publication delay is the
-term the frame period alone got wrong. A reading does not become available at the
-instant it is captured: on this device it arrives about 20 ms later, against an
-11 ms frame period. So a reading the drain had just taken was always older than a
-frame period already, and the test permitted one further ask on every step -- the
-ask that cannot be answered. Measured over a session, that was 2428 failures
-against 2184 readings: one thrown, leaked SDK object per drain step.
+Both checks compare capture times in LSL seconds. The delivery delay is the part
+the frame period alone got wrong. A reading is not ready the instant it is
+captured: on this device it arrives about 20 ms later, while one frame is about
+11 ms. So a reading the app had just taken was always already older than one
+frame, and the check let through one more ask on every step, and that ask could
+never be answered. Over one session, that was 2428 failures against 2184
+readings: one thrown, leaked SDK object per step.
 
-The delay is measured, not assumed: it is the freshest age any reading has been
-offered at in this tracker session. A minimum, because a reading recovered by a
-drain that is catching up is arbitrarily old and says nothing about how quickly
-the tracker parts with a new one. Until a reading has been seen it is zero, which
-only makes the drain ask as eagerly as it did before the delay was measured.
+The delay is measured, not assumed. It is the youngest age any reading has been
+offered at in this tracker session. It uses the smallest value because a reading
+picked up while catching up can be any age, and says nothing about how fast the
+tracker hands over a new one. Before any reading has been seen, the delay is
+zero, which just makes the app ask as often as it did before the delay was
+measured.
 
-The tests remove the request in the ordinary case but cannot remove it while the
-tracker is publishing slower than its nominal rate, so the failure is also caught
-where it is raised and counted. Three since the drain last resumed suspend it for
-ten seconds, and acquisition reads at the current time meanwhile, taking at most
-one reading per step.
+These checks stop the bad ask in the normal case, but not while the tracker is
+making readings slower than its set rate. So the failure is also caught and
+counted where it happens. After three of them since catching up last resumed,
+catching up pauses for ten seconds. In the meantime the app asks for the reading
+at the current time, taking at most one reading per step.
 
-The suspension is not permanent, and that matters. Empty results happen exactly
-while the tracker has nothing newer to give, which is while it is not publishing;
-a tracker that starts publishing a minute later would otherwise spend the whole
-session on a fallback that cannot keep up with it.
+The pause is not permanent, and that matters. The SDK only says "nothing newer"
+while the tracker has nothing new to give, which is while it is not making
+readings. A tracker that starts a minute later would otherwise be stuck for the
+whole session on a fallback that cannot keep up.
 
-The budget runs to the next suspension, not to the next reading. A drain that
-reads one reading and then fails never accumulates two failures in a row, so
-counting consecutively kept a drain that was failing on every step alive for a
-whole session: thousands of leaked objects against eleven suspensions. A clean
-`null` return is ordinary and never counted, so a runtime whose projection is
-correct keeps the drain throughout.
+The count runs until the next pause, not until the next good reading. If a
+catch-up gets one reading and then fails, it never has two failures in a row.
+So counting only failures in a row let a catch-up that failed on every step run
+for a whole session: thousands of leaked objects and only eleven pauses. A clean
+`null` answer is normal and never counted, so on a version of the SDK that works
+properly, catching up is never paused.
 
-The first step of a tracker session has no cursor, so it seeds one from
-`TryGetReadingAtTimestamp(now)`. That reading is the only one judged on age, and
-the age is `query_time - reading.Timestamp`: both wall-clock values the SDK
-reports, so no assumption about the device timer enters into it.
+The first step of a tracker session has no last capture time yet, so it gets one
+from `TryGetReadingAtTimestamp(now)`. That reading is the only one judged on age.
+Its age is `query_time - reading.Timestamp`. Both of those are wall-clock values
+the SDK gives us, so no guess about the headset's own timer is involved.
 
-- The age is finite.
-- Its size is no more than 50 ms, in either direction. The tolerance is symmetric
-  because the reading returned for "now" can be captured a frame either side of
-  the query.
+- The age must be finite.
+- It must be no more than 50 ms either way. It can go either way because the
+  reading for "now" can be captured one frame before or after the ask.
 
-Do not take that age by comparing `SystemRelativeTime.Ticks` against
-`Stopwatch.GetTimestamp()`. The two do not share an epoch, and the device has now
-shown they do not share a rate either:
+Do not work out that age by comparing `SystemRelativeTime.Ticks` with
+`Stopwatch.GetTimestamp()`. The two do not start from the same point, and the
+headset has now shown that they do not tick at the same speed either:
 
-- A reading whose own timestamp said it was 0.022 s old measured -7862.129 s
-  against the device timer, about 2.2 hours in the future. A build that made that
-  comparison rejected every reading the tracker offered, on a device that was
-  offering one to every single call.
-- In a later session the same reading pair read 0.020 s and -231.332 s, and two
-  seconds of wall time later, 0.021 s and -233.588 s. A fixed epoch offset would
-  have held still.
-- Across both sessions the offset is about 0.92 s of "future" per second the
-  device had been up, which is what a rate mismatch produces and an epoch offset
-  does not.
+- A reading whose own time said it was 0.022 s old measured -7862.129 s against
+  the headset timer, about 2.2 hours in the future. A build that made that
+  comparison threw away every reading the tracker offered, on a headset that was
+  offering one on every ask.
+- In a later session, the same pair read 0.020 s and -231.332 s, and two seconds
+  later, 0.021 s and -233.588 s. If only the starting point were different, the
+  gap would have stayed the same.
+- In both sessions, the gap grows by about 0.92 s of "future" for every second
+  the headset has been on. That is what a speed difference looks like, not a
+  different starting point.
 
-Differences between two `SystemRelativeTime` values still order readings
-correctly. They are not durations, because turning one into seconds needs the
-rate. So the queue span budget and the delivered-rate estimate are measured on
-LSL capture times instead.
+The difference between two `SystemRelativeTime` values still puts readings in
+the right order. It is not a length of time, because turning it into seconds
+needs the tick speed. So the queue's time limit and the measured rate use LSL
+capture times instead.
 
-Once a cursor exists, a reading being old means the step is catching up, not that
-the tracker has stalled, so age is not a reason to drop it.
+Once there is a last capture time, an old reading means the step is catching up,
+not that the tracker has stalled, so age is not a reason to drop it.
 
-`GazeReadingGate` then accepts only a timestamp later than the last accepted timestamp in the same tracker session. It drops duplicates and earlier values. Its last accepted timestamp is the drain cursor, so a rejected reading also ends the drain rather than being requested again. The gate resets when the tracker session changes.
+`GazeReadingGate` then only accepts a time later than the last one it accepted in the same tracker session. It drops repeats and earlier times. The last time it accepted is also where catching up starts from, so a refused reading also ends the catch-up instead of being asked for again. The gate resets when the tracker session changes.
 
-### Limit queued data
+### Queue limits
 
-The raw queue and the world-space queue each allow at most 360 items and at most 500 ms between oldest and newest capture times.
+The raw queue and the converted queue each hold at most 360 items, and at most 500 ms between the oldest and newest capture times.
 
-A drained batch is several readings wide, so the span budget has to stay above a
-full batch or the queue policy would discard exactly the readings draining
-recovers. At 90 Hz a full 32-reading batch already spans 355 ms; the budget
-exists only to bound staleness after a real stall. Both numbers are in seconds on
-the LSL clock, so the comparison means what it reads as -- a budget derived from
-`Stopwatch.Frequency` and compared against SDK ticks was some other duration
-entirely, and could fall below one batch.
+One catch-up can return several readings at once, so the time limit has to be
+bigger than a full batch. Otherwise the queue would throw away exactly the
+readings the catch-up just recovered. At 90 Hz, a full batch of 32 readings
+already covers 355 ms. The limit only exists to stop the data getting too old
+after a real stall. Both numbers are seconds on the LSL clock, so the comparison
+means what it says. An older version worked out the limit from
+`Stopwatch.Frequency` and compared it with SDK ticks, so it was really some
+other length of time and could end up shorter than one batch.
 
 When adding an item:
 
-1. Remove oldest items while the queue already has 360 items.
-2. If the new item makes the time span greater than 500 ms, or leaves it unusable, clear the queue. A span a hair below zero is ordinary jitter between the two wall clocks behind a capture time and is within budget; a tracker session that could restart the clock outright clears both queues itself.
+1. While the queue already has 360 items, remove the oldest.
+2. If the new item makes the time between oldest and newest more than 500 ms, or makes it impossible to work out, empty the queue. A span just below zero is normal jitter between the two clocks behind a capture time and is fine. A new tracker session, which could reset the clock completely, empties both queues itself.
 3. Add the new item.
 
-Before sending a world-space sample, reduce an over-limit queue to its newest item.
+Before sending a converted sample, if the queue is over its limit, keep only the newest item.
 
-This creates a clear timestamp gap during overload. Do not replay old samples, fill in missing samples, or give old samples a new current time.
+This leaves a clear gap in time when the app falls behind. Do not replay old samples, fill in missing ones, or give old samples a new time.
 
-### Publishing schedule and errors
+### Sending schedule and errors
 
-A publishing step sends at most one queued sample, so steps run at 1.25 times the
-declared rate. Without that margin a queue built up while the main thread was
-stalled can never shrink, because samples arrive as fast as they leave; the
-latency would be permanent and would accumulate across stalls until the span
-budget dumped the queue. A step that finds nothing sends nothing. The margin
-paces the worker only and does not change the rate declared on the stream.
+Each step sends at most one waiting sample, so steps run at 1.25 times the
+declared rate. Without that margin, a queue that built up while Unity's main
+thread was stuck could never shrink, because samples would arrive as fast as they
+leave. The delay would never go away and would add up over each stall until the
+queue's time limit threw it all away. A step that finds nothing sends nothing.
+The margin only changes how often the worker runs, not the rate declared on the
+stream.
 
-- The worker schedules one step every `1000 / nominal_rate` ms. The current rate is exactly 90 Hz.
-- After a missed schedule, move to the next interval from the current time. Do not run an unlimited catch-up loop.
-- Send a finite, positive `GazeSample.Timestamp` to `push_sample` without changing it.
-- Drop a sample with a bad time, but continue the schedule.
-- A provider exception does not create a sample time.
-- Retry brief provider errors. Restart the tracker after back-to-back errors last about one expected second.
+- The worker runs one step every `1000 / nominal_rate` ms. The rate is exactly 90 Hz.
+- After missing a step, move on to the next one from the current time. Do not try to catch up on every missed step.
+- Pass a finite, positive `GazeSample.Timestamp` to `push_sample` unchanged.
+- Drop a sample with a bad time, but keep to the schedule.
+- An error from the gaze reader never creates a sample time.
+- Retry short gaze reader errors. Restart the tracker after about one second of errors in a row.
 
-### Gaze time metadata
+### Gaze time details
 
 The gaze stream uses:
 
@@ -246,11 +250,11 @@ The gaze stream uses:
 - `timestamp_mapping = query_lsl_clock_minus_query_to_capture_age`
 - `backlog_policy = drop_when_capture_span_exceeds_500ms_retain_latest`
 
-This assumes the SDK's reading timestamp and `LSL.local_clock()` on the device stay in step across the pairing. Repeat the hardware checks after changing Windows runtime, Unity, OpenXR, or liblsl versions.
+This assumes the SDK's reading time and `LSL.local_clock()` on the headset stay in step between the two reads. Run the hardware tests again after changing the Windows, Unity, OpenXR, or liblsl version.
 
-## HoloLens target timestamps
+## HoloLens stair target timestamps
 
-The Vuforia target output reads `LSL.local_clock()` in `LateUpdate`, just before it reads, encodes, and sends the current target pose.
+The Vuforia target output reads `LSL.local_clock()` in `LateUpdate`, just before it reads, packs, and sends the current target position.
 
 It uses:
 
@@ -258,16 +262,16 @@ It uses:
 - `clock_domain = lsl_local_clock`
 - `synchronization/timestamp_origin = local_clock_at_pose_publication`
 
-The target has no SDK capture time and uses an irregular rate. Gaze and target share one clock, but the target time is less precise about the true capture moment.
+The target has no capture time from the SDK and has an irregular rate. Gaze and target share one clock, but the target's time is less exact about when the position was really captured.
 
-While Vuforia is deliberately disabled, target samples carry the last stable
-stair reference with `Tracked = 2`. Their timestamps describe current reference
-publication, not the time of a new optical pose measurement. Live tracked samples
-use 1; invalid samples use 0 and seven NaNs. The reference is built from 20 stable
-poses before the pause and is cleared on resume or outlet disable. This lets a
-recording begun after calibration reconstruct spatial alignment without keeping
-Vuforia active. The physical stairs and shared Unity world must remain unchanged.
-Ordinary tracking loss never publishes a frozen reference automatically.
+While Vuforia is turned off on purpose, target samples carry the last steady
+stair reference with `Tracked = 2`. Their times say when the reference was sent,
+not when a new position was measured. Live tracked samples use 1. Invalid
+samples use 0 and seven NaNs. The reference is built from 20 steady positions
+taken before the pause, and is cleared when Vuforia is turned back on or the
+outlet is turned off. This lets a recording started after calibration still be
+lined up without keeping Vuforia running. The real stairs and the Unity world
+must not change. Normal tracking loss never sends a frozen reference by itself.
 
 ## Live preview time
 
@@ -277,67 +281,67 @@ Every live LSL input calls:
 
 `set_postprocessing(lsl::post_clocksync)`
 
-`pull_sample` therefore returns times corrected to the preview computer's local clock. Do not apply the XDF clock fitting rules to live data.
+So `pull_sample` returns times already corrected to the preview computer's clock. Do not also apply the XDF clock correction rules to live data.
 
-### Read and mark fresh data
+### Read data and mark it fresh
 
-- Read at most 16 ready samples from each stream in one pass and keep the newest.
-- Keep a stream fresh for 500 ms after its latest read.
-- Treat connection, sample presence, and freshness as separate states.
+- Read at most 16 waiting samples from each stream at a time and keep the newest.
+- A stream stays fresh for 500 ms after its latest sample.
+- Being connected, having a sample, and being fresh are three separate things.
 
 ### Build one preview frame
 
-The default matching limit is 50 ms, and users may change it.
+The default matching limit is 50 ms. Users can change it.
 
 When a marker sample arrives:
 
 - Use its time for the frame.
-- Always parse its marker data.
-- Include segment and gaze data only when the stream is fresh and:
+- Always read its marker data.
+- Add segment and gaze data only when that stream is fresh and:
 
   `abs(marker_time - other_time) <= tolerance`
 
-When no marker arrives but segment or gaze updates:
+When there is no new marker, but segment or gaze data is new:
 
-- If both update and are fresh, use the later time.
-- Otherwise, use the time from the one fresh stream that updated.
-- Include a stream only when its latest time is within the limit of that chosen time.
+- If both are new and fresh, use the later time.
+- Otherwise, use the time of the one fresh stream that is new.
+- Only add a stream if its latest time is within the limit of the chosen time.
 
-This is a nearest-current visual match. It does not create new samples between real samples.
+This is a "closest current sample" match for display. It never makes up samples between real ones.
 
 ### Show the live rate
 
-The preview measures rate from corrected sample times over a two-second window:
+The preview works out the rate from corrected sample times over a two-second window:
 
-- Ignore non-finite and exact duplicate times.
-- If time moves backward, clear the window before adding the new time.
-- Keep the newest sample at or before the window start so small timing changes do not shorten the full window.
+- Ignore times that are not finite, and exact repeats.
+- If time goes backward, empty the window before adding the new time.
+- Keep the newest sample at or before the start of the window, so small timing wobbles do not shorten the window.
 - Do not show a rate until at least two samples cover two seconds.
-- Calculate `(sample_count - 1) / elapsed_seconds`.
-- Mark gaze as low only after a full window and only below 80% of a positive, finite expected rate.
-- Do not keep showing an old rate after the stream becomes stale.
+- Work out `(sample_count - 1) / elapsed_seconds`.
+- Only mark gaze as low after a full window, and only when it is below 80% of a positive, finite expected rate.
+- Stop showing the last rate once the stream is out of date.
 
-For a 90 Hz gaze stream, the current low-rate line is 72 Hz.
+For a 90 Hz gaze stream, "low" means below 72 Hz.
 
 ## XDF preview time
 
 ### Read sample times
 
-- An explicit time may use a 32-bit or 64-bit floating-point value.
+- A time can be stored as a 32-bit or 64-bit decimal number.
 - A missing time becomes `previous + 1 / nominal_srate`.
-- A missing time is an error when there is no previous time or the expected rate is not positive and finite.
-- A non-finite sample time is an error.
+- A missing time is an error if there is no earlier time or the expected rate is not positive and finite.
+- A sample time that is not finite is an error.
 
-### Fit saved clock corrections
+### Work out the saved clock corrections
 
-Each XDF clock-offset record contains:
+Each XDF clock correction record holds:
 
-- The measurement time in the source stream's clock.
-- The amount to add to reach recorder time.
+- When it was measured, on the sending stream's clock.
+- How much to add to get to the recorder's clock.
 
-Sort these measurements by stream time. Reject two measurements with the same time.
+Sort these by stream time. Two with the same time are an error.
 
-Fit a straight line around the center of the values:
+Fit a straight line through them, centred on their middle:
 
 `offset(t) = offset_center + slope * (t - stream_center)`
 
@@ -345,242 +349,244 @@ Then apply:
 
 `corrected_time = stream_time + offset(stream_time)`
 
-With one measurement, or when all measurement times are the same, use slope zero and a constant correction.
+With only one record, or when all records have the same time, the slope is zero and the correction is the same everywhere.
 
-### Repair time that moves backward
+### Fix times that go backward
 
-After correction, keep sample order and force times to increase:
+After correcting, keep samples in order and make times always go up:
 
 1. Keep a running shift.
-2. Add that shift to the next corrected time.
-3. If the result is equal to or earlier than the last output, replace it with `nextafter(previous, +infinity)`.
-4. Add the repair amount to the running shift so later samples keep their spacing from the repaired line.
+2. Add the shift to the next corrected time.
+3. If the result is the same as or earlier than the last one, use `nextafter(previous, +infinity)` instead.
+4. Add the size of that fix to the running shift, so later samples keep their spacing from the fixed one.
 
-Count repaired values and include the count in the recording summary.
+Count the fixed values and show the count in the recording summary.
 
 ### Choose the main stream and playback time
 
-Choose the first usable stream in this order:
+Pick the first usable stream in this order:
 
-1. `ViconMarkers` role.
-2. `ViconSegments` role.
-3. Any numeric stream with `Vicon` in its name, ignoring letter case.
-4. `HoloLensGaze` role.
-5. Any numeric stream.
+1. The `ViconMarkers` role.
+2. The `ViconSegments` role.
+3. Any number stream with `Vicon` in its name, in any letter case.
+4. The `HoloLensGaze` role.
+5. Any number stream.
 
-For every main-stream time, use binary search to find the closest sample from another stream. Check both the first sample at or after that time and the sample just before it. Accept the closest only when it is within the chosen time limit.
+For each main stream time, use a binary search to find the closest sample in each other stream. Look at both the first sample at or after that time and the one just before it. Only accept the closer one if it is within the chosen time limit.
 
-Keep corrected full times in `XdfStreamData.timestamps` for matching. Show each frame at:
+Keep the full corrected times in `XdfStreamData.timestamps` for matching. Show each frame at:
 
 `master_absolute_time - first_master_absolute_time`
 
-Playback therefore starts at zero while matching still uses the full corrected times.
+So playback starts at zero, while matching still uses the full corrected times.
 
-The XDF path applies saved clock correction itself. It must not also use live LSL clock correction.
+XDF playback applies the saved clock correction itself. It must not also use LSL's live clock correction.
 
 ## Merged CSV time
 
 For each row:
 
-1. Use finite `relative_time` when present.
-2. Otherwise, use `lsl_time - first_finite_lsl_time` when `lsl_time` is finite.
-3. Otherwise, use the output row number starting at zero.
+1. Use `relative_time` if it is there and finite.
+2. Otherwise, use `lsl_time - first_finite_lsl_time` if `lsl_time` is finite.
+3. Otherwise, use the row number, starting at zero.
 
-The CSV reader does not fit clock differences or match separate streams. It assumes the rows were already merged.
+The CSV reader does not correct clocks or match separate streams. It expects the rows to be merged already.
 
-## Coordinate terms
+## Coordinate words
 
-| Space | Units and direction rules |
+| Space | Units and directions |
 | --- | --- |
-| Vicon stream | Global Vicon positions in millimetres; segment rotation in the order sent by the SDK |
-| Unity world | Unity scene coordinates, which use a left-handed system |
-| Eye-tracker ray | A ray from Extended Eye Tracking, described in code as right-handed |
-| Published HoloLens shared world | The Unity world reflected into a right-handed system, in metres, named `hololens_stationary_shared_with_gaze` |
-| Old tracker space | `eye_tracker_space`; it lacks the changing pose needed for stair alignment |
-| Preview display | One metre-scale scene after the fixed Vicon scale and, when one exists, the solved HoloLens transform |
+| Vicon stream | Vicon's room positions in millimetres; segment rotation as the SDK sends it |
+| Unity world | Unity's scene coordinates, which are left-handed |
+| Eye-tracker ray | A ray from Extended Eye Tracking, which the code treats as right-handed |
+| Published HoloLens shared world | The Unity world flipped to be right-handed, in metres, named `hololens_stationary_shared_with_gaze` |
+| Old tracker space | `eye_tracker_space`; it does not record where the headset was, so it cannot be lined up with the stairs |
+| Preview display | One metre-based scene, after the fixed Vicon scale and, if there is one, the HoloLens alignment |
+
+"Left-handed" and "right-handed" describe which way the Z axis points compared with X and Y. Moving between them means flipping one axis.
 
 ## Show Vicon data in the preview
 
 The default Vicon preview scale is `0.001`. A position `(x, y, z)` in millimetres becomes `(0.001x, 0.001y, 0.001z)` in metres.
 
-Marker and segment positions then use this order:
+Marker and segment positions then go through these steps in order:
 
-1. Apply the sign chosen for each input axis.
-2. Apply one scale.
-3. Apply the enabled four-number rotation, called a quaternion. Otherwise, apply Euler X, then Y, then Z rotation.
-4. Add translation.
+1. Flip each axis if its sign setting says so.
+2. Scale.
+3. Rotate: use the four-number rotation (a quaternion) if it is turned on, or otherwise rotate around X, then Y, then Z.
+4. Move by the translation.
 
-The preview currently copies segment quaternion values directly from the LSL sample. It does not combine them with the position transform. Because the default profile only scales positions, the Vicon orientation stays unchanged. Changing this is a coordinate behavior change.
+The preview copies segment rotation values straight from the LSL sample. It does not combine them with the position steps above. Because the default setup only scales positions, Vicon rotations are shown unchanged. Changing this would change coordinate behavior.
 
-## Convert HoloLens gaze on the device
+## Move HoloLens gaze into the world on the headset
 
 For each usable eye ray:
 
-1. Check that origin, direction, poses, and rotations are finite and usable. Check that direction is not zero.
-2. Reflect origin and direction across Z to move from tracker coordinates into Unity tracker coordinates:
+1. Check that the origin, direction, headset positions, and rotations are finite and usable, and that the direction is not zero.
+2. Flip the origin and direction's Z to go from tracker coordinates to Unity's tracker coordinates:
 
    `F(x, y, z) = (x, y, -z)`
 
 3. Rotate by the `playspaceFromTracker` rotation and add its position to the origin.
-4. Apply the Unity world/playspace scale to each component.
+4. Apply the Unity world scale to each part.
 5. Rotate by `worldFromPlayspace` and add its position to the origin.
-6. Normalize the direction after scale and world rotation.
-7. Reflect origin and direction across Z again to publish the right-handed world shared with the target.
-8. Normalize the final direction.
+6. Rescale the direction to length 1 after scaling and rotating.
+7. Flip Z again on the origin and direction, to publish in the right-handed world shared with the target.
+8. Rescale the final direction to length 1.
 
-Find the device pose at the original gaze capture time. Using the current Unity frame time would change behavior.
+Look up where the headset was at the original gaze capture time. Using Unity's current frame time would change behavior.
 
-## Convert the Vuforia target
+## Move the Vuforia target into the published world
 
-For a tracked Unity pose:
+For a tracked Unity position:
 
 - Position `(x, y, z)` becomes `(x, y, -z)`.
-- Quaternion `(x, y, z, w)` becomes `(-x, -y, z, w)`.
+- Rotation `(x, y, z, w)` becomes `(-x, -y, z, w)`.
 
-This is the rotation-basis change `F R(q) F` where `F = diag(1, 1, -1)`. Gaze and target therefore publish the same right-handed world name.
+In maths terms this is `F R(q) F` with `F = diag(1, 1, -1)`: the same Z flip applied to the rotation. So gaze and target publish in the same right-handed world.
 
-When the target is not tracked, send `NaN` for all seven pose values and zero for the tracked value.
+When the target is not tracked, send `NaN` for all seven position and rotation values and zero for the tracked value.
 
-## Preview transforms and stair alignment
+## Preview alignment and the stairs
 
-### Gaze transform without a calibration
+### Gaze without a calibration
 
-There is no hand-entered gaze transform. The pose of the HoloLens world in Vicon
-coordinates cannot be known before it is measured, so a session with no solved or
-applied calibration uses an identity gaze transform:
+You cannot type in a gaze alignment. Where the HoloLens world sits in Vicon's
+room cannot be known until it is measured, so a session with no worked-out or
+applied calibration leaves gaze as it is:
 
 - Scale is `1.0`, because gaze is already in metres.
 - Axis signs are `(1, 1, 1)`.
-- There is no rotation and no translation.
+- No rotation and no translation.
 
-Gaze is therefore drawn in the published `hololens_stationary_shared_with_gaze`
-frame. It is displayed, but it is not aligned to Vicon, and the calibration state
-reads **Not calibrated**.
+So gaze is drawn in the published `hololens_stationary_shared_with_gaze`
+coordinates. It is shown, but not lined up with Vicon, and the calibration state
+says **Not calibrated**.
 
-The preview uses the same gaze transform whatever coordinate-frame name the gaze stream reports. Changing that needs coordinate checks.
+The preview uses the same gaze alignment whatever coordinate name the gaze stream reports. Changing that needs coordinate tests.
 
-### Decide whether gaze and target can align
+### Can gaze and target be lined up?
 
-Compare coordinate-frame names without letter-case differences:
+Compare coordinate names, ignoring letter case:
 
-- `eye_tracker_space` gaze is never compatible.
-- If either frame name is empty, allow alignment for older data.
+- `eye_tracker_space` gaze can never be lined up.
+- If either name is empty, allow it, for older recordings.
 - Otherwise, both names must match.
 
-Changing the empty-name rule may stop older streams from aligning. Review it separately and check real saved files.
+Changing the empty-name rule could stop older recordings from lining up. Review it on its own and test with real saved files.
 
 ### Fixed stair settings
 
-The current stair settings are:
+The stair settings are:
 
 - ID: `stair-model-v1`.
-- Required samples: `20`.
+- Samples needed: `20`.
 - Allowed position movement: `0.02 m`.
 - Allowed rotation movement: `3 degrees`.
 - Fixed `vicon_from_target` position: `(-2.882676086, 0.310499985, 0.0)` metres.
-- Fixed target rotation: identity.
+- Fixed target rotation: none.
 
-The physical stairs are permanently fixed. The measurement confirmed on
-2026-09-17 places the bottom front-left corner 120.5 cm straight ahead and
-21.3 cm left of the Vicon origin while facing up the stairs. Forward is `-X`,
-left is `-Y`, and the floor is `Z=0`, so this corner is
-`(-1.205, -0.213, 0.0)` metres. The stairs ascend along `-X`.
+The real stairs never move. The measurement confirmed on 2026-09-17 puts the
+bottom front-left corner 120.5 cm straight ahead of and 21.3 cm to the left of
+the Vicon origin, facing up the stairs. Forward is `-X`, left is `-Y`, and the
+floor is `Z=0`, so this corner is at `(-1.205, -0.213, 0.0)` metres. The stairs
+go up along `-X`.
 
-The stair OBJ file uses millimetres. Its matching corner is
-`(1677.676086, -523.499985, 0.0)`, rather than the model origin. With identity
-rotation, subtract that corner scaled by `0.001` from the measured Vicon corner
-to obtain the fixed model translation above. Scale the mesh by `0.001`, then
-apply the fixed rotation and translation to place it in the preview's metre space.
+The stair OBJ file is in millimetres. Its matching corner is at
+`(1677.676086, -523.499985, 0.0)`, not at the model's origin. With no rotation,
+take that corner, scale it by `0.001`, and subtract it from the measured Vicon
+corner to get the fixed model position above. Scale the mesh by `0.001`, then
+apply the fixed rotation and position to place it in the preview's metre space.
 
-The unsolved **Default stair setup** refreshes to this measurement when settings
-load. Existing saved solutions retain their original pose and transform. To
-replace a solution based on the old estimate, select **Default stair setup**,
-run **Calibrate from Stair Target**, and save the new session calibration.
-The physical stair pose stays fixed, but a new HoloLens world still needs a new
-gaze-to-Vicon calibration.
+The built-in **Default stair setup**, before any alignment has been worked out,
+updates to this measurement when settings load. Saved calibrations keep their
+original position and alignment. To replace one based on the old estimate,
+select **Default stair setup**, run **Calibrate from Stair Target**, and save the
+new session calibration. The stairs stay put, but a new HoloLens world still
+needs a new gaze-to-Vicon calibration.
 
-### Find a stable target pose
+### Find a steady target position
 
-- Compare each tracked pose with the first pose in the current set.
+- Compare each tracked position with the first one in the current set.
 - Clear the set when tracking is lost.
-- If movement is outside either limit, clear the set and start again with the new pose.
-- Average finite positions and normalized rotations. Flip equivalent quaternion signs into the same half before averaging.
-- Require at least 20 usable poses.
-- Require both position and rotation RMS values to stay within their limits.
-- Use the same rules when searching an XDF recording for a stable window.
+- If the target moved more than either limit, clear the set and start again from the new position.
+- Average the finite positions and rotations. Rotations can be written two ways with opposite signs, so line up their signs before averaging.
+- Need at least 20 usable positions.
+- The spread (RMS) of both position and rotation must stay within their limits.
+- Use the same rules when searching an XDF recording for a steady stretch.
 
-### Build the gaze-to-Vicon transform
+### Work out the gaze-to-Vicon alignment
 
-The target stream's `acquisition/sdk` value names the publisher:
-`Unity.XR.manual_stair_registration` means a manual three-point registration of
-the Unity CAD root, and any other value, including a missing one, means the
-Vuforia model target. Both publishers locate the Unity-imported stair model, so
-the preview uses the same conversion to its OBJ basis for both and does not read
-this value.
+The target stream's `acquisition/sdk` value says who sent it:
+`Unity.XR.manual_stair_registration` means the stairs were placed by hand from
+three points on the Unity model, and any other value, or none, means the
+Vuforia model target. Both find the same Unity-imported stair model, so the
+preview handles both the same way and does not read this value.
 
-The preview draws the stair OBJ in the file's own coordinates, while Unity's
-model import negates X. After undoing the published world's Z reflection, undo
-that X reflection to reach the drawn model. The calculation is:
+The preview draws the stair OBJ in the file's own coordinates, but Unity's model
+import flips X. So after undoing the published world's Z flip, the preview also
+undoes that X flip to reach the drawn model. The steps are:
 
-1. Inverts the averaged `holo_from_target` pose.
-2. Reflects the target-to-HoloLens position and rotation across Z, reaching the target's Unity basis.
-3. Reflects that position and rotation across X, reaching the drawn stair model's basis.
-4. Applies the fixed `vicon_from_target` pose.
-5. Sets the gaze input signs to `(-1, 1, -1)`, which is the X mirror composed with the Z reflection of step 2.
+1. Invert the averaged `holo_from_target` position and rotation.
+2. Flip the target-to-HoloLens position and rotation in Z, to get back to the target's Unity coordinates.
+3. Flip that position and rotation in X, to reach the drawn stair model's coordinates.
+4. Apply the fixed `vicon_from_target` position and rotation.
+5. Set the gaze input signs to `(-1, 1, -1)`, which is the X flip combined with the Z flip from step 2.
 
-The two reflections preserve handedness overall, as required when mapping the
-right-handed published gaze frame to Vicon. In target-local coordinates the
-conversion is `(x, y, z) -> (-x, y, -z)`: forward and height align with the stairs,
-while lateral Y is preserved. The previous Vuforia path used a 180-degree Z
-rotation instead of the X reflection, which also negated lateral Y and mirrored
-left/right gaze.
+Two flips together keep the handedness the same, which is needed when mapping
+the right-handed gaze coordinates onto Vicon. Seen from the target, the change is
+`(x, y, z) -> (-x, y, -z)`: forward and height line up with the stairs, and the
+sideways Y axis is kept. The older Vuforia code used a 180-degree turn around Z
+instead of the X flip. That also flipped the sideways Y axis, which swapped left
+and right in gaze.
 
-The inverse pose and the input signs must be converted together. Flipping a
-single world-axis input sign fails when the target is rotated. Only the preview
-applies this conversion; recordings retain the published data. XDF playback
-that solves from target poses uses the corrected conversion automatically.
-Previously saved Vuforia calibrations retain their stored transforms: run
-**Calibrate from Stair Target**, then **Save Session Calibration** to replace
-the mirrored solution.
+The inverted position and the input signs must change together. Flipping just
+one input sign breaks as soon as the target is rotated. Only the preview does
+this conversion; recordings keep the data as it was sent. XDF playback that
+works out alignment from target positions uses the fixed conversion
+automatically. Older saved Vuforia calibrations keep what they stored: run
+**Calibrate from Stair Target**, then **Save Session Calibration**, to replace a
+mirrored one.
 
-Automatic alignment lasts only for the current preview session. It is not saved.
-There is no fallback transform: clearing a calibration, or a solve that fails its
-quality limits, returns the preview to the identity gaze transform above.
+Automatic alignment only lasts for the current preview session. It is not saved.
+There is no fallback: clearing a calibration, or an alignment that fails its
+quality limits, takes the preview back to showing gaze as it was sent (see
+above).
 
-## Match live and recorded geometry
+## Live and recorded should look the same
 
-Given the same source values, live and XDF preview paths should show the same geometry after allowing for their different time origins:
+Given the same values, the live and XDF preview should show the same shapes, once you allow for their different starting times:
 
-- Marker names, valid states, and metre positions match.
-- Segment names, valid states, metre positions, and raw rotations match.
-- Gaze ray names, valid states, origins, and normalized directions match.
+- Marker names, usable flags, and positions in metres match.
+- Segment names, usable flags, positions in metres, and raw rotations match.
+- Gaze ray names, usable flags, origins, and directions match.
 - Gaze and target with the shared-world name can use the same stair alignment.
 - `eye_tracker_space` gaze never uses automatic target alignment.
 
-Do not expect live and XDF `PreviewFrame.timestamp` numbers to match. Live time stays in the corrected local clock. XDF playback starts from zero. Their matching decisions should still agree for equivalent corrected source times and the same limit.
+Do not expect the live and XDF `PreviewFrame.timestamp` numbers to match. Live time stays on the corrected local clock, while XDF playback starts from zero. Their matching decisions should still agree for the same corrected times and the same limit.
 
-## Checks for a time or coordinate change
+## Tests for a time or coordinate change
 
-Existing checks cover Vicon time, preview matching, transforms, stair alignment, and old frame names. They also cover XDF clock repair, playback, live rate, HoloLens time conversion, reading age, queue limits, and published times.
+Existing tests cover Vicon time, preview matching, alignment steps, stair alignment, and old coordinate names. They also cover XDF clock fixing, playback, live rate, HoloLens time conversion, reading age, queue limits, and published times.
 
 Before merging a time or coordinate change:
 
-- [ ] Saved Vicon cases cover good, negative, non-finite, overflow, equal, and earlier candidate times.
-- [ ] Reconnect proves Vicon time keeps increasing across stream recreation with stable source IDs.
-- [ ] Marker and segment timestamps from one frame are bit-for-bit equal.
-- [ ] Device evidence records `Stopwatch.Frequency`, raw reading counts, converted LSL times, and local LSL times.
-- [ ] Device recording has no duplicate or earlier gaze times and shows gaps instead of delayed replay during overload.
-- [ ] Live and XDF paths each correct clocks exactly once.
-- [ ] Constant and changing XDF offsets match saved fitted values.
-- [ ] Repair count and repaired times match saved results.
-- [ ] Matching checks cover exactly at, just inside, and just outside the time limit.
-- [ ] Simple axis vectors and rotations prove both HoloLens reflections.
-- [ ] An uncalibrated session leaves gaze in its published frame instead of applying a guessed transform.
-- [ ] Fixed stair alignment works for known fake data and the physical model.
-- [ ] Old, empty, matching, and different frame names follow current rules.
-- [ ] Live and XDF preview geometry matches for the same values.
+- [ ] Saved Vicon cases cover good, negative, not-finite, overflowing, equal, and earlier times.
+- [ ] Reconnecting shows Vicon time keeps going up across reopened streams with the same source IDs.
+- [ ] Marker and segment timestamps from one frame are exactly equal.
+- [ ] Headset results record `Stopwatch.Frequency`, raw reading counts, converted LSL times, and local LSL times.
+- [ ] A headset recording has no repeated or earlier gaze times, and shows gaps instead of late replays when overloaded.
+- [ ] Live and XDF each correct clocks exactly once.
+- [ ] Constant and changing XDF corrections match the saved expected values.
+- [ ] The fix count and fixed times match the saved results.
+- [ ] Matching tests cover exactly at, just inside, and just outside the time limit.
+- [ ] Simple axis and rotation examples prove both HoloLens flips.
+- [ ] Without a calibration, gaze stays as it was sent instead of using a guessed alignment.
+- [ ] Fixed stair alignment works for known fake data and the real model.
+- [ ] Old, empty, matching, and different coordinate names follow the rules.
+- [ ] Live and XDF preview shapes match for the same values.
 
-Use the [hardware test guide](device-parity-runbook.md) for device evidence.
+Use the [hardware test guide](device-parity-runbook.md) for headset results.
 
 ## Main source files
 

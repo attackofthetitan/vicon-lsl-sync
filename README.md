@@ -1,225 +1,227 @@
 # Vicon LSL Bridge
 
-Use this project to send Vicon motion data over [Lab Streaming Layer (LSL)](https://labstreaminglayer.org). LSL keeps data from different devices on a shared time base. [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) can then save those streams in one `.xdf` file.
+This project sends Vicon motion data over [Lab Streaming Layer (LSL)](https://labstreaminglayer.org). LSL puts data from different devices on the same clock. [LabRecorder](https://github.com/labstreaminglayer/App-LabRecorder) can then save all of it in one `.xdf` file.
 
-The project also includes Unity scripts that send HoloLens 2 eye-gaze data directly to LSL.
+The project also has Unity scripts that send HoloLens 2 eye-gaze data straight to LSL.
 
 ## Get started
 
 1. Download the latest package from the [Releases page](https://github.com/attackofthetitan/vicon-lsl-sync/releases/latest).
 2. Start your Vicon DataStream server.
 3. Run `vicon-lsl-bridge-gui`.
-4. Choose the study folder and session values, then select **Start Session**.
-5. Review the setup check. Fix required failures, or enter a reason and choose
-   **Record Anyway** when the exception is deliberate.
-6. Select **Stop Session** when the run is complete and review the XDF file check.
+4. Choose the study folder and fill in the session details, then select **Start Session**.
+5. Look over the setup check. Fix anything marked as required. If you want to
+   record anyway, type a reason and choose **Record Anyway**.
+6. Select **Stop Session** when you are done, then look over the file check.
 
-The default Vicon server address is `localhost:801`.
+The app looks for the Vicon server at `localhost:801` unless you change it.
 
-The macOS download requires Apple Silicon. Open the disk image and drag the app
-into the **Applications** folder shown beside it. LabRecorder is included inside
-the app. Open the app from **Applications** and it ejects the disk image. If you
-open it from the disk image instead, it offers to move itself to
-**Applications** first. Command line tools are in a folder on the same image, so
-copy them before opening the app if you need them.
+### On a Mac
 
-The macOS release is not notarized by Apple. The first time you open the app,
-macOS reports that it could not verify it: open **System Settings > Privacy &
-Security** and choose **Open Anyway**. macOS then asks once before the app uses
-your local network, which Lab Streaming Layer needs. It also asks before the app
-saves recordings in Documents, Desktop, or Downloads, or on an external or
-network drive. If saving was refused, the path check says so, and **Open Privacy
-Settings** opens the setting that allows it.
+The Mac download needs Apple Silicon. Open the disk image and drag the app into
+the **Applications** folder shown next to it. LabRecorder is already inside the
+app. Open the app from **Applications** and it ejects the disk image for you. If
+you open it from the disk image instead, it offers to move itself to
+**Applications** first. The command-line tools are in a separate folder on the
+disk image, so copy them before opening the app if you want them.
 
-If an earlier version installed a separate LabRecorder app in **Applications**,
-move it to the Trash. If **Recorder program** in the app still shows that app's
-path, clear the field.
+Apple has not checked (notarized) this app. The first time you open it, macOS
+says it could not verify the app. Open **System Settings > Privacy & Security**
+and choose **Open Anyway**. macOS then asks once before the app uses your local
+network, which LSL needs. It also asks before the app saves recordings in
+Documents, Desktop, or Downloads, or on an external or network drive. If you
+said no, the path check tells you, and **Open Privacy Settings** takes you to
+the setting that fixes it.
+
+If an older version put a separate LabRecorder app in **Applications**, move it
+to the Trash. If **Recorder program** in the app still shows that app's path,
+clear the field.
 
 ## Streams
 
-| Stream | What it contains |
+| Stream | What it holds |
 | --- | --- |
-| `ViconMarkers` | Four values for each marker: X, Y, Z in millimetres, and a valid flag. A hidden or unreadable marker uses `NaN, NaN, NaN, 0`. |
-| `ViconSegments` | Seven values for each segment: X, Y, Z in millimetres, followed by the four parts of its rotation. An unreadable segment uses seven `NaN` values. |
-| `HoloLensGaze` | A 90 Hz stream sent by the Unity app. Its 21 values describe combined, left-eye, and right-eye rays in the Unity world, with a valid flag for each ray. |
-| `HoloLensModelTargetPose` | An optional stream sent by the Unity app. Its eight values describe the Vuforia stair target position, rotation, and tracking state. |
+| `ViconMarkers` | Four values per marker: X, Y, Z in millimetres, and a flag that says whether the marker was seen. A hidden or unreadable marker sends `NaN, NaN, NaN, 0`. |
+| `ViconSegments` | Seven values per segment: X, Y, Z in millimetres, then four numbers for its rotation. An unreadable segment sends seven `NaN` values. |
+| `HoloLensGaze` | Sent by the Unity app 90 times a second. Its 21 values describe where both eyes, the left eye, and the right eye are looking, each with a flag that says whether it is usable. |
+| `HoloLensModelTargetPose` | Optional, sent by the Unity app. Its eight values give the position and rotation of the Vuforia stair target, and whether it is being tracked. |
 
-You can change the two Vicon stream names. The HoloLens names come from the Unity configuration.
+You can rename the two Vicon streams. The HoloLens stream names come from the Unity settings.
 
-If Vicon subjects, markers, or segments change during a session, the bridge closes the old Vicon streams and creates new ones with the new layout.
+If Vicon subjects, markers, or segments change during a session, the bridge closes the old Vicon streams and opens new ones that match.
 
 ## Use the desktop app
 
-The desktop app lets you:
+With the desktop app you can:
 
-- Start and stop a complete session or control the bridge, preview, and recorder
-  independently.
-- Find LSL streams and choose each source by its source ID. You can deliberately
-  follow a stream name when source IDs change between runs.
-- Check the final XDF path and selected streams before Start.
-- Keep bridge, recorder, preview, calibration, path, storage, stream health,
-  errors, and file-check results visible.
-- Open, seek, step, loop, and visually inspect merged CSV or XDF recordings.
-- Align HoloLens gaze with the Vicon world and manage saved calibrations.
-- Connect to an external recorder or start an included recorder without freezing
-  the window.
+- Start and stop a whole session in one step, or control the bridge, preview,
+  and recorder one at a time.
+- Find LSL streams and pick each one by its source ID. If source IDs change
+  between runs, you can choose to follow a stream by name instead.
+- See the final file path and chosen streams before you start.
+- Keep an eye on the bridge, recorder, preview, calibration, file path, free
+  space, stream health, errors, and file check results.
+- Open a merged CSV or XDF recording and play it back, jump around, step
+  through it, or loop it.
+- Line up HoloLens gaze with the Vicon space and keep saved calibrations.
+- Connect to a recorder you started yourself, or let the app start its own copy,
+  without the window freezing.
 
-By default, the marker and segment preview use the bridge output names, while
-gaze and calibration use `HoloLensGaze` and
-`HoloLensModelTargetPose`. The **Streams** tab shows name, type, source ID, host,
-session, channels, expected and measured rates, coordinate name, sample age, and
-warnings. When names are duplicated, the app does not silently choose one.
+By default, the marker and segment preview use the bridge's stream names, and
+gaze and calibration use `HoloLensGaze` and `HoloLensModelTargetPose`. The
+**Streams** tab shows each stream's name, type, source ID, computer, session,
+channel count, expected and measured rate, coordinate name, how old the last
+sample is, and any warnings. When two streams share a name, the app does not
+quietly pick one.
 
-Session presets contain the recording setup. Import, Export, Reset, Save Preset,
-and Load Preset do not include window size, splitter position, tab selection, or
-recent paths. The saved file format starts at version 1; settings from older
-application releases are not imported.
+Presets save your recording setup. They do not save the window size, layout, the
+open tab, or recent files. Settings from older versions of the app are not
+brought over.
 
-The built-in XDF reader is for visual checks. Use [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) for scientific analysis.
+The built-in XDF reader is for a quick visual check. Use [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) for real analysis.
 
-Old recordings marked `eye_tracker_space` contain gaze in the eye tracker's local space. The preview can show those rays, but it cannot align them from the stair target because the recording does not contain the changing tracker-to-world pose.
+Old recordings marked `eye_tracker_space` store gaze relative to the eye tracker itself. The preview can show that gaze, but it cannot line it up with the stairs, because the file does not say where the headset was at each moment.
 
-## Align gaze from the stair target
+## Line up gaze using the stair target
 
-Automatic alignment needs gaze and target poses from the same Unity/OpenXR world.
+Automatic alignment needs gaze and stair target positions from the same Unity world.
 
 In Unity:
 
 1. Use Microsoft Mixed Reality OpenXR 1.5.1 or later.
 2. Add `GazeDataProvider` and `GazeLSLOutlet` to the scene.
-3. Add `VuforiaModelTargetPoseOutlet` to the same Unity/XR world.
-4. Assign the stair `ModelTargetBehaviour` and the same `GazeLSLConfig` asset to the gaze and target components.
+3. Add `VuforiaModelTargetPoseOutlet` to the same scene.
+4. Give the target component the stair `ModelTargetBehaviour`. Give the gaze and target components the same `GazeLSLConfig` asset.
 
 In the desktop preview:
 
-1. Keep the default **Stair target** stream name, or enter the name from `GazeLSLConfig`.
+1. Keep the default **Stair target** stream name, or type the name set in `GazeLSLConfig`.
 2. Start the preview.
-3. Point the HoloLens at the physical stair target until Vuforia tracks it.
+3. Look at the real stairs with the HoloLens until Vuforia finds them.
 4. Select **Calibrate from Stair Target**.
-5. Hold the target still while the app collects 20 good samples.
+5. Keep the target still while the app collects 20 good samples.
 
-If you then pause Vuforia with **M**, keep the target outlet running and include
-`HoloLensModelTargetPose` in each recording. The updated HoloLens publisher keeps
-a stable stair reference in that stream while paused, so a run started after
-calibration can still be aligned when reopened. It marks these references as
-frozen rather than live tracked. Resuming Vuforia requires a new stable reference.
-Playback shows a warning if the file has no usable recorded calibration.
+You can then pause Vuforia with **M**. Keep the target outlet running and
+include `HoloLensModelTargetPose` in every recording. While Vuforia is paused,
+the HoloLens keeps sending the last steady stair position and marks it as frozen
+instead of live. That way a recording started after calibration can still be
+lined up when you open it later. After you turn Vuforia back on, it has to find
+the stairs again. Playback warns you if a file has nothing it can use to line up
+gaze.
 
-The result lasts only for the current desktop session. There are no hand-entered
-HoloLens translation and rotation fields, because the transform between the
-HoloLens world and Vicon cannot be known before it is measured. Until an
-alignment is solved or a saved calibration is applied, the preview draws gaze in
-its published HoloLens frame. Select **Clear Calibration** to return to that
-state.
+A new alignment only lasts until you close the desktop app. You cannot type in
+the HoloLens position and rotation by hand, because they are unknown until
+measured. Until you run an alignment or apply a saved one, the preview draws gaze
+as the HoloLens sent it. **Clear Calibration** takes you back to that.
 
-An automatic solution stays session-only until you select **Save Session
-Calibration**. A saved calibration records a setup name, stair model and
-measured pose, coordinate names, transform, notes, creation time, and position
-and angle error. Saved calibrations can be applied, copied, hidden, imported,
-and exported. Confirm missing coordinate details deliberately; quality and
-compatibility remain visible as stream status changes.
+To keep an alignment, select **Save Session Calibration**. A saved calibration
+stores a setup name, the stair model and where it was measured, coordinate
+names, the alignment itself, notes, when it was made, and how accurate it was.
+You can apply, copy, hide, import, and export saved calibrations. If coordinate
+details are missing, you must confirm before using one. Its accuracy and whether
+it still fits the current streams stay on screen.
 
-If a saved Vuforia calibration reverses left and right, run **Calibrate from
-Stair Target** and **Save Session Calibration** again with this build. Saved
-calibrations retain their stored transforms; a fresh solve uses the corrected
-stair basis. XDF playback that aligns from recorded target poses also uses the
-correction.
+If a saved Vuforia calibration swaps left and right, run **Calibrate from Stair
+Target** and **Save Session Calibration** again with this version. Saved
+calibrations keep what they stored, but a new one uses the fixed math. XDF
+playback that lines up gaze from recorded target positions also uses the fix.
 
-The stairs are permanently fixed. Their bottom front-left corner is 120.5 cm
-straight ahead and 21.3 cm left of the Vicon origin, at floor height:
-`(-1.205, -0.213, 0)` metres when facing up the stairs. The built-in
-**Default stair setup** accounts for the model origin's offset from this corner.
-For saved calibrations made with the previous estimate, select **Default stair
-setup**, recalibrate, and save the result. Restarting the HoloLens app can create
-a new Unity world, so run the gaze alignment again after a restart even though
-the physical stairs remain fixed.
+The stairs never move. Their bottom front-left corner is 120.5 cm straight ahead
+of and 21.3 cm to the left of the Vicon origin, on the floor. In metres, facing
+up the stairs, that is `(-1.205, -0.213, 0)`. The built-in **Default stair
+setup** already allows for the gap between that corner and the model's own
+origin. If a saved calibration was made with the older, estimated position,
+select **Default stair setup**, calibrate again, and save. Restarting the
+HoloLens app can reset its world, so run the gaze alignment again after a
+restart even though the stairs have not moved.
 
-The Unity app keeps the original device capture time. It drops duplicate,
-invalid, or out-of-order readings, and walks forward through every reading the
-tracker published since the last accepted one. If processing falls more than
-500 ms behind, it drops the older queued readings and keeps the newest one. This leaves a
-visible time gap instead of replaying old gaze data. See [How time and
-coordinates work](docs/time-and-coordinate-semantics.md) for the exact rules.
+The Unity app keeps the time each gaze reading was actually taken. It skips
+repeated, broken, or out-of-order readings, and picks up every reading the eye
+tracker made since the last one it kept. If it falls more than 500 ms behind, it
+throws away the older waiting readings and keeps the newest. That leaves a gap in
+time instead of playing back old gaze late. See [How time and coordinates
+work](docs/time-and-coordinate-semantics.md) for the details.
 
 ## Record with LabRecorder
 
-The default recorder remote-control address is `localhost:22345`. Before
-automatic launch, the desktop app checks that address so it does not start a
-duplicate recorder. A recorder started from the desktop app is shown as
-**Started here**; one that was already running is shown as **External** and is
-never closed by the desktop app. **Disconnect / Detach** disconnects without
-closing the recorder.
+The app talks to LabRecorder at `localhost:22345` unless you change it. Before
+starting its own LabRecorder, the app checks that address so it does not start
+a second one. A recorder the app started shows as **Started here**. One that was
+already running shows as **External**, and the app never closes it.
+**Disconnect / Detach** lets go of the recorder without closing it.
 
 1. Start the Vicon bridge.
-2. In **Recording**, choose the study folder and filename pattern.
-3. Fill in the participant, session, task, run, acquisition, and modality fields.
-4. In **Streams**, select **Find LSL Streams**, review each source and its status,
-   and mark the streams that should be recorded or are required.
+2. In **Recording**, choose the study folder and file name pattern.
+3. Fill in the participant, session, task, run, acquisition, and modality.
+4. In **Streams**, select **Find LSL Streams**. Check each stream and mark
+   which ones to record and which ones must be there.
 5. Choose how to record:
 
-   - The default uses the included recorder and saves only the selected streams.
-   - **Use external graphical recorder** uses its remote-control connection and
-     deliberately records everything visible after an immediate refresh.
+   - By default, the app uses its own copy of LabRecorder and saves only the
+     streams you picked.
+   - **Use external graphical recorder** uses the LabRecorder window you already
+     have open. It refreshes the stream list right before starting and records
+     every stream it can see.
 
-6. Select **Check Setup** and review every required, warning, and information
-   item.
-7. Select **Start Recording**, or use **Start Session** to run the guided bridge,
-   preview, stream search, setup check, and recording steps.
-8. Select **Stop Recording** or **Stop Session** when finished.
+6. Select **Check Setup** and read every required item, warning, and note.
+7. Select **Start Recording**. Or use **Start Session** to have the app start the
+   bridge and preview, find streams, check the setup, and start recording for
+   you.
+8. Select **Stop Recording** or **Stop Session** when you are done.
 
-The bridge expands the filename pattern before sending it to the graphical
-LabRecorder, preserving the exact case, folders, and run formatting shown in
-the destination preview. For compatibility with LabRecorder's legacy protocol,
-its template field shows `%b` and its task field carries the resolved relative
-filename; edit recording details in the bridge.
+The app fills in the file name pattern itself before handing it to LabRecorder.
+This keeps the exact letters, folders, and run number shown in the destination
+preview. Because of how LabRecorder's remote control works, its template box
+shows `%b` and its task box holds the finished file name. Change recording
+details in this app, not in LabRecorder.
 
-**Recording Destination** shows the final full path checked by the app, sent to
-the recorder, and saved in the session details. The app appends `.xdf` when
-needed and blocks paths that escape the study folder,
-reserved Windows names, unwritable paths, existing files that were not approved,
-and destinations outside the study root. **Find Next Run** finds an unused run
-number. Low storage is a visible warning at the chosen threshold.
+**Recording Destination** shows the full path the app checked, sent to the
+recorder, and saved with the session details. The app adds `.xdf` if needed. It
+blocks paths that leave the study folder, use names Windows does not allow,
+cannot be written to, or point at a file that already exists unless you allowed
+that. **Find Next Run** finds a run number that is not used yet. The app warns
+you when free space drops below the level you set.
 
-Check these items before recording:
+Before you record, check that:
 
 - The bridge is streaming.
-- The selected recorder is connected or available and is not busy with another
-  command.
-- Required streams are present, recent, have the expected channel layout, and
-  use the expected coordinate names.
-- `ViconMarkers`, `ViconSegments`, and `HoloLensGaze` show healthy measured
-  rates when those roles are required.
-- The filename preview points to the intended `.xdf` file.
+- The recorder is connected or ready and is not busy with another command.
+- Every required stream is there, has recent data, has the right number of
+  channels, and uses the expected coordinate names.
+- `ViconMarkers`, `ViconSegments`, and `HoloLensGaze` show healthy rates when
+  they are required.
+- The file name preview points to the `.xdf` file you want.
 
-An invalid folder, value, filename pattern, or selection explains the problem
-and how to fix it. A recorder error does not stop the Vicon bridge. Repeated
-Start or Stop requests are refused, and closing while Start is in progress
-either cancels it before it is sent or sends one final Stop.
+If a folder, value, file name pattern, or choice is wrong, the app says what is
+wrong and how to fix it. A recorder error does not stop the Vicon bridge.
+Pressing Start or Stop again while one is already running does nothing. If you
+close the app while Start is in progress, it either cancels Start before it is
+sent or sends one last Stop.
 
-After a successful Stop, the app waits for the XDF file and checks the selected
-streams, source IDs, channel layouts, time ranges, rates, gaps, and sample times
-in the background. The run becomes **Checked**, **Checked with warnings**, or
-**Needs attention**. This check never rewrites the recording; use **Open
-Recording in Preview** for a visual review or export the session details.
+After Stop, the app waits for the XDF file and checks it in the background. It
+looks at the chosen streams, source IDs, channel counts, time ranges, rates,
+gaps, and sample times. The run is marked **Checked**, **Checked with
+warnings**, or **Needs attention**. This check never changes the file. Use
+**Open Recording in Preview** to look at it, or export the session details.
 
-## Review a recording
+## Look at a recording
 
-Open a merged CSV or XDF from **Preview**, drag a file onto the window, or choose
-a recent file. Reading the file, finding stream details, correcting time, calibration,
-and frame preparation run in the background with progress and cancellation. The
-previous usable source remains visible unless the new file finishes successfully.
+Open a merged CSV or XDF file from **Preview**, drag it onto the window, or pick
+a recent file. The file loads in the background with a progress bar and a
+cancel button. What you had open stays on screen until the new file has fully
+loaded.
 
-CSV and XDF share play/pause, a timeline, current time and frame position,
-single-frame steps, start/end and selected-time jumps, speed, and an explicit
-loop option. Long recordings use a configurable memory limit and draw fewer
-frames when needed; reported file timing remains exact. XDF files with several
-possible streams ask the user to choose the main time source and the streams to
-use.
-Compatible pieces from a source that restarted are joined in a predictable way.
+CSV and XDF files have the same playback controls: play and pause, a timeline,
+the current time and frame, single-frame steps, jumps to the start, end, or a
+chosen time, speed, and a loop switch. Long recordings stay within a memory limit
+you can set, so the preview may skip some frames. The file check still uses exact
+numbers. If an XDF file has more than one stream that could be used, the app asks
+which one to use as the main timeline and which streams to include. If a stream
+restarted during a recording, the matching pieces are joined back together.
 
 ## Use the command line
 
-The package also includes a command-line app for scripts and computers without a desktop display:
+The package also has a command-line app for scripts and for computers without a screen:
 
 ```text
 vicon-lsl-bridge [options]
@@ -238,7 +240,7 @@ Example:
 ./vicon-lsl-bridge --server 192.168.1.100:801
 ```
 
-The HoloLens Unity app sends gaze directly to LSL. The desktop command does not relay gaze.
+The HoloLens Unity app sends gaze straight to LSL. The command-line app does not pass gaze along.
 
 ## Build from source
 
@@ -246,11 +248,11 @@ You need:
 
 - CMake 3.23 or later.
 - A C++17 compiler.
-- Boost thread and chrono libraries, plus the Boost headers.
-- The Vicon DataStream SDK linked repository (Git submodule).
-- Qt 6 Core, Widgets, and Network if you want the desktop app.
+- The Boost thread and chrono libraries, and the Boost headers.
+- The Vicon DataStream SDK, which is linked into this repository as a Git submodule.
+- Qt 6 Core, Widgets, and Network, if you want the desktop app.
 
-CMake downloads liblsl when an installed copy is not available.
+If liblsl is not installed, CMake downloads it.
 
 ### Linux
 
@@ -271,11 +273,11 @@ cmake -B build -A x64 "-DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%/scripts/
 cmake --build build --config Release
 ```
 
-With Qt 6, the build creates both `vicon-lsl-bridge` and `vicon-lsl-bridge-gui`. Without Qt 6, it creates only the command-line app.
+With Qt 6, you get both `vicon-lsl-bridge` and `vicon-lsl-bridge-gui`. Without Qt 6, you only get the command-line app.
 
-## Run the checks
+## Run the tests
 
-Run the C++ checks without the Vicon SDK, Qt, or a downloaded test library:
+These C++ tests do not need the Vicon SDK, Qt, or any download:
 
 ```bash
 cmake -S vicon-lsl-bridge -B build-logic \
@@ -287,22 +289,22 @@ cmake --build build-logic --config Release --target vicon-lsl-bridge-logic-tests
 ctest --test-dir build-logic --build-config Release --output-on-failure
 ```
 
-Run the HoloLens checks that do not need Unity or a device:
+These HoloLens tests do not need Unity or a headset:
 
 ```bash
 dotnet run --project hololens-gaze-lsl/Tests/HoloLensCore.Tests.csproj --configuration Release
 python tools/generate_stream_contracts.py --check
 ```
 
-For the full desktop checks, download the linked Vicon SDK repository and provide liblsl and Qt 6. Build every target, then run CTest from that build folder.
+For the full desktop tests, download the Vicon SDK submodule and install liblsl and Qt 6. Build everything, then run CTest from that build folder.
 
-Unity, Windows device APIs, Vuforia, and physical Vicon behavior still need real hardware checks. Follow the [hardware test guide](docs/device-parity-runbook.md).
+Unity, Windows device features, Vuforia, and the real Vicon system still have to be tested by hand. Follow the [hardware test guide](docs/device-parity-runbook.md).
 
 ## More detail
 
 - [How the code is organized](docs/architecture.md)
 - [Behavior that must stay the same](docs/behavior-contract.md)
-- [How services start, stop, and recover](docs/runtime-state-machines.md)
+- [How each part starts, stops, and recovers](docs/runtime-state-machines.md)
 - [How time and coordinates work](docs/time-and-coordinate-semantics.md)
 - [Hardware test guide](docs/device-parity-runbook.md)
 - [Release checklist](docs/release-checklist.md)
@@ -310,8 +312,9 @@ Unity, Windows device APIs, Vuforia, and physical Vicon behavior still need real
 
 ## Make a release
 
-Release tags use the exact form `vN.N.N`. The tagged commit must already be in `main`. The tag version must match the CMake project version and a dated entry in [CHANGELOG.md](CHANGELOG.md).
+Release tags look exactly like `vN.N.N`. The tagged commit must already be on `main`. The tag version must match the version in CMake and a dated entry in [CHANGELOG.md](CHANGELOG.md).
 
-The release workflow builds the Windows ZIP, Windows portable app, Linux
-archive, macOS ARM64 disk image and archive, and `SHA256SUMS.txt`. Follow the
-[release checklist](docs/release-checklist.md) before and after publishing.
+The release build makes the Windows ZIP, the Windows portable app, the Linux
+archive, the Mac (Apple Silicon) disk image and archive, and `SHA256SUMS.txt`.
+Follow the [release checklist](docs/release-checklist.md) before and after
+publishing.

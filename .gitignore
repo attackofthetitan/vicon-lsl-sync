@@ -64,7 +64,7 @@ venv/
 /preview_csv.py
 /preview_gpu.py
 
-# Tracked preview geometry used by the Windows bridge package
+# The stair model the preview draws is kept in the repository
 !vicon-lsl-bridge/assets/
 !vicon-lsl-bridge/assets/stair_model/
 !vicon-lsl-bridge/assets/stair_model/*.obj
