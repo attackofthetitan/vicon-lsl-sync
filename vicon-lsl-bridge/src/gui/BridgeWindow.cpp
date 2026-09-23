@@ -15,6 +15,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -38,6 +39,7 @@
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QUrl>
 
 #include <algorithm>
 #include <array>
@@ -220,6 +222,10 @@ BridgeWindow::~BridgeWindow() {
     if (!closing() && !close_finalizing_) saveSettings();
 }
 
+void BridgeWindow::reportApplicationEvent(EventSeverity severity, const QString& message) {
+    appendEvent(SessionComponent::Application, severity, message);
+}
+
 template <typename Handler>
 void BridgeWindow::onEdited(std::initializer_list<QWidget*> widgets, Handler handler) {
     for (QWidget* widget : widgets) {
@@ -272,6 +278,14 @@ void BridgeWindow::connectSignals() {
         if (ui_->preview_panel && !verification_report_.path.isEmpty()) {
             ui_->preview_panel->openRecording(verification_report_.path);
         }
+    });
+    connect(ui_->privacy_settings_button, &QPushButton::clicked, this, []() {
+        QDesktopServices::openUrl(QUrl(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"));
+    });
+    // Check the folder again when the user comes back from System Settings.
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+        if (state == Qt::ApplicationActive && path_result_.privacy_blocked) validateRecordingPath();
     });
 
     connect(filename_sync_timer_, &QTimer::timeout, this, &BridgeWindow::syncFilenameToLabRecorder);
@@ -609,6 +623,7 @@ void BridgeWindow::validateRecordingPath(bool create_parent) {
     ui_->filename_preview_label->setCursorPosition(0);
     ui_->path_validation_label->setText(path_result_.summary());
     ui_->path_validation_label->setToolTip(path_result_.summary());
+    ui_->privacy_settings_button->setVisible(path_result_.privacy_blocked);
     refreshUi();
 }
 

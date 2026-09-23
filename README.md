@@ -16,10 +16,24 @@ The project also includes Unity scripts that send HoloLens 2 eye-gaze data direc
 
 The default Vicon server address is `localhost:801`.
 
-The macOS download requires Apple Silicon. Open the disk image and drag both
-**Vicon LSL Bridge** and **LabRecorder** into the **Applications** folder shown
-beside them. Keep them together: the bridge starts the recorder by looking for it
-next to itself. Command line tools are in a folder on the same image.
+The macOS download requires Apple Silicon. Open the disk image and drag the app
+into the **Applications** folder shown beside it. LabRecorder is included inside
+the app. Open the app from **Applications** and it ejects the disk image. If you
+open it from the disk image instead, it offers to move itself to
+**Applications** first. Command line tools are in a folder on the same image, so
+copy them before opening the app if you need them.
+
+The macOS release is not notarized by Apple. The first time you open the app,
+macOS reports that it could not verify it: open **System Settings > Privacy &
+Security** and choose **Open Anyway**. macOS then asks once before the app uses
+your local network, which Lab Streaming Layer needs. It also asks before the app
+saves recordings in Documents, Desktop, or Downloads, or on an external or
+network drive. If saving was refused, the path check says so, and **Open Privacy
+Settings** opens the setting that allows it.
+
+If an earlier version installed a separate LabRecorder app in **Applications**,
+move it to the Trash. If **Recorder program** in the app still shows that app's
+path, clear the field.
 
 ## Streams
 

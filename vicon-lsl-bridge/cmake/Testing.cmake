@@ -86,6 +86,9 @@ if(TARGET vicon-lsl-bridge-gui-components)
         tests/SetupCheckPolicyTests.cpp
         tests/StreamInventoryTests.cpp
     )
+    if(APPLE)
+        target_sources(vicon-lsl-labrecorder-tests PRIVATE tests/MacInstallationTests.cpp)
+    endif()
     target_link_libraries(vicon-lsl-labrecorder-tests PRIVATE vicon-lsl-bridge-gui-components)
     add_dependencies(vicon-lsl-labrecorder-tests vicon-lsl-recorder-process-fixture)
     add_test(NAME vicon-lsl-labrecorder-tests COMMAND vicon-lsl-labrecorder-tests)

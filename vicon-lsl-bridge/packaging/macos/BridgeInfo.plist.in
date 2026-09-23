@@ -29,5 +29,18 @@
 	     the local-network prompt is unhelpful or the access is simply denied. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Vicon LSL Bridge finds and records Lab Streaming Layer streams published by Vicon and the HoloLens on your local network.</string>
+	<!-- macOS asks before an app uses these folders or volumes. The bundled
+	     recorders run as this app's helpers, so the request made here also
+	     covers the XDF file they write. Each string says why it is asked. -->
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Vicon LSL Bridge saves recordings in the study folder you choose, and opens recordings for preview.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Vicon LSL Bridge saves recordings in the study folder you choose, and opens recordings for preview.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Vicon LSL Bridge saves recordings in the study folder you choose, and opens recordings for preview.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Vicon LSL Bridge saves recordings in the study folder you choose, including one on an external drive.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Vicon LSL Bridge saves recordings in the study folder you choose, including one on a network drive.</string>
 </dict>
 </plist>

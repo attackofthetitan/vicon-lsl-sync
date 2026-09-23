@@ -85,7 +85,15 @@ void RecorderProcessController::detach() {
     kind_ = RecorderProcessKind::None;
 }
 
-// Looks beside the app, in a labrecorder folder, and next to a macOS app bundle.
+// The macOS app from the disk image carries LabRecorder and LabRecorderCLI
+// inside itself, so they work wherever the app is placed.
+QString RecorderProcessController::embeddedRecorderDirectory(const QString& app_dir) {
+    if (!app_dir.endsWith("/Contents/MacOS")) return {};
+    return QDir::cleanPath(app_dir + "/../Helpers/LabRecorder.app/Contents/MacOS");
+}
+
+// Looks beside the app, in a labrecorder folder, inside a macOS app bundle, and
+// next to it.
 QString RecorderProcessController::bundledGraphicalRecorderExecutable(const QString& app_dir) {
     QStringList candidates = {
         QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
@@ -96,6 +104,7 @@ QString RecorderProcessController::bundledGraphicalRecorderExecutable(const QStr
         QDir(app_dir).filePath("LabRecorder")
     };
     if (app_dir.endsWith("/Contents/MacOS")) {
+        candidates.push_back(QDir(embeddedRecorderDirectory(app_dir)).filePath("LabRecorder"));
         const QString package_root = QDir(app_dir + "/../../..").canonicalPath();
         candidates.push_back(QDir(package_root).filePath(
             "labrecorder/LabRecorder.app/Contents/MacOS/LabRecorder"));
@@ -120,6 +129,9 @@ QString RecorderProcessController::bundledSelectedStreamExecutable(
     candidates.push_back(QDir(app_dir).filePath("labrecorder/LabRecorderCLI"));
     candidates.push_back(QDir(app_dir).filePath("LabRecorderCLI.exe"));
     candidates.push_back(QDir(app_dir).filePath("LabRecorderCLI"));
+    if (const QString embedded = embeddedRecorderDirectory(app_dir); !embedded.isEmpty()) {
+        candidates.push_back(QDir(embedded).filePath("LabRecorderCLI"));
+    }
     return firstExistingFile(candidates);
 }
 

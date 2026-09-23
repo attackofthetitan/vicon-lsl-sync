@@ -39,6 +39,7 @@ public:
     void endOwnedProcess();
     void detach();
 
+    static QString embeddedRecorderDirectory(const QString& application_directory);
     static QString bundledGraphicalRecorderExecutable(const QString& application_directory);
     static QString bundledSelectedStreamExecutable(const QString& graphical_executable,
                                                     const QString& application_directory);

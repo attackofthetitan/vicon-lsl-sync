@@ -133,6 +133,10 @@ The main desktop components are:
 - `PreviewFileLoader` reads CSV or XDF files, corrects time, applies calibration,
   and prepares a memory-limited set of frames away from the window thread.
   `RecordingVerifier` reads the finished XDF and reports sample and timing health.
+- On macOS, `MacInstallation` runs before the window opens. It offers to move an
+  app opened from its disk image to Applications, and ejects the image once the
+  app runs from elsewhere. It recognizes the image by the version marker at its
+  root.
 
 The preview only reads streams. It must not change source timestamps or layouts.
 Each live input uses its last-sample time to track whether a sample is available.
@@ -267,6 +271,8 @@ The repository checks:
   newest live frame; playback seeking; drawing checks at small and scaled sizes;
   readable colors; keyboard and screen-reader labels; and preview stopping.
 - Packaged GUI layout, local LSL discovery, bundled/custom recorder lookup, portable paths, optional recorder startup, and stair assets.
+- On macOS, packaged programs finding every library inside the package, and
+  which disk images the app offers to move from or ejects.
 - HoloLens channel and pose encoding, coordinate conversion, time handling, queue rules, publishing, cancellation, and recovery without Unity or hardware.
 - Generated files being up to date, cross-platform builds, and Windows package
   contents.

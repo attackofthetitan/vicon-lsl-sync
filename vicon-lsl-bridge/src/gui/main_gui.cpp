@@ -3,6 +3,9 @@
 #include <QTimer>
 
 #include "BridgeWindow.h"
+#ifdef Q_OS_MACOS
+#include "gui/MacInstallation.h"
+#endif
 
 #ifndef VICON_LSL_BRIDGE_VERSION
 #define VICON_LSL_BRIDGE_VERSION "unknown"
@@ -15,6 +18,19 @@ int main(int argc, char* argv[]) {
     const bool verification_requested =
         app.arguments().contains(QStringLiteral("--test"));
 
+#ifdef Q_OS_MACOS
+    // Settle where the app runs from before the window starts a recorder.
+    const QString bundle = vicon_lsl::gui::applicationBundlePath(
+        QCoreApplication::applicationDirPath());
+    const QStringList installer_images = vicon_lsl::gui::installerImages(
+        app.applicationVersion(), vicon_lsl::gui::mountedReadOnlyVolumes());
+    if (!verification_requested &&
+        vicon_lsl::gui::shouldOfferMove(bundle, installer_images) &&
+        vicon_lsl::gui::moveToApplications(bundle)) {
+        return 0;
+    }
+#endif
+
     BridgeWindow window;
     if (const QScreen* screen = window.screen()) {
         const QSize available = screen->availableGeometry().size();
@@ -23,6 +39,15 @@ int main(int argc, char* argv[]) {
         window.resize(QSize(1440, 900).boundedTo(usable));
     }
     window.show();
+#ifdef Q_OS_MACOS
+    if (!verification_requested) {
+        vicon_lsl::gui::ejectImages(
+            vicon_lsl::gui::imagesToEject(bundle, installer_images), &window,
+            [&window](EventSeverity severity, const QString& message) {
+                window.reportApplicationEvent(severity, message);
+            });
+    }
+#endif
     if (verification_requested) {
         QTimer::singleShot(0, &app, [&app, &window]() {
             window.ensurePolished();

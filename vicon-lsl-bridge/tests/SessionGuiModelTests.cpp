@@ -15,6 +15,11 @@
 #include <limits>
 #include <cmath>
 
+#ifdef Q_OS_MACOS
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace labrecorder_client_tests {
 namespace {
 
@@ -58,6 +63,16 @@ void testNormalizedPathPolicy() {
                valid.summary().toStdString());
     expect(valid.absolute_path.endsWith(".xdf", Qt::CaseInsensitive),
            "appends the XDF extension consistently");
+
+    // The destination is two folders below the root. Its checks must still use
+    // the root, not the working folder: a macOS app opened from Finder runs in /.
+    const QString working_directory = QDir::currentPath();
+    QDir::setCurrent(QDir::rootPath());
+    const RecordingPathResult from_root = LabRecorderFilenamePolicy::validate(fields);
+    QDir::setCurrent(working_directory);
+    expect(from_root.valid() && from_root.available_storage_bytes >= 0,
+           "checks the study root when several destination folders are missing: " +
+               from_root.summary().toStdString());
     expect(LabRecorderFilenamePolicy::renderedFilename(valid.normalized_fields) ==
                valid.relative_path,
            "normalized fields render the checked relative destination");
@@ -136,6 +151,23 @@ void testNormalizedPathPolicy() {
     expect(hasIssue(LabRecorderFilenamePolicy::validate(fields, create_parent),
                     RecordingPathIssueLevel::Error, "could not be created"),
            "reports a destination parent creation failure");
+    expect(!valid.privacy_blocked,
+           "does not report a writable folder as refused by macOS");
+
+#ifdef Q_OS_MACOS
+    // A locked folder refuses writes with the same error as a folder that macOS
+    // privacy settings protect.
+    QTemporaryDir locked;
+    const QByteArray locked_path = QFile::encodeName(locked.path());
+    expect(locked.isValid() && ::chflags(locked_path.constData(), UF_IMMUTABLE) == 0,
+           "creates a locked study root");
+    const RecordingPathResult refused =
+        LabRecorderFilenamePolicy::validate(validFields(locked.path()));
+    ::chflags(locked_path.constData(), 0);
+    expect(!refused.valid() && refused.privacy_blocked &&
+               hasIssue(refused, RecordingPathIssueLevel::Error, "macOS has not allowed"),
+           "explains a folder that macOS refuses: " + refused.summary().toStdString());
+#endif
 }
 
 void testSessionConfiguration() {

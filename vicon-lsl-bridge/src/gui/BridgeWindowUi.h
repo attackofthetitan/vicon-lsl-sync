@@ -82,6 +82,7 @@ struct BridgeWindowUi {
     QLineEdit* modality_edit = nullptr;
     QLineEdit* filename_preview_label = nullptr;
     QLabel* path_validation_label = nullptr;
+    QPushButton* privacy_settings_button = nullptr;
     QDoubleSpinBox* storage_warning_spin = nullptr;
     QCheckBox* allow_overwrite_check = nullptr;
     QCheckBox* allow_outside_root_check = nullptr;

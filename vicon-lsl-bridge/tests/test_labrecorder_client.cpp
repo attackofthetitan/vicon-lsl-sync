@@ -29,6 +29,9 @@ int main(int argc, char** argv) {
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);
     run("bundled executable resolution", testBundledExecutableResolution);
+#ifdef Q_OS_MACOS
+    run("macOS installation", testMacInstallation);
+#endif
     run("shutdown waiting", testShutdownWaitsForEachComponent);
     run("shutdown owned recorder", testShutdownEndsOwnedRecorderOnceOrOnDeadline);
     run("shutdown lost recorder", testShutdownReportsLostExternalRecorder);

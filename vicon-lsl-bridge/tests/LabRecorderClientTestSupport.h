@@ -65,6 +65,7 @@ void testRecorderDuplicateAndShutdownProtocol();
 void testRecordingVerifierOutcomes();
 void testRecorderProcessControllerLifecycle();
 void testBundledExecutableResolution();
+void testMacInstallation();
 void testShutdownWaitsForEachComponent();
 void testShutdownEndsOwnedRecorderOnceOrOnDeadline();
 void testShutdownReportsLostExternalRecorder();

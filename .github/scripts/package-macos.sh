@@ -3,6 +3,18 @@ set -euo pipefail
 
 artifact_name="$1"
 
+# The rpaths a Mach-O file searches for its @rpath libraries.
+rpaths() {
+  otool -l "$1" | awk '/cmd LC_RPATH/ { found = 1; next }
+    found && $1 == "path" { sub(/^ *path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; found = 0 }'
+}
+
+add_rpath() {
+  if ! rpaths "$1" | grep -xF -- "$2" >/dev/null; then
+    install_name_tool -add_rpath "$2" "$1"
+  fi
+}
+
 if [[ -e package ]]; then
   echo "Refusing to reuse an existing package directory" >&2
   exit 1
@@ -112,6 +124,36 @@ for bin in package/vicon-lsl-bridge package/LabRecorderCLI; do
   fi
 done
 
+# Absolute rpaths name folders on the build machine, such as the liblsl build
+# or Homebrew. Other computers do not have them, and a library found there
+# instead of the bundled one would not be the build that was tested.
+while IFS= read -r binary; do
+  file -b "$binary" | grep -q '^Mach-O' || continue
+  while IFS= read -r rpath; do
+    if [[ "$rpath" == /* ]]; then
+      install_name_tool -delete_rpath "$rpath" "$binary"
+    fi
+  done < <(rpaths "$binary")
+done < <(find package -type f)
+
+# macdeployqt gives LabRecorder no path to the lsl framework it bundles, so
+# without this it only starts on the machine that built it.
+add_rpath package/LabRecorder.app/Contents/MacOS/LabRecorder "@executable_path/../Frameworks"
+
+# LabRecorder asks for the same access as the bridge when it runs on its own.
+# macOS shows these reasons in its requests.
+recorder_plist=package/LabRecorder.app/Contents/Info.plist
+chmod u+w "$recorder_plist"  # The LabRecorder build writes it read-only.
+plutil -replace NSLocalNetworkUsageDescription -string \
+  "LabRecorder finds and records Lab Streaming Layer streams on your local network." \
+  "$recorder_plist"
+for key in NSDocumentsFolderUsageDescription NSDesktopFolderUsageDescription \
+           NSDownloadsFolderUsageDescription NSRemovableVolumesUsageDescription \
+           NSNetworkVolumesUsageDescription; do
+  plutil -replace "$key" -string "LabRecorder saves recordings in the folder you choose." \
+    "$recorder_plist"
+done
+
 # Codesign macOS application bundles
 for app in package/vicon-lsl-bridge-gui.app package/LabRecorder.app; do
   if [[ -d "$app" ]]; then
@@ -137,15 +179,29 @@ tar -czf "${artifact_name}.tar.gz" -C package .
 # The disk image is arranged for drag installation instead of being a copy of
 # the flat layout. Running the app from the mounted image gives it a different
 # path on every mount, so macOS cannot recognise it between launches and any
-# permission the user grants is asked for again. Dragging both bundles to
-# /Applications gives them one stable location, and keeps them siblings, which
-# is how the bridge locates the recorder.
+# permission the user grants is asked for again. Dragging the app to
+# /Applications gives it one stable location.
+#
+# There is one app to drag. LabRecorder and LabRecorderCLI travel inside it, so
+# macOS approves them together with the app instead of blocking the recorder
+# the first time the app starts it, and the app finds them wherever it is put.
 dmg_root=dmg-root
 rm -rf "$dmg_root"
 mkdir -p "$dmg_root"
-cp -R -- package/vicon-lsl-bridge-gui.app "$dmg_root/"
-cp -R -- package/LabRecorder.app "$dmg_root/"
+bridge_app="$dmg_root/vicon-lsl-bridge-gui.app"
+helpers="$bridge_app/Contents/Helpers"
+cp -R -- package/vicon-lsl-bridge-gui.app "$bridge_app"
+mkdir -p "$helpers"
+cp -R -- package/LabRecorder.app "$helpers/"
+cp -- package/LabRecorderCLI "$helpers/LabRecorder.app/Contents/MacOS/"
+add_rpath "$helpers/LabRecorder.app/Contents/MacOS/LabRecorderCLI" "@executable_path/../Frameworks"
+codesign --force --deep --sign - "$bridge_app"
 ln -s /Applications "$dmg_root/Applications"
+
+# The app ejects the image once it runs from somewhere else. This marker names
+# the version the image installs, so the app knows the image is its own.
+plutil -extract CFBundleShortVersionString raw package/vicon-lsl-bridge-gui.app/Contents/Info.plist \
+  > "$dmg_root/.vicon-lsl-bridge-installer"
 
 # Everything that is not an application bundle stays available, but out of the
 # way of the drag target. The launcher wrappers are omitted: they expect the
@@ -159,6 +215,8 @@ for entry in package/*; do
   cp -R -- "$entry" "$dmg_root/Command Line Tools/"
 done
 
-test -d "$dmg_root/vicon-lsl-bridge-gui.app"
+test -x "$helpers/LabRecorder.app/Contents/MacOS/LabRecorder"
+test -x "$helpers/LabRecorder.app/Contents/MacOS/LabRecorderCLI"
+test -s "$dmg_root/.vicon-lsl-bridge-installer"
 test -L "$dmg_root/Applications"
 hdiutil create -volname "Vicon LSL Bridge" -srcfolder "$dmg_root" -ov -format UDZO -imagekey zlib-level=1 "${artifact_name}.dmg"

@@ -9,6 +9,12 @@
 
 #include <algorithm>
 
+#ifdef Q_OS_MACOS
+#include <cerrno>
+#include <cstdlib>
+#include <unistd.h>
+#endif
+
 namespace {
 
 constexpr int kMaxFindNextRun = 1000;
@@ -72,14 +78,17 @@ bool pathIsWithin(const QString& root, const QString& path) {
     return norm_path.startsWith(norm_root);
 }
 
-QString nearestExistingDirectory(QString path) {
-    QFileInfo info(path);
-    if (!info.isDir()) path = info.absolutePath();
-    QDir dir(path);
-    while (!dir.exists()) {
-        if (!dir.cdUp()) return {};
+// Walks up by name: QDir::cdUp() refuses to enter a folder that does not exist,
+// so it stops as soon as two levels are missing.
+QString nearestExistingDirectory(const QString& path) {
+    const QFileInfo info(path);
+    QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    while (!QFileInfo(directory).isDir()) {
+        const QString parent = QFileInfo(directory).absolutePath();
+        if (parent == directory) return {};
+        directory = parent;
     }
-    return dir.absolutePath();
+    return directory;
 }
 
 bool isReservedWindowsName(const QString& component) {
@@ -93,6 +102,24 @@ bool isReservedWindowsName(const QString& component) {
 
 QStringList relativeComponents(const QString& relative_path) {
     return QDir::fromNativeSeparators(relative_path).split('/', Qt::SkipEmptyParts);
+}
+
+// macOS refuses a folder that its privacy settings protect with EPERM, where
+// ordinary file permissions refuse with EACCES.
+bool refusedByMacOS(const QString& directory) {
+#ifdef Q_OS_MACOS
+    QByteArray path = QFile::encodeName(QDir(directory).filePath(".vicon-lsl-writecheck-XXXXXX"));
+    const int fd = ::mkstemp(path.data());
+    if (fd >= 0) {
+        ::close(fd);
+        ::unlink(path.constData());
+        return false;
+    }
+    return errno == EPERM;
+#else
+    Q_UNUSED(directory);
+    return false;
+#endif
 }
 
 } // namespace
@@ -373,10 +400,20 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
     if (options.verify_write_access && QDir(writable_directory).exists()) {
         QTemporaryFile probe(QDir(writable_directory).filePath(".vicon-lsl-writecheck-XXXXXX"));
         probe.setAutoRemove(true);
+        // The first write to a protected folder is what makes macOS ask the
+        // user. A refusal after that lasts until it is changed in Settings.
         if (!probe.open()) {
-            addIssue(result, RecordingPathIssueLevel::Error, "destination directory",
-                     "The destination directory is not writable: " + writable_directory,
-                     "Choose a writable study root or correct its permissions.");
+            if (refusedByMacOS(writable_directory)) {
+                result.privacy_blocked = true;
+                addIssue(result, RecordingPathIssueLevel::Error, "destination directory",
+                         "macOS has not allowed this app to save in " + writable_directory + ".",
+                         "Allow it under System Settings > Privacy & Security > Files and Folders, "
+                         "or choose another study root.");
+            } else {
+                addIssue(result, RecordingPathIssueLevel::Error, "destination directory",
+                         "The destination directory is not writable: " + writable_directory,
+                         "Choose a writable study root or correct its permissions.");
+            }
         }
     }
 

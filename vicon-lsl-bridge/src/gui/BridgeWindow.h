@@ -63,6 +63,10 @@ public:
         std::shared_ptr<QSettings> settings = {});
     ~BridgeWindow() override;
 
+    // Adds a message from outside the window, such as the installer's, to the
+    // event log.
+    void reportApplicationEvent(EventSeverity severity, const QString& message);
+
 protected:
     void closeEvent(QCloseEvent* event) override;
 

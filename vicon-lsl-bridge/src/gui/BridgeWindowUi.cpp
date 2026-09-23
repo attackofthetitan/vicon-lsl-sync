@@ -267,7 +267,14 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     recording_form->addRow("Recording details:", metadata_grid);
     recording_form->addRow("Exact destination:", ui->filename_preview_label);
     ui->path_validation_label = makeMessageValue("Not checked", "Recording path check");
-    recording_form->addRow("Path check:", ui->path_validation_label);
+    // Shown only while macOS privacy settings refuse the study folder.
+    ui->privacy_settings_button = makeButton("Open Privacy Settings",
+        "Open System Settings to let this app save in the study folder.");
+    ui->privacy_settings_button->hide();
+    auto* path_check_layout = new QHBoxLayout();
+    path_check_layout->addWidget(ui->path_validation_label, 1);
+    path_check_layout->addWidget(ui->privacy_settings_button, 0, Qt::AlignTop);
+    recording_form->addRow("Path check:", path_check_layout);
 
     ui->storage_warning_spin = new QDoubleSpinBox();
     ui->storage_warning_spin->setRange(0.0, 10000.0);

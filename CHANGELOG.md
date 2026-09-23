@@ -2,6 +2,51 @@
 
 Notable user-facing, compatibility, build, and maintenance changes are recorded here.
 
+## [1.15.0] - 2026-09-23
+
+### Added
+
+- On a Mac, the app ejects its installer disk image for you. This happens when
+  you open the app from the Applications folder.
+- If you open the app from the disk image, it offers to move itself to the
+  Applications folder. It then opens from there and ejects the disk image.
+- If macOS does not let the app save in your study folder, the path check now
+  says so. Select **Open Privacy Settings** to allow it. The check runs again
+  when you come back to the app.
+
+### Fixed
+
+- The recorders now start on any Mac. Before, LabRecorder only started on the
+  computer that built it.
+- After you drag the app to Applications, it now finds the recorder it uses by
+  default. Before, recording said the recorder program was missing.
+- The path check now looks at your study folder. Before, it often looked at the
+  wrong folder. On a Mac, it then said the folder could not be written to, and
+  Start needed **Record Anyway**.
+
+### Changed
+
+- The Mac disk image now has one app to drag. LabRecorder is inside it, so you
+  approve only one app.
+- When macOS asks to let the app use Documents, Desktop, Downloads, or an
+  external or network drive, it now says why: to save your recordings there.
+- More desktop code was cleaned up. It works the same as before.
+
+### Upgrade
+
+- If an earlier version put a separate LabRecorder app in Applications, move it
+  to the Trash. If **Recorder program** still shows its path, clear the field.
+
+### Compatibility
+
+- macOS still asks you to approve the app the first time, because Apple has not
+  notarized it. Open **System Settings > Privacy & Security** and choose **Open
+  Anyway**.
+- Streams, recordings, saved settings, and command-line options are unchanged.
+  The `.tar.gz` download keeps its layout.
+- Automated checks passed on a Mac. The move to Applications and the macOS
+  permission prompts were not tried on a Mac that has never run the app.
+
 ## [1.14.7] - 2026-09-23
 
 ### Changed
@@ -649,7 +694,9 @@ Notable user-facing, compatibility, build, and maintenance changes are recorded 
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.6...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.7...v1.15.0
+[1.14.7]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.6...v1.14.7
 [1.14.6]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.5...v1.14.6
 [1.14.5]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.4...v1.14.5
 [1.14.4]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.3...v1.14.4

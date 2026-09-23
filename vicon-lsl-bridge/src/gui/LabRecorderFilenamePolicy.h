@@ -42,6 +42,8 @@ struct RecordingPathResult {
     QString relative_path;
     QString absolute_path;
     qint64 available_storage_bytes = -1;
+    // macOS refused the destination folder, which its privacy settings can allow.
+    bool privacy_blocked = false;
     QVector<RecordingPathIssue> issues;
 
     bool valid() const;

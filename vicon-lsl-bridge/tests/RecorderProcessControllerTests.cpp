@@ -154,6 +154,34 @@ void testBundledExecutableResolution() {
                         package_gui, bridge_app_dir), package_cli),
            "resolves LabRecorderCLI from beside sibling macOS app bundles");
 
+    const QString image_root = QDir(root).filePath("image");
+    const QString image_app_dir = QDir(image_root).filePath(
+        "vicon-lsl-bridge-gui.app/Contents/MacOS");
+    const QString embedded_dir = QDir(image_root).filePath(
+        "vicon-lsl-bridge-gui.app/Contents/Helpers/LabRecorder.app/Contents/MacOS");
+    const QString embedded_gui = QDir(embedded_dir).filePath("LabRecorder");
+    const QString embedded_cli = QDir(embedded_dir).filePath("LabRecorderCLI");
+    const QString sibling_gui = QDir(image_root).filePath(
+        "LabRecorder.app/Contents/MacOS/LabRecorder");
+    const QString custom_gui = QDir(root).filePath(
+        "custom/LabRecorder.app/Contents/MacOS/LabRecorder");
+    expect(QDir().mkpath(image_app_dir) && createFile(embedded_gui) &&
+               createFile(embedded_cli) && createFile(sibling_gui) && createFile(custom_gui),
+           "create recorders carried inside a macOS app bundle");
+    expect(sameFile(RecorderProcessController::embeddedRecorderDirectory(image_app_dir),
+                    embedded_dir) &&
+               RecorderProcessController::embeddedRecorderDirectory(root).isEmpty(),
+           "places carried recorders only inside a macOS app bundle");
+    expect(sameFile(RecorderProcessController::bundledGraphicalRecorderExecutable(
+                        image_app_dir), embedded_gui),
+           "prefers the LabRecorder carried inside the app over one beside it");
+    expect(sameFile(RecorderProcessController::bundledSelectedStreamExecutable(
+                        embedded_gui, image_app_dir), embedded_cli),
+           "resolves the LabRecorderCLI carried beside the embedded LabRecorder");
+    expect(sameFile(RecorderProcessController::bundledSelectedStreamExecutable(
+                        custom_gui, image_app_dir), embedded_cli),
+           "uses the carried LabRecorderCLI when a custom LabRecorder has none beside it");
+
     const QString empty_root = QDir(root).filePath("empty");
     expect(QDir().mkpath(empty_root), "create recorder-free application directory");
     expect(RecorderProcessController::bundledGraphicalRecorderExecutable(

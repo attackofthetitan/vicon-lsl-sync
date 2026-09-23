@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.14.7 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.15.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -188,6 +188,10 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/PreviewStreamWorker.cpp
                 src/gui/PreviewWidget.cpp
             )
+            if(APPLE)
+                target_sources(vicon-lsl-bridge-gui-components PRIVATE
+                    src/gui/MacInstallation.cpp)
+            endif()
             set_target_properties(vicon-lsl-bridge-gui-components PROPERTIES
                 AUTOMOC ON)
 
