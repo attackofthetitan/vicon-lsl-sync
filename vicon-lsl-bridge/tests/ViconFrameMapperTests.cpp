@@ -285,13 +285,13 @@ TEST_CASE("Vicon marker frame mapping preserves status and context before LSL co
          "SDK result 1", "Failed to read marker global translation"};
 
     const auto layout = vicon_lsl::discoverLayout(client, 0).layout;
-    const auto frame = vicon_lsl::buildMarkerFrame(client, layout.markers, 7);
-    REQUIRE_EQ(frame.reads.size(), static_cast<std::size_t>(3));
-    REQUIRE_EQ(frame.reads[0].translation[0], 1.0);
-    REQUIRE_EQ(frame.reads[0].status, vicon_lsl::ViconReadStatus::Ok);
-    REQUIRE_EQ(frame.reads[1].translation[0], 4.0);
-    REQUIRE_EQ(frame.reads[1].status, vicon_lsl::ViconReadStatus::Occluded);
-    REQUIRE_EQ(frame.reads[2].status, vicon_lsl::ViconReadStatus::SdkError);
+    const auto frame = vicon_lsl::buildViconFrame(client, layout, 7);
+    REQUIRE_EQ(frame.markers.size(), static_cast<std::size_t>(3));
+    REQUIRE_EQ(frame.markers[0].translation[0], 1.0);
+    REQUIRE_EQ(frame.markers[0].status, vicon_lsl::ViconReadStatus::Ok);
+    REQUIRE_EQ(frame.markers[1].translation[0], 4.0);
+    REQUIRE_EQ(frame.markers[1].status, vicon_lsl::ViconReadStatus::Occluded);
+    REQUIRE_EQ(frame.markers[2].status, vicon_lsl::ViconReadStatus::SdkError);
 
     // The subject, object, and operation that identify a failed read are
     // carried by its diagnostic rather than repeated on every read.
@@ -302,8 +302,8 @@ TEST_CASE("Vicon marker frame mapping preserves status and context before LSL co
     REQUIRE_EQ(frame.diagnostics[0].operation, std::string("GetMarkerGlobalTranslation"));
     REQUIRE_EQ(frame.diagnostics[1].object_name, std::string("Failed"));
 
-    const auto visible_sample = vicon_lsl::markerSampleForLsl(frame.reads[0]);
-    const auto occluded_sample = vicon_lsl::markerSampleForLsl(frame.reads[1]);
+    const auto visible_sample = vicon_lsl::markerSampleForLsl(frame.markers[0]);
+    const auto occluded_sample = vicon_lsl::markerSampleForLsl(frame.markers[1]);
     REQUIRE_EQ(visible_sample[0], 1.0);
     REQUIRE_EQ(visible_sample[3], 1.0);
     REQUIRE(std::isnan(occluded_sample[0]));
@@ -342,11 +342,11 @@ TEST_CASE("Vicon segment frame mapping preserves status and context before LSL c
          "SDK result 2", "Failed to read segment global rotation quaternion"};
 
     const auto layout = vicon_lsl::discoverLayout(client, 0).layout;
-    const auto frame = vicon_lsl::buildSegmentFrame(client, layout.segments, 9);
-    REQUIRE_EQ(frame.reads.size(), static_cast<std::size_t>(3));
-    REQUIRE_EQ(frame.reads[0].rotation.quaternion[3], 1.0);
-    REQUIRE_EQ(frame.reads[1].translation.status, vicon_lsl::ViconReadStatus::SdkError);
-    REQUIRE_EQ(frame.reads[2].rotation.status, vicon_lsl::ViconReadStatus::SdkError);
+    const auto frame = vicon_lsl::buildViconFrame(client, layout, 9);
+    REQUIRE_EQ(frame.segments.size(), static_cast<std::size_t>(3));
+    REQUIRE_EQ(frame.segments[0].rotation.quaternion[3], 1.0);
+    REQUIRE_EQ(frame.segments[1].translation.status, vicon_lsl::ViconReadStatus::SdkError);
+    REQUIRE_EQ(frame.segments[2].rotation.status, vicon_lsl::ViconReadStatus::SdkError);
     REQUIRE_EQ(frame.diagnostics.size(), static_cast<std::size_t>(2));
     REQUIRE_EQ(frame.diagnostics[0].operation,
                std::string("GetSegmentGlobalTranslation"));
@@ -358,9 +358,9 @@ TEST_CASE("Vicon segment frame mapping preserves status and context before LSL c
     REQUIRE_EQ(frame.diagnostics[1].sdk_result, std::string("SDK result 2"));
 
     const auto good_sample =
-        vicon_lsl::segmentSampleForLsl(frame.reads[0].translation, frame.reads[0].rotation);
+        vicon_lsl::segmentSampleForLsl(frame.segments[0].translation, frame.segments[0].rotation);
     const auto failed_sample =
-        vicon_lsl::segmentSampleForLsl(frame.reads[2].translation, frame.reads[2].rotation);
+        vicon_lsl::segmentSampleForLsl(frame.segments[2].translation, frame.segments[2].rotation);
     REQUIRE_EQ(good_sample[6], 1.0);
     REQUIRE(std::isnan(failed_sample[0]));
 }

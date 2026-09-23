@@ -48,6 +48,8 @@ TEST_CASE("Preview playback clock preserves pause position and speed changes") {
         rejected = true;
     }
     REQUIRE(rejected);
+    REQUIRE(clock.duration() == 3.0);
+    REQUIRE_EQ(clock.frameIndex(102.55), static_cast<std::size_t>(0));
 }
 
 TEST_CASE("Preview playback clock can reference bounded frames without duplicating timestamps") {

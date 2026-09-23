@@ -4,9 +4,8 @@ namespace vicon_lsl::gui {
 
 namespace {
 
-// A selected-stream recorder is this app's own process, so it is safe once that
-// process is gone. A LabRecorder connection is safe once its shutdown settled
-// without a Start that may still be running on the server.
+// Wait for the selected-stream recorder to exit, or for LabRecorder to settle
+// with no Start command that might still be running.
 bool recorderSafeToClose(const ShutdownInputs& inputs) {
     return inputs.selected_stream_recorder ? !inputs.owns_running_process
                                            : inputs.recorder_settled_safely;

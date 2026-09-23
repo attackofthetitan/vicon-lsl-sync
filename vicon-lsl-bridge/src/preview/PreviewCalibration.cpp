@@ -253,24 +253,17 @@ PreviewTransformProfile transformProfileFromRigid(const PreviewRigidTransform& t
 PreviewTransformProfile gazeTransformFromTargetCalibration(
     const CalibrationProfile& profile,
     const PreviewRigidTransform& holo_from_target) {
-    const PreviewQuaternion target_from_holo_rotation =
-        inverseQuaternion(holo_from_target.rotation);
-    const PreviewVec3 target_from_holo_translation = rotateByQuaternion(
-        holo_from_target.translation * -1.0,
-        target_from_holo_rotation);
+    const PreviewRigidTransform target_from_holo = inverseRigidTransform(holo_from_target);
 
-    // Both target publishers (the Vuforia model target and the manual stair
-    // registration) locate the stair model as Unity imported it. Go from the
-    // HoloLens world to the target, undo the two flips to reach the drawn OBJ,
-    // then place it in Vicon. The inverse pose and the input signs must change
-    // together, or a rotated HoloLens world mirrors the gaze.
+    // Move gaze into the target's coordinates, undo Unity's axis flips, then
+    // place it in Vicon. Flip both the pose and input signs to avoid mirroring.
     PreviewTransformProfile transform;
     transform.name = "HoloLens";
     transform.use_quaternion_rotation = true;
     transform.rotation = normalizeQuaternion(multiplyQuaternions(
-        profile.vicon_from_target.rotation, flipXZ(target_from_holo_rotation)));
+        profile.vicon_from_target.rotation, flipXZ(target_from_holo.rotation)));
     transform.translation = applyRigidTransformPoint(
-        profile.vicon_from_target, flipXZ(target_from_holo_translation));
+        profile.vicon_from_target, flipXZ(target_from_holo.translation));
     transform.input_axis_sign.x = -1.0;
     transform.input_axis_sign.z = -1.0;
     return transform;

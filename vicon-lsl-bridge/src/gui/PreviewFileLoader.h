@@ -18,8 +18,7 @@ enum class PreviewFileType {
     Xdf,
 };
 
-// Loads a CSV or XDF recording on its own thread. The result is only available
-// after a complete load, so a cancel or failure leaves the current source alone.
+// Loads a CSV or XDF in the background and keeps only a completed recording.
 class PreviewFileLoader : public QThread {
     Q_OBJECT
 
@@ -61,8 +60,7 @@ private:
     std::atomic<bool> cancel_requested_{false};
     QMutex mutex_;
     QWaitCondition mapping_available_;
-    bool have_mapping_ = false;
-    XdfStreamMapping mapping_;
+    std::optional<XdfStreamMapping> mapping_;
     std::optional<PreviewRecording> recording_;
 };
 

@@ -95,16 +95,6 @@ struct SegmentPoseRead {
 };
 
 // Values follow layout order. Failed reads are described in diagnostics.
-struct MarkerFrameResult {
-    std::vector<MarkerTranslationRead> reads;
-    std::vector<ViconDiagnostic> diagnostics;
-};
-
-struct SegmentFrameResult {
-    std::vector<SegmentPoseRead> reads;
-    std::vector<ViconDiagnostic> diagnostics;
-};
-
 struct ViconFrameResult {
     std::vector<MarkerTranslationRead> markers;
     std::vector<SegmentPoseRead> segments;

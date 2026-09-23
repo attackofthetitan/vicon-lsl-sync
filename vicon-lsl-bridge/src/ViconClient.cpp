@@ -25,10 +25,9 @@ namespace SDK = ViconDataStreamSDK::CPP;
 
 namespace {
 
-// How long each connection check may take, so a missing server cannot delay Stop.
+// Limit each TCP attempt so a missing server does not delay Stop for long.
 constexpr int kReachabilityTimeoutMs = 500;
 
-// Vicon's port when the address does not give one.
 constexpr const char* kDefaultViconPort = "801";
 
 #ifdef _WIN32
@@ -67,7 +66,6 @@ bool markNonBlocking(SocketHandle handle) {
 #endif
 }
 
-// Returns true once the connection succeeds, false if it fails or times out.
 bool waitForConnection(SocketHandle handle, int timeout_ms) {
 #ifdef _WIN32
     fd_set writable;
@@ -89,8 +87,7 @@ bool waitForConnection(SocketHandle handle, int timeout_ms) {
     }
 #endif
 
-    // A writable socket only means the attempt finished. The socket error says
-    // whether it actually connected.
+    // A writable socket may have failed to connect; check its error too.
     int pending_error = 0;
     SocketLength length = sizeof(pending_error);
     return getsockopt(handle, SOL_SOCKET, SO_ERROR,
@@ -117,8 +114,7 @@ bool addressAccepts(const addrinfo& candidate, int timeout_ms) {
     return accepted;
 }
 
-// Splits "host:port", using the default port when none is given. Only a final
-// all-digit part counts as a port, because IPv6 addresses contain colons.
+// Treat a final colon followed by digits as the port; otherwise use port 801.
 std::pair<std::string, std::string> splitServerAddress(const std::string& address) {
     const std::size_t separator = address.rfind(':');
     if (separator == std::string::npos || separator + 1 == address.size()) {
@@ -211,13 +207,6 @@ std::string describeSdkResult(SDK::Result::Enum result) {
            std::to_string(static_cast<int>(result)) + ")";
 }
 
-vicon_lsl::ViconReadStatus readStatus(SDK::Result::Enum result) {
-    return result == SDK::Result::NotConnected
-               ? vicon_lsl::ViconReadStatus::NotConnected
-               : vicon_lsl::ViconReadStatus::SdkError;
-}
-
-// Failed reads look the same for every read type.
 template <class Read>
 Read notConnected() {
     Read read;
@@ -230,13 +219,13 @@ Read notConnected() {
 template <class Read>
 Read sdkFailed(SDK::Result::Enum result, std::string message) {
     Read read;
-    read.status = readStatus(result);
+    read.status = result == SDK::Result::NotConnected
+        ? vicon_lsl::ViconReadStatus::NotConnected : vicon_lsl::ViconReadStatus::SdkError;
     read.sdk_result = describeSdkResult(result);
     read.message = std::move(message);
     return read;
 }
 
-// Hidden items are marked so the stream sends invalid values for them.
 template <class Read>
 Read occludedOrOk(Read read, bool occluded, const char* occlusion_message) {
     read.occluded = occluded;
@@ -316,7 +305,6 @@ void ViconClient::disconnect() {
 }
 
 bool ViconClient::isConnected() const {
-    // Both our own flag and the SDK must agree that the connection is up.
     return connected_ && client_.IsConnected().Connected;
 }
 
@@ -327,8 +315,7 @@ bool ViconClient::getFrame() {
         return false;
     }
 
-    // Read the local clock right after the frame arrives, then subtract Vicon's
-    // latency estimate. See viconFrameTimestamp().
+    // Subtract Vicon's latency from the time the frame arrived.
     const double receipt_timestamp = lsl::local_clock();
     const auto latency = client_.GetLatencyTotal();
     frame_timestamp_ = vicon_lsl::viconFrameTimestamp(

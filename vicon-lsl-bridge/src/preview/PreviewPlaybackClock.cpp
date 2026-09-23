@@ -3,32 +3,24 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace vicon_lsl {
-namespace {
 
-std::vector<double> relativeTimeline(const std::vector<double>& timestamps) {
-    std::vector<double> timeline;
-    if (timestamps.empty()) return timeline;
-    timeline.reserve(timestamps.size());
-    const double first = timestamps.front();
-    for (const double timestamp : timestamps) {
+void PreviewPlaybackClock::setTimeline(std::vector<double> timestamps) {
+    const double first = timestamps.empty() ? 0.0 : timestamps.front();
+    double previous = 0.0;
+    for (double& timestamp : timestamps) {
         if (!std::isfinite(timestamp)) {
             throw std::invalid_argument("Playback timeline contains a non-finite timestamp");
         }
-        const double relative = timestamp - first;
-        if (!timeline.empty() && relative < timeline.back()) {
+        timestamp -= first;
+        if (timestamp < previous) {
             throw std::invalid_argument("Playback times must always increase");
         }
-        timeline.push_back(relative);
+        previous = timestamp;
     }
-    return timeline;
-}
-
-} // namespace
-
-void PreviewPlaybackClock::setTimeline(const std::vector<double>& timestamps) {
-    timeline_ = relativeTimeline(timestamps);
+    timeline_ = std::move(timestamps);
     playing_ = false;
     paused_position_ = 0.0;
     anchor_monotonic_seconds_ = 0.0;
@@ -38,7 +30,7 @@ void PreviewPlaybackClock::setFrameTimeline(const std::vector<PreviewFrame>& fra
     std::vector<double> timestamps;
     timestamps.reserve(frames.size());
     for (const PreviewFrame& frame : frames) timestamps.push_back(frame.timestamp);
-    setTimeline(timestamps);
+    setTimeline(std::move(timestamps));
 }
 
 void PreviewPlaybackClock::play(double monotonic_seconds) {

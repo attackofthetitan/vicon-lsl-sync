@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
-#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -31,29 +30,20 @@ std::optional<std::size_t> nearestSampleIndex(const XdfStreamData& stream,
         return std::nullopt;
     }
 
-    const auto it = std::lower_bound(
+    auto nearest = std::lower_bound(
         stream.timestamps.begin(), stream.timestamps.end(), absolute_timestamp);
-    std::optional<std::size_t> best;
-    double best_delta = std::numeric_limits<double>::infinity();
-
-    auto consider = [&](std::size_t index) {
-        if (index >= stream.timestamps.size()) {
-            return;
-        }
-        const double delta = std::abs(stream.timestamps[index] - absolute_timestamp);
-        if (delta <= tolerance_seconds && delta < best_delta) {
-            best = index;
-            best_delta = delta;
-        }
-    };
-
-    if (it != stream.timestamps.end()) {
-        consider(static_cast<std::size_t>(std::distance(stream.timestamps.begin(), it)));
+    // Only the samples on either side can be closest. Ties use the later one.
+    if (nearest == stream.timestamps.end() ||
+        (nearest != stream.timestamps.begin() &&
+         std::abs(*std::prev(nearest) - absolute_timestamp) <
+             std::abs(*nearest - absolute_timestamp))) {
+        --nearest;
     }
-    if (it != stream.timestamps.begin()) {
-        consider(static_cast<std::size_t>(std::distance(stream.timestamps.begin(), it) - 1));
+    const double delta = std::abs(*nearest - absolute_timestamp);
+    if (std::isfinite(delta) && delta <= tolerance_seconds) {
+        return static_cast<std::size_t>(nearest - stream.timestamps.begin());
     }
-    return best;
+    return std::nullopt;
 }
 
 // The stream whose samples become the playback frames. Without a choice, prefers
@@ -84,21 +74,18 @@ const XdfStreamData* chooseMasterStream(const std::vector<XdfStreamData>& stream
     return nullptr;
 }
 
-void appendStreamSample(PreviewFrame& frame,
-                        const XdfStreamData& stream,
-                        const std::vector<double>& sample,
-                        const PreviewTransformProfile& vicon_transform,
-                        const PreviewTransformProfile& gaze_transform) {
-    const auto append = [](auto& into, auto items) {
-        into.insert(into.end(), std::make_move_iterator(items.begin()),
-                    std::make_move_iterator(items.end()));
-    };
+void setStreamSample(PreviewFrame& frame,
+                     const XdfStreamData& stream,
+                     const std::vector<double>& sample,
+                     const PreviewTransformProfile& vicon_transform,
+                     const PreviewTransformProfile& gaze_transform) {
+    // Stream mapping leaves one stream per role.
     if (stream.role == PreviewStreamRole::ViconMarkers) {
-        append(frame.markers, parseMarkerSample(stream.channel_labels, sample, vicon_transform));
+        frame.markers = parseMarkerSample(stream.channel_labels, sample, vicon_transform);
     } else if (stream.role == PreviewStreamRole::ViconSegments) {
-        append(frame.segments, parseSegmentSample(stream.channel_labels, sample, vicon_transform));
+        frame.segments = parseSegmentSample(stream.channel_labels, sample, vicon_transform);
     } else if (stream.role == PreviewStreamRole::HoloLensGaze) {
-        append(frame.gaze_rays, parseGazeSample(stream.channel_labels, sample, gaze_transform));
+        frame.gaze_rays = parseGazeSample(stream.channel_labels, sample, gaze_transform);
     }
 }
 
@@ -231,11 +218,8 @@ PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                 : nearestSampleIndex(stream, absolute_timestamp, match_tolerance_seconds);
             if (sample_index && *sample_index < stream.samples.size()) {
                 ++matched_samples[stream.stream_id];
-                appendStreamSample(frame,
-                                   stream,
-                                   stream.samples[*sample_index],
-                                   vicon_transform,
-                                   resolved_gaze_transform);
+                setStreamSample(frame, stream, stream.samples[*sample_index],
+                                vicon_transform, resolved_gaze_transform);
             }
         }
 

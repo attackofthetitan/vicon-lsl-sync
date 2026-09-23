@@ -5,6 +5,7 @@
 #include <QMutexLocker>
 
 #include <exception>
+#include <utility>
 
 namespace vicon_lsl {
 
@@ -39,28 +40,25 @@ void PreviewFileLoader::cancel() {
 void PreviewFileLoader::provideMapping(const XdfStreamMapping& mapping) {
     QMutexLocker lock(&mutex_);
     mapping_ = mapping;
-    have_mapping_ = true;
     mapping_available_.wakeAll();
 }
 
 std::optional<PreviewRecording> PreviewFileLoader::takeRecording() {
     QMutexLocker lock(&mutex_);
-    std::optional<PreviewRecording> result = std::move(recording_);
-    recording_.reset();
-    return result;
+    return std::exchange(recording_, std::nullopt);
 }
 
 // Asks the window which streams to use and waits for the answer or a cancel.
 XdfStreamMapping PreviewFileLoader::awaitMapping(const XdfMappingAnalysis& analysis) {
     emit mappingRequired(analysis);
     QMutexLocker lock(&mutex_);
-    while (!have_mapping_ && !canceled()) {
+    while (!mapping_ && !canceled()) {
         mapping_available_.wait(&mutex_, 100);
     }
     if (canceled()) {
         throw std::runtime_error("Preview load canceled");
     }
-    return mapping_;
+    return *mapping_;
 }
 
 void PreviewFileLoader::run() {

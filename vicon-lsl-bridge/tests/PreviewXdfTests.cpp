@@ -465,6 +465,28 @@ TEST_CASE("Preview XDF timeline matches streams by corrected absolute timestamp"
     REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
     REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
     REQUIRE(recording.frames.front().gaze_rays.empty());
+
+    xdf.streams[0].timestamps = {19.0, 20.0, 21.0, 22.0, 23.0};
+    xdf.streams[0].samples.resize(5, xdf.streams[0].samples.front());
+    xdf.streams[1].timestamps = {20.0, 22.0};
+    xdf.streams[1].samples.resize(2, xdf.streams[1].samples.front());
+    for (std::size_t i = 0; i < 2; ++i) {
+        auto& sample = xdf.streams[1].samples[i];
+        sample[0] = static_cast<double>(i + 1);
+        sample[5] = 1.0;
+        sample[6] = 1.0;
+    }
+    const auto matched = vicon_lsl::buildXdfPreviewRecording(xdf, {}, {}, 1.0);
+    const double expected_x[] = {1.0, 1.0, 2.0, 2.0, 2.0};
+    REQUIRE_EQ(matched.frames.size(), static_cast<std::size_t>(5));
+    for (std::size_t i = 0; i < matched.frames.size(); ++i) {
+        REQUIRE(!matched.frames[i].gaze_rays.empty());
+        REQUIRE(near(matched.frames[i].gaze_rays.front().origin.x, expected_x[i]));
+    }
+    const auto strict = vicon_lsl::buildXdfPreviewRecording(xdf, {}, {}, 0.25);
+    REQUIRE(strict.frames[0].gaze_rays.empty());
+    REQUIRE(strict.frames[2].gaze_rays.empty());
+    REQUIRE(strict.frames[4].gaze_rays.empty());
 }
 
 TEST_CASE("Preview XDF loader rejects impossible implicit timestamps and repairs regressions") {
@@ -596,6 +618,10 @@ TEST_CASE("Recorded stream mapping stitches compatible recovered identities") {
     REQUIRE(bounded.streams.front().stored_sample_stride >=
             static_cast<std::size_t>(2));
     REQUIRE(near(bounded.streams.front().timestamps.back(), 4.0));
+    for (std::size_t i = 0; i < bounded.streams.front().samples.size(); ++i) {
+        REQUIRE(near(bounded.streams.front().samples[i][0],
+                     bounded.streams.front().timestamps[i]));
+    }
 
     vicon_lsl::XdfLoadResult source_id_collision = xdf;
     source_id_collision.streams.back().hostname = "different-capture-host";

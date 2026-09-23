@@ -14,31 +14,24 @@ namespace vicon_lsl {
 
 double quietNaN();
 
-// Timestamps
-
 struct ViconTimestampState {
     bool have_timestamp = false;
     double last_timestamp = 0.0;
 };
 
-// Estimates the capture time as the local receipt time minus Vicon's reported
-// latency. Uses the receipt time when the latency is missing, negative, or not
-// a number. This is an estimate, not the exact capture time.
+// Estimates capture time by subtracting Vicon latency from receipt time.
+// Uses receipt time if the latency is missing, negative, or not finite.
 double viconFrameTimestamp(double receipt_timestamp,
                            double latency_seconds,
                            bool latency_valid);
 
-// Keeps timestamps finite and always increasing. A time that is not a number is
-// replaced by the receipt time. A time that would go backward is replaced by the
-// receipt time if that is later, or else by the smallest step past the last one.
-// Returns false when no finite time is available.
+// Keeps times finite and increasing, using receipt time or the next possible
+// time after the last sample. Returns false if neither works.
 bool enforceViconTimestamp(double candidate_timestamp,
                            double receipt_timestamp,
                            ViconTimestampState& state,
                            double& output_timestamp,
                            bool* adjusted = nullptr);
-
-// Samples sent to LSL
 
 MarkerSample invalidMarkerSample();
 SegmentSample invalidSegmentSample();
@@ -54,8 +47,6 @@ MarkerSample markerSampleForLsl(const MarkerTranslationRead& read);
 // A segment needs both reads to be good, or all seven values become NaN.
 SegmentSample segmentSampleForLsl(const SegmentTranslationRead& translation,
                                   const SegmentRotationRead& rotation);
-
-// Error reporting
 
 struct DiagnosticEmission {
     std::vector<std::string> log_lines;
@@ -84,10 +75,7 @@ std::string formatDiagnostic(const ViconDiagnostic& diagnostic);
 std::string diagnosticKey(const ViconDiagnostic& diagnostic);
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics);
 
-// Reading a frame. These are templates so tests can pass a fake client.
-
-// Describes a failed read. Uses the SDK's own result and message when it gave
-// them. Hidden items are warnings; everything else is an error.
+// Uses the SDK error when available. Hidden items are warnings.
 template <class Read>
 ViconDiagnostic readFailure(const Read& read,
                             unsigned int frame_number,
@@ -178,14 +166,16 @@ ViconDiscoveryResult discoverLayout(Client& client, unsigned int frame_number) {
     return result;
 }
 
+// The client can be the Vicon SDK wrapper or a test fake.
 template <class Client>
-MarkerFrameResult buildMarkerFrame(Client& client,
-                                   const std::vector<NamedViconItem>& markers,
-                                   unsigned int frame_number) {
-    MarkerFrameResult result;
-    result.reads.reserve(markers.size());
+ViconFrameResult buildViconFrame(Client& client,
+                                 const ViconLayout& layout,
+                                 unsigned int frame_number) {
+    ViconFrameResult result;
+    result.markers.reserve(layout.markers.size());
+    result.segments.reserve(layout.segments.size());
 
-    for (const auto& marker : markers) {
+    for (const auto& marker : layout.markers) {
         auto read = client.readMarkerGlobalTranslation(marker.first, marker.second);
         if (!isValid(read)) {
             result.diagnostics.push_back(
@@ -193,20 +183,10 @@ MarkerFrameResult buildMarkerFrame(Client& client,
                             "GetMarkerGlobalTranslation",
                             "Marker translation unavailable"));
         }
-        result.reads.push_back(std::move(read));
+        result.markers.push_back(std::move(read));
     }
 
-    return result;
-}
-
-template <class Client>
-SegmentFrameResult buildSegmentFrame(Client& client,
-                                     const std::vector<NamedViconItem>& segments,
-                                     unsigned int frame_number) {
-    SegmentFrameResult result;
-    result.reads.reserve(segments.size());
-
-    for (const auto& segment : segments) {
+    for (const auto& segment : layout.segments) {
         auto translation = client.readSegmentGlobalTranslation(segment.first, segment.second);
         auto rotation = client.readSegmentGlobalRotationQuaternion(segment.first, segment.second);
 
@@ -222,26 +202,9 @@ SegmentFrameResult buildSegmentFrame(Client& client,
                             "GetSegmentGlobalRotationQuaternion",
                             "Segment rotation unavailable"));
         }
-        result.reads.push_back({std::move(translation), std::move(rotation)});
+        result.segments.push_back({std::move(translation), std::move(rotation)});
     }
 
-    return result;
-}
-
-template <class Client>
-ViconFrameResult buildViconFrame(Client& client,
-                                 const ViconLayout& layout,
-                                 unsigned int frame_number) {
-    auto marker_frame = buildMarkerFrame(client, layout.markers, frame_number);
-    auto segment_frame = buildSegmentFrame(client, layout.segments, frame_number);
-
-    ViconFrameResult result;
-    result.markers = std::move(marker_frame.reads);
-    result.segments = std::move(segment_frame.reads);
-    result.diagnostics = std::move(marker_frame.diagnostics);
-    result.diagnostics.insert(result.diagnostics.end(),
-                              segment_frame.diagnostics.begin(),
-                              segment_frame.diagnostics.end());
     return result;
 }
 

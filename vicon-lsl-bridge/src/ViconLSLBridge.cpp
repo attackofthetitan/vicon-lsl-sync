@@ -67,9 +67,8 @@ void ViconLSLBridge::stop() {
 }
 
 void ViconLSLBridge::run() {
-    // LabRecorder continues a recreated stream as the same stream when its
-    // source ID matches, so the timestamp guard lives across reconnects. That
-    // way time never goes backward within one recorded stream.
+    // LabRecorder joins reconnects with the same source ID, so keep timestamps
+    // increasing across reconnects too.
     vicon_lsl::ViconTimestampState timestamp_state;
     bool previous_first_frame_failed = false;
     while (running_) {

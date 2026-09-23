@@ -11,7 +11,6 @@
 #include <QStringList>
 
 #include <algorithm>
-#include <cmath>
 #include <tuple>
 
 namespace vicon_lsl {
@@ -65,15 +64,14 @@ qint64 steadyNowMs() {
 } // namespace
 
 struct PreviewStreamWorker::StreamState {
-    QString requested_name, configured_source_id, bound_source_id;
-    bool follow_by_name = false;
+    gui::StreamBinding binding;
+    QString bound_source_id;
     PreviewStreamRole role = PreviewStreamRole::Unknown;
     PreviewTransformProfile transform;
     std::unique_ptr<lsl::stream_inlet> inlet;
     std::vector<std::string> labels;
     std::string coordinate_frame;
     std::vector<double> latest_sample;
-    double nominal_rate = 0.0;
     PreviewRateTracker rate_tracker;
     double latest_timestamp = 0.0;
     qint64 last_sample_ms = -1, next_resolve_ms = 0;
@@ -100,9 +98,7 @@ PreviewStreamWorker::PreviewStreamWorker(PreviewWorkerConfig config, QObject* pa
 
     const auto init = [](StreamState& stream, const gui::StreamBinding& binding,
                          PreviewStreamRole role, const PreviewTransformProfile& transform) {
-        stream.requested_name = binding.name;
-        stream.configured_source_id = binding.source_id;
-        stream.follow_by_name = binding.reconnection == gui::StreamReconnectionMode::FollowName;
+        stream.binding = binding;
         stream.role = role;
         stream.transform = transform;
     };
@@ -184,12 +180,12 @@ void PreviewStreamWorker::run() {
 }
 
 bool PreviewStreamWorker::connectStream(StreamState& state) {
-    if (state.requested_name.trimmed().isEmpty()) {
+    if (state.binding.name.trimmed().isEmpty()) {
         state.last_error = "No stream name configured";
         return false;
     }
     try {
-        auto streams = lsl::resolve_stream("name", state.requested_name.toStdString(), 0, kResolveTimeoutSeconds);
+        auto streams = lsl::resolve_stream("name", state.binding.name.toStdString(), 0, kResolveTimeoutSeconds);
         if (streams.empty()) return false;
 
         // Sort so the candidates always appear in the same order.
@@ -205,12 +201,11 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
             candidates.push_back(std::move(id));
         }
         // A source ID from the settings wins over the one found on the last connection.
-        gui::StreamBinding selection_binding;
-        selection_binding.name = state.requested_name;
-        selection_binding.source_id = !state.configured_source_id.trimmed().isEmpty()
-            ? state.configured_source_id.trimmed() : state.bound_source_id.trimmed();
-        selection_binding.reconnection = state.follow_by_name ? gui::StreamReconnectionMode::FollowName
-                                                              : gui::StreamReconnectionMode::SourceIdentity;
+        gui::StreamBinding selection_binding = state.binding;
+        selection_binding.source_id = state.binding.source_id.trimmed();
+        if (selection_binding.source_id.isEmpty()) {
+            selection_binding.source_id = state.bound_source_id.trimmed();
+        }
         const gui::StreamIdentitySelection selection = gui::selectStreamIdentity(candidates, selection_binding);
         if (selection.index < 0) {
             replaceInventory(state.role, std::move(candidates), selection.explanation);
@@ -222,7 +217,6 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
                           selection.should_warn ? selection.explanation : QString());
     } catch (const std::exception& ex) {
         state.inlet.reset();
-        state.nominal_rate = 0.0;
         state.clearSample();
         state.last_error = QString::fromStdString(ex.what());
         return false;
@@ -239,20 +233,21 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
     state.labels = channelLabels(metadata, state.role, metadata_complete);
     state.coordinate_frame = gui::coordinateFrameOf(metadata).toStdString();
     state.latest_sample.assign(static_cast<std::size_t>(metadata.channel_count()), 0.0);
-    state.nominal_rate = metadata.nominal_srate() > 0.0 && std::isfinite(metadata.nominal_srate()) ? metadata.nominal_srate() : 0.0;
     state.inlet = std::move(inlet);
     state.inlet->set_postprocessing(lsl::post_clocksync);
     state.clearSample();
     state.last_error.clear();
     state.identity = gui::identityFromStreamInfo(metadata);
     state.identity.role = previewStreamRoleName(state.role);
-    state.identity.nominal_rate = state.nominal_rate;
     const bool coordinate_required = state.role == PreviewStreamRole::HoloLensGaze ||
                                      state.role == PreviewStreamRole::HoloLensCalibrationTarget;
     state.identity.metadata_complete = metadata_complete &&
         gui::identityDescribesItself(state.identity, coordinate_required);
     // Remember the source ID so a restart reconnects to the same publisher.
-    if (!state.follow_by_name && !state.identity.source_id.isEmpty()) state.bound_source_id = state.identity.source_id;
+    if (state.binding.reconnection == gui::StreamReconnectionMode::SourceIdentity &&
+        !state.identity.source_id.isEmpty()) {
+        state.bound_source_id = state.identity.source_id;
+    }
     if (isInterruptionRequested()) return false;
     if (!state.identity.metadata_complete) {
         if (!warning.isEmpty()) warning += "; ";
@@ -366,18 +361,18 @@ void PreviewStreamWorker::updateStatus(qint64 now_ms) {
 
 QString PreviewStreamWorker::streamStatusText(const StreamState& state, qint64 now_ms) const {
     QString status;
-    if (!state.connected()) status = state.requested_name + ": resolving";
-    else if (!state.hasSample()) status = state.requested_name + ": connected";
+    if (!state.connected()) status = state.binding.name + ": resolving";
+    else if (!state.hasSample()) status = state.binding.name + ": connected";
     else if (!streamIsFresh(state, now_ms)) {
-        status = state.requested_name + ": not recently updated (" +
+        status = state.binding.name + ": not recently updated (" +
                  QString::number(static_cast<double>(now_ms - state.last_sample_ms) / 1000.0, 'f', 1) + "s)";
-    } else status = state.requested_name + ": " + QString::number(state.latest_sample.size()) + "ch";
+    } else status = state.binding.name + ": " + QString::number(state.latest_sample.size()) + "ch";
 
     if (streamIsFresh(state, now_ms) && state.rate_tracker.hasFullWindow()) {
         status += "; rate " + QString::number(state.rate_tracker.effectiveRateHz(), 'f', 1) + "Hz";
         if (state.role == PreviewStreamRole::HoloLensGaze &&
-            state.rate_tracker.belowNominalRate(state.nominal_rate, kGazeLowRateFraction)) {
-            status += " LOW RATE (expected " + QString::number(state.nominal_rate, 'f', 1) + "Hz)";
+            state.rate_tracker.belowNominalRate(state.identity.nominal_rate, kGazeLowRateFraction)) {
+            status += " LOW RATE (expected " + QString::number(state.identity.nominal_rate, 'f', 1) + "Hz)";
         }
     }
     return status;

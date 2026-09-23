@@ -2,6 +2,7 @@
 
 #include "preview/PreviewParsing.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -52,12 +53,7 @@ double parseDoubleField(const std::string& text) {
 }
 
 std::size_t findColumn(const std::vector<std::string>& labels, const std::string& name) {
-    for (std::size_t index = 0; index < labels.size(); ++index) {
-        if (labels[index] == name) {
-            return index;
-        }
-    }
-    return labels.size();
+    return static_cast<std::size_t>(std::find(labels.begin(), labels.end(), name) - labels.begin());
 }
 
 std::size_t estimateFramePayloadBytes(const PreviewFrame& frame) {

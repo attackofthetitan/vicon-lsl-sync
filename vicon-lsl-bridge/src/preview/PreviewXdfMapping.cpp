@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -75,11 +76,13 @@ std::size_t groupSampleCount(const Group& group) {
 // The group with the most samples for a role.
 const Group* chooseSuggestedGroup(const std::vector<Group>& groups, PreviewStreamRole role) {
     const Group* best = nullptr;
+    std::size_t best_count = 0;
     for (const Group& group : groups) {
         if (group.role != role) continue;
-        if (!best || groupSampleCount(group) > groupSampleCount(*best) ||
-            (groupSampleCount(group) == groupSampleCount(*best) && group.key < best->key)) {
+        const std::size_t count = groupSampleCount(group);
+        if (!best || count > best_count || (count == best_count && group.key < best->key)) {
             best = &group;
+            best_count = count;
         }
     }
     return best;
@@ -123,24 +126,14 @@ XdfStreamData stitchGroup(const Group& group, std::size_t maximum_samples) {
 
     maximum_samples = (std::max)(std::size_t{2}, maximum_samples);
     std::size_t merged_index = 0;
-    std::vector<double> pending_sample;
-    double pending_timestamp = 0.0;
-    bool have_pending = false;
+    std::optional<Cursor> pending;
     while (!heap.empty()) {
         const Cursor cursor = heap.top();
         heap.pop();
         const XdfStreamData& stream = *group.streams[cursor.stream];
         if (result.samples.size() >= maximum_samples) {
-            std::size_t output = 0;
-            for (std::size_t input = 0; input < result.samples.size(); input += 2) {
-                if (output != input) {
-                    result.samples[output] = std::move(result.samples[input]);
-                    result.timestamps[output] = result.timestamps[input];
-                }
-                ++output;
-            }
-            result.samples.resize(output);
-            result.timestamps.resize(output);
+            keepEveryOther(result.samples, false);
+            keepEveryOther(result.timestamps, false);
             result.stored_sample_stride *= 2;
         }
         if (merged_index % result.stored_sample_stride == 0) {
@@ -148,12 +141,9 @@ XdfStreamData stitchGroup(const Group& group, std::size_t maximum_samples) {
                 result.timestamps.push_back(cursor.timestamp);
                 result.samples.push_back(stream.samples[cursor.sample]);
             }
-            have_pending = false;
-            pending_sample.clear();
+            pending.reset();
         } else {
-            pending_timestamp = cursor.timestamp;
-            pending_sample = stream.samples[cursor.sample];
-            have_pending = true;
+            pending = cursor;
         }
         ++merged_index;
         const std::size_t next = cursor.sample + 1;
@@ -161,13 +151,14 @@ XdfStreamData stitchGroup(const Group& group, std::size_t maximum_samples) {
             heap.push({stream.timestamps[next], cursor.stream, next});
         }
     }
-    if (have_pending) {
-        if (result.samples.size() >= maximum_samples && !result.samples.empty()) {
-            result.samples.back() = std::move(pending_sample);
-            result.timestamps.back() = pending_timestamp;
+    if (pending) {
+        const auto& sample = group.streams[pending->stream]->samples[pending->sample];
+        if (result.samples.size() >= maximum_samples) {
+            result.samples.back() = sample;
+            result.timestamps.back() = pending->timestamp;
         } else {
-            result.samples.push_back(std::move(pending_sample));
-            result.timestamps.push_back(pending_timestamp);
+            result.samples.push_back(sample);
+            result.timestamps.push_back(pending->timestamp);
         }
     }
     if (!result.timestamps.empty()) {

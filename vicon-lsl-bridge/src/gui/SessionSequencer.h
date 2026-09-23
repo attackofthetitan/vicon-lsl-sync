@@ -22,8 +22,7 @@ struct ShutdownInputs {
     bool owned_process_end_requested = false;
 };
 
-// A recorder started here is closed once the recording has stopped, or once the
-// deadline passes with no stop, so closing cannot wait forever on it.
+// Close a recorder started here when it stops recording or the deadline passes.
 struct OwnedProcessDecision {
     bool end_now = false;
     bool forced_by_deadline = false;
@@ -31,13 +30,11 @@ struct OwnedProcessDecision {
 
 OwnedProcessDecision endOwnedProcessDecision(const ShutdownInputs& inputs);
 
-// Whether an external recorder dropped its connection while closing, which is
-// reported once but does not hold the window open.
+// A lost external recorder connection does not prevent the window from closing.
 bool recorderConnectionLostExternally(const ShutdownInputs& inputs);
 
-// The components still being waited on, in a stable order, named as they are
-// shown to the user. Empty means the window is ready to close. Call this after
-// acting on endOwnedProcessDecision so `owns_running_process` is current.
+// Lists what still needs to stop. Call after acting on endOwnedProcessDecision
+// so owns_running_process is current. An empty list means the window can close.
 QStringList shutdownWaitingOn(const ShutdownInputs& inputs);
 
 QString shutdownStatusText(const QStringList& waiting);

@@ -17,10 +17,6 @@
 namespace vicon_lsl::gui {
 namespace {
 
-QString jsonString(const QJsonObject& object) {
-    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
-}
-
 double readFiniteDouble(const QJsonObject& object, const char* key, double default_value = 0.0) {
     const double value = object.value(QLatin1String(key)).toDouble(default_value);
     return std::isfinite(value) ? value : default_value;
@@ -39,16 +35,6 @@ bool parseConfiguration(const QByteArray& bytes, const QString& bad_json,
     }
     if (error) *error = message;
     return message.isEmpty();
-}
-
-bool readFile(const QString& path, QByteArray& bytes, QString* error) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = file.errorString();
-        return false;
-    }
-    bytes = file.readAll();
-    return true;
 }
 
 StreamBinding makeBinding(const QString& role, const QString& name, bool required,
@@ -387,7 +373,8 @@ bool SessionConfigurationStore::savePreset(QSettings& settings, const QString& n
         if (error) *error = "Preset names must be non-empty and cannot contain '/'.";
         return false;
     }
-    settings.setValue("sessionPresets/" + n, jsonString(config.toJson()));
+    settings.setValue("sessionPresets/" + n,
+                      QString::fromUtf8(QJsonDocument(config.toJson()).toJson(QJsonDocument::Compact)));
     settings.sync();
     if (settings.status() != QSettings::NoError) {
         if (error) *error = "The preset settings store could not be written.";
@@ -420,9 +407,13 @@ bool SessionConfigurationStore::exportConfiguration(const QString& path,
 bool SessionConfigurationStore::importConfiguration(const QString& path,
                                                     SessionConfiguration& config,
                                                     QString* error) {
-    QByteArray bytes;
-    return readFile(path, bytes, error) &&
-           parseConfiguration(bytes, "The file is not valid session configuration JSON.", config, error);
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = file.errorString();
+        return false;
+    }
+    return parseConfiguration(file.readAll(), "The file is not valid session configuration JSON.",
+                              config, error);
 }
 
 } // namespace vicon_lsl::gui
