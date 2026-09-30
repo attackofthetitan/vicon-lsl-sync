@@ -30,7 +30,12 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int c
         emit commandFinished("connect", false, "Recorder shutdown is already in progress");
         return;
     }
-    if (active_batch_ || start_may_have_reached_server_ || recording_state_ == RecorderRecordingState::Recording) {
+    // A lost connection can always be replaced, still remembering that a Start
+    // may have been sent, so the new connection can send the Stop.
+    const bool connection_open = connection_state_ == RecorderConnectionState::Connected ||
+                                 connection_state_ == RecorderConnectionState::Connecting;
+    if (active_batch_ || (connection_open && (start_may_have_reached_server_ ||
+                                              recording_state_ == RecorderRecordingState::Recording))) {
         emit commandFinished("connect", false, "Recorder connection cannot be replaced while recording work is active");
         return;
     }

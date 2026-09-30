@@ -20,6 +20,13 @@
 
 namespace {
 
+// Frames between layout checks and status reports, and how long reads must stay
+// clean before they count as recovered.
+constexpr unsigned int kStatusIntervalFrames = 100;
+// Frame waits, about a second each, that may time out in a row before the
+// bridge reconnects.
+constexpr unsigned int kMaxFrameTimeouts = 5;
+
 vicon_lsl::bridge_internal::Dependencies liveDependencies(const Config& config) {
     vicon_lsl::bridge_internal::Dependencies dependencies;
     dependencies.client = std::make_shared<::ViconClient>(config.vicon_server);
@@ -57,6 +64,7 @@ void ViconLSLBridge::reportStatus(BridgeState state, const std::string& message)
         status.marker_count = known_layout_.markers.size();
         status.segment_count = known_layout_.segments.size();
         status.frame_count = frame_count_;
+        status.layout_change_count = layout_change_count_;
         status.message = message.empty() ? last_diagnostic_message_ : message;
         status_callback_(status);
     }
@@ -108,11 +116,26 @@ void ViconLSLBridge::run() {
 void ViconLSLBridge::streamFrames(vicon_lsl::ViconTimestampState& timestamp_state) {
     std::cout << "Streaming started" << std::endl;
     reportStatus(BridgeState::Streaming, "Streaming started");
+    // Vicon pauses briefly without dropping the connection, so a few missed
+    // frames keep the streams open for the recorder.
+    unsigned int frame_timeouts = 0;
     while (running_ && client_->isConnected()) {
         if (!client_->getFrame()) {
+            if (client_->frameTimedOut() && ++frame_timeouts < kMaxFrameTimeouts) {
+                if (frame_timeouts == 1) {
+                    std::cerr << "No Vicon frame arrived in time; waiting" << std::endl;
+                    reportStatus(BridgeState::Streaming, "Waiting for Vicon frames");
+                }
+                continue;
+            }
             std::cerr << "Lost connection, will reconnect" << std::endl;
             reportStatus(BridgeState::Connecting, "Lost connection, will reconnect");
             return;
+        }
+        if (frame_timeouts > 0) {
+            frame_timeouts = 0;
+            std::cerr << "Vicon frames resumed" << std::endl;
+            reportStatus(BridgeState::Streaming, "Vicon frames resumed");
         }
         frame_count_ = client_->frameNumber();
 
@@ -136,7 +159,7 @@ void ViconLSLBridge::streamFrames(vicon_lsl::ViconTimestampState& timestamp_stat
             return;
         }
 
-        if (++frames_since_layout_check_ >= 100) {
+        if (++frames_since_layout_check_ >= kStatusIntervalFrames) {
             frames_since_layout_check_ = 0;
             reportStatus(BridgeState::Streaming);
             if (!refreshStreams(BridgeState::Streaming)) {
@@ -153,6 +176,7 @@ void ViconLSLBridge::resetConnectedSession() {
     client_->disconnect();
     frame_count_ = 0;
     frames_since_layout_check_ = 0;
+    clean_frames_ = 0;
     known_layout_ = {};
     diagnostic_aggregator_.clear();
     last_diagnostic_message_.clear();
@@ -197,6 +221,11 @@ bool ViconLSLBridge::refreshStreams(BridgeState state) {
     known_layout_ = discovery.layout;
     diagnostic_aggregator_.clear();
     last_diagnostic_message_.clear();
+    clean_frames_ = 0;
+    // A recorder already receiving the old streams cannot follow new ones with
+    // different channels, even when the change happened during a reconnect.
+    if (published_layout_ && *published_layout_ != known_layout_) ++layout_change_count_;
+    published_layout_ = known_layout_;
 
     std::cout << "Discovered " << known_layout_.markers.size() << " markers and "
               << known_layout_.segments.size() << " segments" << std::endl;
@@ -256,7 +285,10 @@ void ViconLSLBridge::handleDiagnostics(
     const std::vector<vicon_lsl::ViconDiagnostic>& diagnostics,
     BridgeState state) {
     if (diagnostics.empty()) {
-        if (!last_diagnostic_message_.empty()) {
+        // A clean frame between occlusions is not a recovery, or a flickering
+        // marker would be logged afresh every other frame.
+        if (!last_diagnostic_message_.empty() && ++clean_frames_ >= kStatusIntervalFrames) {
+            clean_frames_ = 0;
             last_diagnostic_message_.clear();
             diagnostic_aggregator_.clear();
             reportStatus(state, "Vicon reads recovered");
@@ -264,6 +296,7 @@ void ViconLSLBridge::handleDiagnostics(
         return;
     }
 
+    clean_frames_ = 0;
     const auto emission = diagnostic_aggregator_.record(diagnostics);
     for (const auto& line : emission.log_lines) {
         std::cerr << line << std::endl;

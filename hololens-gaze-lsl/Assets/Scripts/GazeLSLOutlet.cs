@@ -155,7 +155,8 @@ namespace GazeLSL
                 $"suspended {acquisition.DrainSuspended} after " +
                 $"{acquisition.DrainSuspensions} suspension(s). Accepted " +
                 $"{acquisition.ReadingsAccepted}, not newer " +
-                $"{acquisition.ReadingsRejectedAsNotNewer}, " +
+                $"{acquisition.ReadingsRejectedAsNotNewer}, dropped after a clock change " +
+                $"{acquisition.ReadingsDroppedAfterClockChange}, " +
                 $"{acquisition.PendingRawReadings} waiting to convert. Conversion " +
                 $"{acquisition.TransformPasses} passes, " +
                 $"{acquisition.SamplesConverted} converted, " +

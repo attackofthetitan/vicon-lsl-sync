@@ -31,6 +31,8 @@ struct ManagedCalibrationProfile {
     bool retired = false;
 
     bool complete(QString* reason = nullptr) const;
+    // False for a setup whose gaze was never measured, such as the built-in one.
+    bool hasGazeCalibration() const;
     CalibrationProfile solverProfile() const;
     QJsonObject toJson() const;
     static ManagedCalibrationProfile fromJson(const QJsonObject& object,

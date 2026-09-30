@@ -44,12 +44,7 @@ double parseDoubleField(const std::string& text) {
     if (text.empty()) {
         return std::numeric_limits<double>::quiet_NaN();
     }
-    char* end = nullptr;
-    const double value = std::strtod(text.c_str(), &end);
-    if (end == text.c_str()) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    return value;
+    return parseCNumber(text);
 }
 
 std::size_t findColumn(const std::vector<std::string>& labels, const std::string& name) {

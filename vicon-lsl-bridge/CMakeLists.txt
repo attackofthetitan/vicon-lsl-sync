@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.15.0 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.15.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -68,6 +68,7 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/StreamSchema.cpp
     src/CommandLine.cpp
     src/ViconFrameMapper.cpp
+    src/ViconServerAddress.cpp
 )
 
 target_include_directories(vicon-lsl-bridge-logic PUBLIC src)

@@ -175,11 +175,9 @@ int parseIntTag(const std::string& xml, const std::string& tag, int default_valu
 
 double parseDoubleTag(const std::string& xml, const std::string& tag, double default_value) {
     const auto value = xmlTagValue(xml, tag);
-    try {
-        return value ? std::stod(*value) : default_value;
-    } catch (...) {
-        return default_value;
-    }
+    if (!value) return default_value;
+    const double parsed = parseCNumber(*value);
+    return std::isfinite(parsed) ? parsed : default_value;
 }
 
 // Uses the <label> values when there is one per channel, or else names the
@@ -429,6 +427,11 @@ void parseSamplesChunk(BinaryReader& reader,
         if (stream.sample_count == 0) {
             stream.start_timestamp = timestamp;
         } else {
+            // Counted here, over every sample, because only the kept ones are
+            // repaired later; text streams keep no times to repair.
+            if (stream.numeric && timestamp <= stream.end_timestamp) {
+                ++stream.repaired_timestamp_count;
+            }
             const double gap = timestamp - stream.end_timestamp;
             if (std::isfinite(gap) && gap > stream.maximum_sample_gap) {
                 stream.maximum_sample_gap = gap;
@@ -636,7 +639,9 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path,
                                   "Correcting XDF timestamps");
         XdfStreamData& stream = item.second;
         retainFinalSample(stream, options);
-        stream.repaired_timestamp_count = correctAndRepairTimestamps(stream);
+        // The clock correction can make two kept times equal that were not.
+        stream.repaired_timestamp_count =
+            (std::max)(stream.repaired_timestamp_count, correctAndRepairTimestamps(stream));
         if (!stream.timestamps.empty()) {
             stream.start_timestamp = stream.timestamps.front();
             stream.end_timestamp = stream.timestamps.back();

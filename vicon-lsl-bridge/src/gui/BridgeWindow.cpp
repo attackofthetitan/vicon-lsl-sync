@@ -167,10 +167,14 @@ BridgeWorker::BridgeWorker(const Config& config, QObject* parent)
 void BridgeWorker::run() {
     emit lifecycleChanged(ComponentLifecycleState::Starting, "Bridge worker started");
     try {
-        bridge_->setStatusCallback([this](const BridgeStatus& status) {
+        bridge_->setStatusCallback([this, layout_changes = 0u](const BridgeStatus& status) mutable {
             emit statusUpdate(static_cast<int>(status.state), static_cast<unsigned long long>(status.marker_count),
                               static_cast<unsigned long long>(status.segment_count), status.frame_count,
                               QString::fromStdString(status.message));
+            if (status.layout_change_count != layout_changes) {
+                layout_changes = status.layout_change_count;
+                emit layoutChanged();
+            }
         });
         bridge_->run();
         emit lifecycleChanged(ComponentLifecycleState::Stopped, stop_requested_.load() ? "Bridge stopped on request" : "Bridge run completed");
@@ -628,10 +632,13 @@ void BridgeWindow::validateRecordingPath(bool create_parent) {
 }
 
 void BridgeWindow::onFindNextRun() {
-    const int next = LabRecorderFilenamePolicy::findNextRun(ui_->filenameFields(), ui_->run_spin->value(), pathValidationOptions(false));
-    if (next > ui_->run_spin->value()) {
+    const int current = ui_->run_spin->value();
+    const int next = LabRecorderFilenamePolicy::findNextRun(ui_->filenameFields(), current, pathValidationOptions(false));
+    if (next > current) {
         ui_->run_spin->setValue(next);
         appendEvent(SessionComponent::Path, EventSeverity::Information, "Selected next unused run " + QString::number(next));
+    } else if (next == current) {
+        appendEvent(SessionComponent::Path, EventSeverity::Information, "Run " + QString::number(current) + " is not used yet");
     } else appendEvent(SessionComponent::Path, EventSeverity::Warning, "No unused run was found within the supported range");
 }
 
@@ -881,6 +888,18 @@ bool BridgeWindow::recordingActiveOrPending() const {
            labrecorder_client_->desiredRecordingState() == RecorderRecordingState::Recording;
 }
 
+// True when a Stop sent now would be taken rather than refused on the spot, so
+// Stop Session never asks again while another command is still running.
+bool BridgeWindow::recorderCanAcceptStop() const {
+    if (pending_recording_start_) return true;
+    if (recorder_process_->kind() == RecorderProcessKind::SelectedStreamRecorder &&
+        recorder_process_->ownsRunningProcess()) {
+        return recorder_process_->selectedStreamRecording();
+    }
+    return labrecorder_client_->isConnected() && !labrecorder_client_->shutdownRequested() &&
+           labrecorder_client_->operationState() == RecorderOperationState::Idle;
+}
+
 bool BridgeWindow::verificationActive() const {
     return verification_file_timer_->isActive() || verifier_ != nullptr;
 }
@@ -916,9 +935,21 @@ void BridgeWindow::refreshUi() {
 }
 
 void BridgeWindow::pumpSession() {
-    if (startingSession()) advanceGuidedStart();
-    if (stoppingSession()) advanceGuidedStop();
-    if (closing()) updateShutdownStatus();
+    // A step can make the recorder report back at once, which calls this again,
+    // so finish the current pass first and then run another.
+    if (pumping_session_) {
+        session_pump_again_ = true;
+        return;
+    }
+    pumping_session_ = true;
+    for (int pass = 0; pass < 4; ++pass) {
+        session_pump_again_ = false;
+        if (startingSession()) advanceGuidedStart();
+        if (stoppingSession()) advanceGuidedStop();
+        if (closing()) updateShutdownStatus();
+        if (!session_pump_again_) break;
+    }
+    pumping_session_ = false;
 }
 
 void BridgeWindow::updateReadiness() {
@@ -948,6 +979,7 @@ void BridgeWindow::onStart() {
     ui_->setBridgeInputsEnabled(false);
     appendEvent(SessionComponent::Bridge, EventSeverity::Information, "Bridge start requested for " + configuration_.vicon_endpoint);
     connect(worker_, &BridgeWorker::statusUpdate, this, &BridgeWindow::onStatusUpdate);
+    connect(worker_, &BridgeWorker::layoutChanged, this, &BridgeWindow::onBridgeLayoutChanged);
     connect(worker_, &BridgeWorker::lifecycleChanged, this, [this](ComponentLifecycleState s, const QString& d) {
         if (bridge_lifecycle_ == ComponentLifecycleState::Stopping && s == ComponentLifecycleState::Starting) return;
         bridge_lifecycle_ = s;
@@ -1013,6 +1045,20 @@ void BridgeWindow::onStatusUpdate(int state, unsigned long long markers, unsigne
     updateReadiness();
     updateDashboard();
     pumpSession();
+}
+
+// LabRecorder only takes a replaced stream back when its channels are the same,
+// and then keeps the old channel names, so a recording cannot follow the change.
+void BridgeWindow::onBridgeLayoutChanged() {
+    if (recordingActiveOrPending()) {
+        appendEvent(SessionComponent::Bridge, EventSeverity::Error,
+                    "The Vicon subjects or markers changed during the recording, so the bridge "
+                    "replaced its Vicon streams and this recording cannot follow them. Stop the "
+                    "recording and start a new one.");
+    } else {
+        appendEvent(SessionComponent::Bridge, EventSeverity::Warning,
+                    "The Vicon subjects or markers changed, so the bridge replaced its Vicon streams.");
+    }
 }
 
 bool BridgeWindow::bridgeStatusRecent() const {
@@ -1306,9 +1352,9 @@ void BridgeWindow::onStopRecording() {
         pumpSession();
         return;
     }
-    recording_stop_requested_ = true;
-    bool accepted = (recorder_process_->kind() == RecorderProcessKind::SelectedStreamRecorder && recorder_process_->ownsRunningProcess())
+    const bool accepted = (recorder_process_->kind() == RecorderProcessKind::SelectedStreamRecorder && recorder_process_->ownsRunningProcess())
         ? recorder_process_->stopSelectedStreamRecording() : labrecorder_client_->stopRecording();
+    if (accepted) recording_stop_requested_ = true;
     appendEvent(SessionComponent::Recorder, accepted ? EventSeverity::Information : EventSeverity::Warning,
                 accepted ? "The recorder was asked to stop" : "The recorder is already stopping or could not stop");
     refreshUi();
@@ -1356,6 +1402,7 @@ void BridgeWindow::advanceGuidedStart() {
 void BridgeWindow::onStopSession() {
     if (stoppingSession() || closing()) return;
     sequence_ = SessionSequence::StoppingSession;
+    guided_stop_wait_reported_ = false;
     setup_check_start_waiting_ = false;
     appendEvent(SessionComponent::Application, EventSeverity::Information, "Stopping the recorder, preview, and bridge");
     advanceGuidedStop();
@@ -1364,7 +1411,18 @@ void BridgeWindow::onStopSession() {
 void BridgeWindow::advanceGuidedStop() {
     if (!stoppingSession()) return;
     if (recordingActiveOrPending()) {
-        if (effectiveOperationState() != RecorderOperationState::Stopping) onStopRecording();
+        // Wait for a command in progress to finish, and for a lost recorder to
+        // be reconnected, rather than sending a Stop that would be refused.
+        if (recorderCanAcceptStop()) {
+            onStopRecording();
+        } else if (!guided_stop_wait_reported_ &&
+                   labrecorder_client_->connectionState() != RecorderConnectionState::Connected &&
+                   !recorder_process_->ownsRunningProcess()) {
+            guided_stop_wait_reported_ = true;
+            appendEvent(SessionComponent::Recorder, EventSeverity::Warning,
+                        "Stop Session is waiting to stop the recording, but the recorder is not "
+                        "connected. Select Connect to reconnect to it.");
+        }
         return;
     }
     if (verificationActive()) return;
@@ -1388,7 +1446,8 @@ void BridgeWindow::advanceGuidedStop() {
 }
 
 void BridgeWindow::requestVerification() {
-    if (pending_recording_path_.isEmpty() || verificationActive()) return;
+    // Closing stops the recording but does not wait to check the file.
+    if (closing() || pending_recording_path_.isEmpty() || verificationActive()) return;
     verification_report_.state = RecordingVerificationState::Running;
     verification_file_elapsed_.restart();
     verification_file_timer_->start();
@@ -1420,7 +1479,7 @@ void BridgeWindow::onVerificationFilePoll() {
 }
 
 void BridgeWindow::startVerifier() {
-    if (verifier_ || pending_recording_path_.isEmpty()) return;
+    if (closing() || verifier_ || pending_recording_path_.isEmpty()) return;
     verifier_ = new RecordingVerifier({pending_recording_path_, recording_inventory_,
         configuration_.recording_streams}, this);
     auto* started = verifier_;

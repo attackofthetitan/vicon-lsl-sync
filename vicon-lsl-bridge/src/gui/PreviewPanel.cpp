@@ -744,6 +744,8 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
 
     automatic_gaze_transform_ = gazeTransformFromTargetCalibration(profile, solution->holo_from_target);
     calibration_state_ = gui::SessionCalibrationState::AutomaticSession;
+    const gui::ManagedCalibrationProfile* measured_with = selectedCalibrationProfile();
+    calibration_source_id_ = measured_with ? measured_with->id : QString();
     calibration_quality_ = solution->quality;
     if (worker_) worker_->setGazeTransform(gazeTransform());
     reloadStairModel();
@@ -1098,6 +1100,7 @@ void PreviewPanel::resetCalibrationSession() {
     calibration_samples_.clear();
     calibration_state_ = gui::SessionCalibrationState::Uncalibrated;
     automatic_gaze_transform_ = {};
+    calibration_source_id_.clear();
 }
 
 PreviewTransformProfile PreviewPanel::stairTransform() const {
@@ -1201,6 +1204,10 @@ void PreviewPanel::applySelectedCalibrationProfile() {
         setStatus("Saved calibration is incomplete: " + reason);
         return;
     }
+    if (!profile->hasGazeCalibration()) {
+        setStatus(profile->display_name + " has no measured gaze calibration; select Calibrate to measure one");
+        return;
+    }
     bool metadata_matches = true;
     for (const gui::StreamIdentity& id : latest_stream_inventory_) {
         if (id.role == "gaze" && !id.coordinate_frame.isEmpty() && id.coordinate_frame != profile->gaze_coordinate_frame) metadata_matches = false;
@@ -1221,6 +1228,7 @@ void PreviewPanel::applySelectedCalibrationProfile() {
     automatic_gaze_transform_ = profile->gaze_transform;
     calibration_quality_ = profile->quality;
     calibration_state_ = gui::SessionCalibrationState::SavedProfile;
+    calibration_source_id_ = profile->id;
     if (worker_) worker_->setGazeTransform(gazeTransform());
     reloadStairModel();
     widget_->requestViewRefit();
@@ -1240,8 +1248,13 @@ void PreviewPanel::saveSessionCalibrationProfile() {
         return;
     }
     gui::ManagedCalibrationProfile* selected = selectedCalibrationProfile();
+    const auto source = std::find_if(calibration_profiles_.cbegin(), calibration_profiles_.cend(),
+        [this](const gui::ManagedCalibrationProfile& p) { return p.id == calibration_source_id_; });
     const QString display_name = calibration_profile_name_edit_->text().trimmed();
-    const bool create_new = !selected || selected->quality.sample_count == 0 || selected->retired;
+    // Only the saved calibration this one came from is updated; with another
+    // one selected, saving adds a new entry instead of overwriting that one.
+    const bool create_new = !selected || selected->id != calibration_source_id_ ||
+                            selected->quality.sample_count == 0 || selected->retired;
     gui::ManagedCalibrationProfile profile = selected ? *selected : gui::CalibrationProfileStore::defaultProfile();
     if (create_new) {
         profile.id = gui::CalibrationProfileStore::newProfileId(display_name, calibration_profiles_);
@@ -1254,7 +1267,10 @@ void PreviewPanel::saveSessionCalibrationProfile() {
     profile.stair_model_path = stair_model_edit_->text().trimmed();
     profile.stair_model_identity = gui::CalibrationProfileStore::stairModelIdentity(profile.stair_model_path);
     if (profile.stair_model_identity.isEmpty()) profile.stair_model_identity = QFileInfo(profile.stair_model_path).fileName();
-    profile.vicon_from_target = activeSolverProfile().vicon_from_target;
+    // The stair position the gaze calibration was measured against.
+    profile.vicon_from_target = source != calibration_profiles_.cend()
+        ? source->vicon_from_target
+        : defaultStairCalibrationProfile().vicon_from_target;
     profile.gaze_transform = gazeTransform();
     profile.gaze_coordinate_frame = gaze_frame_edit_->text().trimmed();
     profile.target_coordinate_frame = target_frame_edit_->text().trimmed();
@@ -1270,6 +1286,7 @@ void PreviewPanel::saveSessionCalibrationProfile() {
     saveCalibrationProfiles();
     refreshCalibrationProfileUi(profile.id);
     calibration_state_ = gui::SessionCalibrationState::SavedProfile;
+    calibration_source_id_ = profile.id;
     updateCalibrationPersistentStatus(gui::SessionCalibrationState::SavedProfile, calibration_quality_label_->text(), calibration_metadata_compatible_);
     setStatus("Saved calibration " + profile.display_name);
 }

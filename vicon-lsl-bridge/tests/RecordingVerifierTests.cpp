@@ -42,12 +42,11 @@ void writeChunk(std::ostream& output,
     output.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
 
-void writeVerifierXdf(const QString& path,
-                      const std::vector<double>& timestamps,
-                      const std::string& name = "Markers",
-                      const std::string& source_id = "markers-source") {
-    std::ofstream output(path.toStdString(), std::ios::binary);
-    output << "XDF:";
+void writeVerifierStream(std::ostream& output,
+                         std::uint32_t stream_id,
+                         const std::vector<double>& timestamps,
+                         const std::string& name,
+                         const std::string& source_id) {
     std::ostringstream xml;
     xml << "<?xml version=\"1.0\"?><info>"
         << "<name>" << name << "</name>"
@@ -63,7 +62,7 @@ void writeVerifierXdf(const QString& path,
         << "<channel><label>x</label></channel>"
         << "<channel><label>y</label></channel>"
         << "</channels></desc></info>";
-    writeChunk(output, 2, 1, xml.str());
+    writeChunk(output, 2, stream_id, xml.str());
 
     std::ostringstream samples;
     writeVarlen(samples, timestamps.size());
@@ -73,7 +72,16 @@ void writeVerifierXdf(const QString& path,
         writeLittle(samples, static_cast<double>(index));
         writeLittle(samples, static_cast<double>(index + 1));
     }
-    writeChunk(output, 3, 1, samples.str());
+    writeChunk(output, 3, stream_id, samples.str());
+}
+
+void writeVerifierXdf(const QString& path,
+                      const std::vector<double>& timestamps,
+                      const std::string& name = "Markers",
+                      const std::string& source_id = "markers-source") {
+    std::ofstream output(path.toStdString(), std::ios::binary);
+    output << "XDF:";
+    writeVerifierStream(output, 1, timestamps, name, source_id);
 }
 
 vicon_lsl::gui::RecordingVerificationReport runVerifier(
@@ -162,6 +170,39 @@ void testRecordingVerifierOutcomes() {
         if (finding.id == "sample-gaps") found_gap = true;
     }
     expect(found_gap, "warning report identifies the stream gap explicitly");
+
+    // The check keeps only a few samples, but every time that moved back counts.
+    std::vector<double> regressing_times;
+    for (int index = 0; index < 200; ++index) {
+        const bool moves_back = index > 0 && index % 20 == 0;
+        regressing_times.push_back(moves_back ? regressing_times.back() - 0.001
+                                              : 30.0 + index * 0.01);
+    }
+    const QString regressing_path = directory.filePath("regressing.xdf");
+    writeVerifierXdf(regressing_path, regressing_times);
+    const auto regressing = runVerifier(verificationRequest(regressing_path));
+    expect(regressing.streams.size() == 1 &&
+               regressing.streams.front().repaired_timestamp_count == 9 &&
+               regressing.hasWarnings(),
+           "the file check counts every timestamp that moved back");
+
+    // Markers stop after 0.02 s while another stream runs on for 5 s, as when
+    // the bridge replaces its streams during a recording.
+    const QString early_path = directory.filePath("ended-early.xdf");
+    {
+        std::ofstream output(early_path.toStdString(), std::ios::binary);
+        output << "XDF:";
+        writeVerifierStream(output, 1, {40.0, 40.01, 40.02}, "Markers", "markers-source");
+        std::vector<double> later_times;
+        for (int index = 0; index <= 500; ++index) later_times.push_back(40.0 + index * 0.01);
+        writeVerifierStream(output, 2, later_times, "Other", "other-source");
+    }
+    const auto early = runVerifier(verificationRequest(early_path));
+    int ended_early = 0;
+    for (const auto& finding : early.findings) {
+        if (finding.id == "stream-ended-early") ++ended_early;
+    }
+    expect(ended_early == 1, "a stream that stops seconds before the others is flagged");
 
     auto missing_request = verificationRequest(healthy_path);
     missing_request.expected_streams.front().source_id = "missing-source";

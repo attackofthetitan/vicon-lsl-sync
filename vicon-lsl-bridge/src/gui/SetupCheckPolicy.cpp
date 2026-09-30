@@ -3,6 +3,7 @@
 #include <QDateTime>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace vicon_lsl::gui {
@@ -12,6 +13,10 @@ namespace {
 // A stream that has never been measured passes, but one that has must have been
 // updated within this many milliseconds.
 constexpr qint64 kStreamFreshnessLimitMs = 2000;
+
+QString rateText(double rate) {
+    return rate > 0.0 ? QString::number(rate, 'f', 1) + " Hz" : QStringLiteral("an irregular rate");
+}
 
 } // namespace
 
@@ -74,6 +79,30 @@ SetupCheckResult runSetupCheck(const SetupCheckInputs& inputs,
         add(SessionComponent::Streams, SetupCheckLevel::Required, ready,
             ready ? name + " stream is ready" : name + " stream is not ready",
             "Start the saved stream source or choose the current one.");
+    }
+
+    // Rates only warn, since a slow stream can still be recorded.
+    for (const StreamBinding& binding : configuration.recording_streams) {
+        const auto found = std::find_if(inventory.cbegin(), inventory.cend(),
+                                        [&binding](const StreamIdentity& stream) {
+                                            return stream.present && binding.matches(stream);
+                                        });
+        if (found == inventory.cend()) continue;
+        const QString name = binding.role.isEmpty() ? binding.name : binding.role;
+        const double expected = binding.expected_nominal_rate;
+        if (expected > 0.0 && std::abs(found->nominal_rate - expected) > 0.01 * expected) {
+            add(SessionComponent::Streams, SetupCheckLevel::Warning, false,
+                name + " stream declares " + rateText(found->nominal_rate) + "; the settings expect " +
+                    rateText(expected),
+                "Check the source's frame rate, or choose the stream again to save its rate.");
+        }
+        if (found->nominal_rate > 0.0 && found->effective_rate > 0.0 &&
+            found->effective_rate < 0.8 * found->nominal_rate) {
+            add(SessionComponent::Streams, SetupCheckLevel::Warning, false,
+                name + " stream arrives at " + rateText(found->effective_rate) + ", below 80% of its " +
+                    rateText(found->nominal_rate),
+                "Check the stream source and its network connection.");
+        }
     }
 
     if (!inputs.record_every_visible_stream) {

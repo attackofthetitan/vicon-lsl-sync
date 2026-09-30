@@ -1,3 +1,4 @@
+#include "LocaleTestSupport.h"
 #include "MarkerStream.h"
 #include "SegmentStream.h"
 
@@ -548,6 +549,17 @@ void testMarkerAndSegmentTimestampPropagation() {
     }
 }
 
+void testRateMetadataIgnoresCommaLocale() {
+    const locale_test_support::CommaDecimalLocale comma_locale;
+    auto state = std::make_shared<OutletState>();
+    MarkerStream markers(fakeFactory(state));
+    markers.initialize({{"Subject", "Marker"}}, "markers", "marker_source", 119.88);
+    MetadataFields expected_acquisition = expectedIrregularAcquisitionMetadata();
+    expected_acquisition[2].second = "119.880000";
+    expect(state->streams.size() == 1 && state->streams[0].acquisition == expected_acquisition,
+           "the metadata rate is written with a decimal point whatever the locale");
+}
+
 } // namespace
 
 int main() {
@@ -560,6 +572,7 @@ int main() {
     testEmptyLayoutsAreHealthy();
     testReinitializeClosesBeforeCreatingReplacement();
     testMarkerAndSegmentTimestampPropagation();
+    testRateMetadataIgnoresCommaLocale();
     if (failures != 0) {
         std::cerr << failures << " test failure(s)" << std::endl;
         return 1;

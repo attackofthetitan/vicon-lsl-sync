@@ -311,6 +311,61 @@ void testConnectionStateTracksIdleDisconnectAndReconnect() {
            "reconnect preserves unknown recording state until a command is acknowledged");
 }
 
+void testReconnectAfterLossDuringStartCanStop() {
+    LabRecorderFilenameFields fields;
+    fields.root = "/tmp/data";
+    fields.templ = "run-%r.xdf";
+    fields.participant = "P001";
+    fields.session = "S001";
+    fields.task = "Reach";
+    fields.run = "1";
+    fields.acquisition = "vicon";
+    fields.modality = "beh";
+
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "lost Start server listens");
+    LabRecorderClient client;
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&] { return client.isConnected() && server.hasPendingConnections(); }),
+           "lost Start client connects");
+    std::unique_ptr<QTcpSocket> first(server.nextPendingConnection());
+    if (!first) return;
+
+    expect(client.startRecording(fields, true), "lost Start begins");
+    for (int command = 0; command < 3; ++command) {
+        expect(!readCommand(first.get()).isEmpty(), "lost Start preparation arrives");
+        expect(writeReply(first.get(), "OK"), "lost Start preparation is acknowledged");
+    }
+    expect(readCommand(first.get()) == "start", "Start reaches the recorder");
+    expect(!waitUntil([&] { return server.hasPendingConnections(); }, 50),
+           "no second connection is made while the first is open");
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(!waitUntil([&] { return server.hasPendingConnections(); }, 100),
+           "an open connection that may have sent Start is not replaced");
+
+    // The recorder goes away before it answers Start.
+    first->abort();
+    expect(waitUntil([&] {
+        return client.connectionState() != RecorderConnectionState::Connected;
+    }), "the lost connection is noticed");
+    expect(client.startMayHaveReachedServer(), "the app remembers Start may have been sent");
+
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&] { return client.isConnected() && server.hasPendingConnections(); }),
+           "a lost connection can be replaced");
+    std::unique_ptr<QTcpSocket> second(server.nextPendingConnection());
+    if (!second) return;
+    expect(client.startMayHaveReachedServer(),
+           "reconnecting still remembers Start may have been sent");
+    expect(client.stopRecording(), "Stop can be sent on the new connection");
+    expect(readCommand(second.get()) == "stop", "Stop reaches the recorder");
+    expect(writeReply(second.get(), "OK"), "Stop is acknowledged");
+    expect(waitUntil([&] {
+        return client.recordingState() == RecorderRecordingState::Stopped &&
+               !client.startMayHaveReachedServer();
+    }), "a confirmed Stop clears the pending Start");
+}
+
 void testRecorderDuplicateAndShutdownProtocol() {
     LabRecorderFilenameFields fields;
     fields.root = "/tmp/data";

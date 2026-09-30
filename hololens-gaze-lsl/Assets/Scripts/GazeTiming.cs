@@ -27,6 +27,15 @@ namespace GazeLSL
                    !double.IsInfinity(ageSeconds) &&
                    Math.Abs(ageSeconds) <= MaxSeedCaptureAgeSeconds;
         }
+
+        // A reading cannot be taken well after we ask for it, so one that seems to
+        // be means the headset clock was changed in between, and its age is wrong.
+        public static bool IsPossibleCaptureAge(double ageSeconds)
+        {
+            return !double.IsNaN(ageSeconds) &&
+                   !double.IsInfinity(ageSeconds) &&
+                   ageSeconds >= -MaxSeedCaptureAgeSeconds;
+        }
     }
 
     // Compares the SDK's whole-number timestamps, not converted times, and a new

@@ -200,6 +200,21 @@ void RecordingVerifier::run() {
         if (std::isfinite(earliest) && std::isfinite(latest) && latest >= earliest) {
             report.duration_seconds = latest - earliest;
         }
+        // A regular stream that stops well before the others usually lost its
+        // source, as when a Vicon layout change replaces the bridge's streams.
+        for (const XdfStreamData& stream : loaded.streams) {
+            if (stream.sample_count == 0 || stream.nominal_srate <= 0.0 || !std::isfinite(latest)) {
+                continue;
+            }
+            const double stopped_early = latest - stream.end_timestamp;
+            if (stopped_early > (std::max)(2.0, 10.0 / stream.nominal_srate)) {
+                const QString label = streamLabel(stream);
+                addFinding(report, EventSeverity::Warning, "stream-ended-early", label,
+                           label + " stopped " + QString::number(stopped_early, 'f', 1) +
+                               " s before the recording ended",
+                           "Check whether its source stopped or replaced its streams, for example after the Vicon subjects changed.");
+            }
+        }
 
         for (const StreamBinding& expected : request_.expected_streams) {
             if (!expected.required) continue;

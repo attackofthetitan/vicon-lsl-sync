@@ -92,11 +92,17 @@ not divide those ticks by `Stopwatch.Frequency`, and do not use
 `TimeSpan.TicksPerSecond`.
 
 The capture time we publish does not come from those ticks either. Each time the
-app asks for readings, it reads `DateTime.Now` and `LSL.local_clock()` once,
+app asks for readings, it reads `DateTime.UtcNow` and `LSL.local_clock()` once,
 together. Every reading it gets then works out its own time from how old the SDK
-says it is:
+says it is, with both date and time values in UTC so a time zone or daylight
+saving change cannot move it:
 
 `lsl_timestamp_seconds = query_lsl_clock - (query_time - reading.Timestamp)`
+
+A reading that seems captured more than 50 ms after the ask means the headset's
+clock was changed between the capture and the ask, so its time cannot be worked
+out. It is skipped and counted in the gaze acquisition log, and the next ask
+waits a frame.
 
 Do not replace this with Unity's frame time, or with `LSL.local_clock()` read at
 the moment the sample is sent.
@@ -114,7 +120,9 @@ Instead, each step works forward from the last capture time it accepted:
 `TryGetReadingAfterSystemRelativeTime(TimeSpan.FromTicks(last_accepted_ticks))`
 
 It keeps going until the SDK has nothing newer, or until it has taken 32
-readings. That way, no reading is lost when a step runs late.
+readings. That way, a step that runs a little late loses no reading. One that
+falls more than 500 ms behind still loses the older readings, because the queue
+keeps at most 500 ms of them (see below).
 
 On this device, the SDK cannot say "nothing newer" cleanly. Its C# code does not
 check for that empty result, so the normal end of a catch-up shows up as a

@@ -16,6 +16,7 @@ internal static partial class Program
             GazeSampleEncodingMatchesContract,
             GazeTimingTakesDurationsInOneDomain,
             GazeTimingJudgesSeedAgeOnOneClock,
+            GazeTimingRejectsReadingsFromAfterTheAsk,
             GazeReadingGateRejectsDuplicateAndRegression,
             GazeReadingGateExposesDrainCursor,
             GazeDrainAsksOnlyWhenAReadingCouldExist,

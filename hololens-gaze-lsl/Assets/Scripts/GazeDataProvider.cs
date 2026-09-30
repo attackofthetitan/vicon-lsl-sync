@@ -27,6 +27,7 @@ namespace GazeLSL
         public int DrainSuspensions;
         public int ReadingsAccepted;
         public int ReadingsRejectedAsNotNewer;
+        public int ReadingsDroppedAfterClockChange;
         public int PendingRawReadings;
         public int TransformPasses;
         public int SamplesConverted;
@@ -275,7 +276,8 @@ namespace GazeLSL
 #endif
         }
 
-        // GazeLSLOutlet calls this only after SDK reads keep failing.
+        // GazeLSLOutlet calls this after SDK reads keep failing, and this class
+        // calls it after locating the tracker fails.
         public async void RestartTrackingSession()
         {
 #if ENABLE_WINMD_SUPPORT
@@ -308,7 +310,8 @@ namespace GazeLSL
         // "now" returns only one reading and a late ask would lose the rest.
         private void AcquireRawReadingLocked()
         {
-            DateTime queryTime = DateTime.Now;
+            // UTC, so a time zone or daylight saving change cannot move the readings.
+            DateTime queryTime = DateTime.UtcNow;
             double queryLslTime = LSL.LSL.local_clock();
 
             if (!readingGate.HasReading || drainPolicy.IsSuspended(queryLslTime))
@@ -404,7 +407,7 @@ namespace GazeLSL
 
             // Record the age of every reading offered, so a refused reading a moment
             // old can be told apart from one minutes old.
-            double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
+            double ageSeconds = (queryTime - reading.Timestamp.ToUniversalTime()).TotalSeconds;
             counters.LastReadingAgeSeconds = ageSeconds;
 
             if (!GazeTiming.IsFreshSeedAge(ageSeconds))
@@ -430,11 +433,20 @@ namespace GazeLSL
                 return false;
             }
 
-            counters.ReadingsAccepted++;
-
             // Every reading in this batch uses the same two clock readings, but
             // keeps its own capture time.
-            double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
+            double ageSeconds = (queryTime - reading.Timestamp.ToUniversalTime()).TotalSeconds;
+            if (!GazeTiming.IsPossibleCaptureAge(ageSeconds))
+            {
+                // The headset clock changed between this reading and the ask, so
+                // its time is unknown. Skip it, carry on after it, and treat it as
+                // taken no later than the ask so the next ask waits a frame.
+                counters.ReadingsDroppedAfterClockChange++;
+                lastAcceptedCaptureLslTime = queryLslTime;
+                return true;
+            }
+
+            counters.ReadingsAccepted++;
 
             RawGazeReading raw = new RawGazeReading
             {

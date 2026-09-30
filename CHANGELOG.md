@@ -2,6 +2,43 @@
 
 This file lists what changed in each release.
 
+## [1.15.1] - 2026-10-01
+
+### Fixed
+
+- Stopping a session no longer crashes the app. If the recorder connection was
+  lost, **Connect** works again, and the session stops the recording once it
+  reconnects.
+- The Linux download now runs without installing anything else.
+- LabRecorder keeps recording after you close the app on Linux or a Mac.
+- CSV and XDF files are read correctly on computers that write numbers with a
+  decimal comma.
+- The file check now counts every timestamp it had to fix. Closing the app no
+  longer waits up to 15 seconds for a file check.
+- Short Vicon pauses no longer close and reopen the Vicon streams, and a marker
+  that keeps disappearing and reappearing no longer fills the log.
+- Server settings with more than one Vicon address now connect.
+- **Save Session Calibration** no longer overwrites a different saved
+  calibration, and the built-in stair setup can no longer be applied as if it
+  had been measured.
+- CSV playback no longer shows each segment as an extra marker.
+- **Find Next Run** now says when the current run is still free.
+- The HoloLens stair target stream closes as soon as it stops, and gaze times no
+  longer shift when the headset's time zone or clock changes.
+
+### Changed
+
+- The app shows an error if the Vicon subjects or markers change during a
+  recording, because the recording cannot follow the change. The file check
+  also warns when a stream stops early.
+- The setup check warns when a stream's rate is too low or differs from the
+  saved one.
+
+### Compatibility
+
+- In the Linux download, LabRecorder is now in the `labrecorder` folder.
+- Streams, recordings, saved settings, and command-line options are unchanged.
+
 ## [1.15.0] - 2026-09-23
 
 ### Added
@@ -694,7 +731,8 @@ This file lists what changed in each release.
 - Setting names, build targets, and release filenames also stay the same.
 - The HoloLens 2, Vuforia, Vicon, and LabRecorder hardware setup was not available for this release. Automated stream, timing, start/stop, recovery, recording, and package checks passed. Use `v1.10.4` as the rollback version if a hardware problem appears.
 
-[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.7...v1.15.0
 [1.14.7]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.6...v1.14.7
 [1.14.6]: https://github.com/attackofthetitan/vicon-lsl-sync/compare/v1.14.5...v1.14.6
