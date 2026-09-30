@@ -9,8 +9,8 @@ namespace vicon_lsl::gui {
 
 namespace {
 
-// A stream that has never been measured is accepted; one that has been must
-// have been updated recently.
+// A stream that has never been measured passes, but one that has must have been
+// updated within this many milliseconds.
 constexpr qint64 kStreamFreshnessLimitMs = 2000;
 
 } // namespace

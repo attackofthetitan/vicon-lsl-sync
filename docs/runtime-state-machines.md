@@ -166,7 +166,7 @@ stateDiagram-v2
 `connectToServer()` replaces the old connection:
 
 1. Stop both timers.
-2. Fail any work in progress as replaced.
+2. End any work in progress as failed, because the connection was replaced.
 3. Throw away unsent command data and partial replies.
 4. Close the old connection straight away.
 5. Store the connection and command timeouts separately.
@@ -244,16 +244,16 @@ Keep these rules:
 - Only one command in that group waits for a reply.
 - Keep any part of a command that has not been sent yet.
 - Keep pieces of a reply until `OK` can be checked.
-- Skip leading carriage returns, line feeds, spaces, and tabs.
+- Skip line breaks, spaces, and tabs at the start of a reply.
 - The two letters `OK` are enough. Do not wait for the rest of the line.
 - A failure ends the group and closes the connection.
 - A successful group only changes the recording state if the group says which state it leads to (anything other than `Unknown`).
 - In record-every-visible-stream mode, Start is one unbroken group: `update`, `select all`, `filename`, `start`.
 - Closing while Start is running lets that group finish, then sends exactly one
   Stop. All new work is refused once closing begins.
-- A timeout, bad reply, disconnect, or allowed connection replacement fails the
-  work in progress and sets both the confirmed and wanted state back to
-  `Unknown`. Replacing the connection is refused while recording work is running
+- A timeout, bad reply, disconnect, or allowed connection replacement ends the
+  work in progress as failed and sets both the confirmed and wanted state back
+  to `Unknown`. Replacing the connection is refused while recording work is running
   on it. Reconnecting after the connection was lost remembers that Start may have
   reached the recorder, until Stop is confirmed.
 
@@ -456,11 +456,11 @@ preview understands is found, loading fails instead of picking some unrelated
 number stream.
 
 Playback is `Loaded`, `Playing`, or `Paused`. Jumping updates the shared CSV/XDF
-clock without changing speed. Jumps to the start and end, single-frame and
-set-time steps, stopping at the end with loop off, wrapping round with loop on,
-opening recent files, drag-and-drop, and exporting the current picture are all
-things the user chooses. The memory limit caps the decoded result, and skipping
-frames when drawing does not change the file check numbers.
+clock without changing speed. The user can also jump to the start or end, step
+one frame or a set time, open recent files, drag and drop a file, and export the
+current picture. At the end, playback stops when loop is off and wraps round
+when loop is on. The memory limit caps the decoded result, and skipping frames
+when drawing does not change the file check numbers.
 
 ### Stair alignment
 
@@ -588,8 +588,8 @@ Four counters and checks keep old work out of a new session:
 Each time the publisher runs:
 
 1. `TryGetNextSample` works through every reading made since the last accepted capture time, up to 32 per step, while holding the tracker lock. It does not ask until one frame period plus the measured delivery delay has passed since that capture. It stops once a reading brings it up to the newest reading the tracker has made. If there is no last capture time yet, or working through readings is paused, it asks for the reading at the current time instead.
-2. Refuse a reading with a missing, repeated, out-of-order, or broken capture time. Refuse a reading fetched for the current time if it is old; an old reading from working through the backlog only means the step is catching up.
-3. A read that fails inside the SDK does not hold back samples that are already converted and waiting. Send the waiting sample, and only report the failure once the queue is empty, so recovery still sees failures that keep happening. After three of the SDK's broken "nothing newer" results since reading last resumed, pause working through the backlog for ten seconds. A good reading does not wipe that count.
+2. Refuse a reading with a missing, repeated, out-of-order, or broken capture time. Refuse a reading fetched for the current time if it is old. An old reading found while working through earlier readings only means the step is catching up.
+3. A read that fails inside the SDK does not hold back samples that are already converted and waiting. Send the waiting sample, and only report the failure once the queue is empty, so recovery still sees failures that keep happening. After three of the SDK's broken "nothing newer" results since reading last resumed, stop working through earlier readings for ten seconds. A good reading does not wipe that count.
 4. Copy the combined ray, and the left and right rays if they are there, in tracker coordinates.
 5. Add the raw reading, keeping the queue within 500 ms and 360 items.
 6. Unity's `Update` handles at most 32 raw readings. For each, find where the headset was at the original capture time, move the rays into the world, and add a `GazeSample` to the next queue.
@@ -601,7 +601,7 @@ If looking up the headset position simply fails, still make a sample at the capt
 
 ```mermaid
 stateDiagram-v2
-    [*] --> WaitingForTracker: Start and links are valid
+    [*] --> WaitingForTracker: Start with config and gaze reader set
     WaitingForTracker --> Publishing: active session reports 90 Hz
     Publishing --> Stopping: rate or session goes away or changes
     Publishing --> RecoveringProvider: gaze reader keeps failing
@@ -622,7 +622,7 @@ Keep these rules:
 - Treat an error from the LSL output as a permanent worker failure.
 - When reopening the stream, use the saved name, type, source ID, and current expected rate.
 
-The stair target output is simpler. It checks its links, opens one stream, and sends in every `LateUpdate`. An error while opening or sending turns it off. Destroying it lets go of its links.
+The stair target output is simpler. It checks that it has a config and a model target, opens one stream, and sends in every `LateUpdate`. An error while opening or sending turns it off. Destroying it lets go of its stream.
 
 ### Device tests
 

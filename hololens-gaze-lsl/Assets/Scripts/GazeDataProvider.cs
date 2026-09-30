@@ -9,9 +9,8 @@ using Microsoft.MixedReality.OpenXR;
 
 namespace GazeLSL
 {
-    // Counts for each step between the SDK and a sample ready to send. Any step
-    // can lose a reading without a trace, and from outside they all look the
-    // same, so these counts show which step is at fault.
+    // Counts for each step between the SDK and a sample ready to send, which show
+    // where readings are lost because every step looks the same from outside.
     public struct GazeAcquisitionSnapshot
     {
         public int SeedAttempts;
@@ -131,8 +130,8 @@ namespace GazeLSL
 #endif
         }
 
-        // TryGetEffectiveFrameRate reports the rate the device was set to, even if
-        // it has slowed itself down. This measures what actually arrived.
+        // Measures the rate that actually arrived, because TryGetEffectiveFrameRate
+        // only reports the rate the device was set to.
         public bool TryGetMeasuredFrameRate(out double samplesPerSecond, out long generation)
         {
             samplesPerSecond = 0.0;
@@ -176,8 +175,8 @@ namespace GazeLSL
 #endif
         }
 
-        // changeCount goes up on every change, so a caller that checks rarely
-        // still sees that calibration changed, even if it missed a value between.
+        // changeCount goes up on every change, so a caller that checks rarely still
+        // sees that calibration changed even if it missed a value in between.
         public bool TryGetCalibrationState(out bool valid, out int changeCount)
         {
             valid = false;
@@ -242,9 +241,9 @@ namespace GazeLSL
                     }
                     catch (Exception e)
                     {
-                        // Samples already converted are still good. Throwing here
-                        // would leave them stuck behind the failure, which once
-                        // made a working tracker send nothing at all.
+                        // Hold the failure so samples already converted still go
+                        // out, because throwing here once made a working tracker
+                        // send nothing at all.
                         acquireFailure =
                             System.Runtime.ExceptionServices.ExceptionDispatchInfo
                                 .Capture(e);
@@ -265,8 +264,8 @@ namespace GazeLSL
 
             if (acquireFailure != null)
             {
-                // Nothing was left to send, so pass the failure on. The caller
-                // counts it towards restarting the tracker.
+                // Nothing was left to send, so pass the failure on for the caller
+                // to count towards restarting the tracker.
                 acquireFailure.Throw();
             }
 
@@ -276,7 +275,7 @@ namespace GazeLSL
 #endif
         }
 
-        // The outlet calls this only after SDK reads keep failing.
+        // GazeLSLOutlet calls this only after SDK reads keep failing.
         public async void RestartTrackingSession()
         {
 #if ENABLE_WINMD_SUPPORT
@@ -305,8 +304,8 @@ namespace GazeLSL
         }
 
 #if ENABLE_WINMD_SUPPORT
-        // Takes every reading made since the last one accepted. Asking for "now"
-        // only returns one reading, so a late ask would lose the ones in between.
+        // Takes every reading made since the last one accepted, because asking for
+        // "now" returns only one reading and a late ask would lose the rest.
         private void AcquireRawReadingLocked()
         {
             DateTime queryTime = DateTime.Now;
@@ -320,9 +319,8 @@ namespace GazeLSL
 
             for (int index = 0; index < GazeTiming.MaxReadingsPerAcquire; index++)
             {
-                // Stop when the tracker cannot have a new reading ready yet: both
-                // before the first ask and after a reading that catches up. On this
-                // device, asking for a reading that is not ready yet fails.
+                // Stop as soon as the tracker cannot have a new reading ready yet,
+                // because asking too early fails on this device.
                 if (!GazeDrainPolicy.CouldHaveNewerReading(
                         queryLslTime,
                         lastAcceptedCaptureLslTime,
@@ -342,10 +340,9 @@ namespace GazeLSL
                 }
                 catch (NullReferenceException)
                 {
-                    // On this device the SDK says "no newer reading" by throwing
-                    // this instead of returning null, and leaves behind an object
-                    // that throws again later. End the step here. A few of these
-                    // pause catching up for ten seconds.
+                    // On this device the SDK throws this instead of returning null
+                    // when there is no newer reading, so end the step here, and a
+                    // few of these pause catching up for ten seconds.
                     counters.DrainFailedEmptyResults++;
                     NoteFailedDrainEmptyResultLocked(queryLslTime);
                     return;
@@ -367,9 +364,8 @@ namespace GazeLSL
             }
         }
 
-        // Each failure leaks a broken SDK object that throws again later, so
-        // catching up is paused quickly. Only the first pause is logged. The total
-        // is in the counters, and repeating the warning would add nothing.
+        // Logs only the first pause, because the counters already hold the total
+        // and repeating the warning would add nothing.
         private void NoteFailedDrainEmptyResultLocked(double queryLslTime)
         {
             if (!drainPolicy.NoteFailedEmptyResult(queryLslTime) ||
@@ -393,9 +389,8 @@ namespace GazeLSL
             return 1.0 / rate;
         }
 
-        // Gets the first reading to catch up from, and is the only way readings
-        // are fetched while catching up is paused. Only a reading fetched for
-        // "now" is judged on age.
+        // Asks for the reading at the current time, which is how a catch-up starts
+        // and the only way to get readings while catching up is paused.
         private void AcquireReadingAtTimestampLocked(DateTime queryTime, double queryLslTime)
         {
             counters.SeedAttempts++;
@@ -407,8 +402,8 @@ namespace GazeLSL
                 return;
             }
 
-            // Record the age of every reading offered. Otherwise a reading a moment
-            // old and one minutes old would look the same when refused.
+            // Record the age of every reading offered, so a refused reading a moment
+            // old can be told apart from one minutes old.
             double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
             counters.LastReadingAgeSeconds = ageSeconds;
 
@@ -421,7 +416,7 @@ namespace GazeLSL
             EnqueueReadingLocked(reading, queryTime, queryLslTime);
         }
 
-        // Returns false if the reading is not newer than the last one. That both
+        // Returns false if the reading is not newer than the last one, which both
         // skips repeats and ends a catch-up.
         private bool EnqueueReadingLocked(
             EyeGazeTrackerReading reading,
@@ -437,8 +432,8 @@ namespace GazeLSL
 
             counters.ReadingsAccepted++;
 
-            // Every reading in this batch uses the same clock pair, but keeps its
-            // own capture time.
+            // Every reading in this batch uses the same two clock readings, but
+            // keeps its own capture time.
             double ageSeconds = (queryTime - reading.Timestamp).TotalSeconds;
 
             RawGazeReading raw = new RawGazeReading
@@ -483,7 +478,7 @@ namespace GazeLSL
             lock (trackerGate)
             {
                 // If this stays at zero, Unity is not calling Update on this
-                // component. Nothing else here would show that.
+                // component, which nothing else here would show.
                 counters.TransformPasses++;
             }
 
@@ -713,8 +708,8 @@ namespace GazeLSL
                         previousTracker = tracker;
                         tracker = newTracker;
                         trackerNode = newTrackerNode;
-                        // Start fresh for the new tracker. Readings from the old
-                        // session must never be compared with this one's clock.
+                        // Start fresh for the new tracker, because readings from the
+                        // old session must never be compared with this one's clock.
                         ResetReadingPipelineLocked();
                         selectedFrameRate = activeFrameRate;
                         includeIndividualEyes = perEye;
@@ -893,8 +888,7 @@ namespace GazeLSL
             counters = default(GazeAcquisitionSnapshot);
         }
 
-        // The caller must hold trackerGate. Each caller bumps the generation
-        // counters itself.
+        // The caller must hold trackerGate and bump the generation counters itself.
         private void ClearActiveTrackerLocked()
         {
             tracker = null;

@@ -33,8 +33,8 @@ OwnedProcessDecision endOwnedProcessDecision(const ShutdownInputs& inputs);
 // A lost external recorder connection does not prevent the window from closing.
 bool recorderConnectionLostExternally(const ShutdownInputs& inputs);
 
-// Lists what still needs to stop. Call after acting on endOwnedProcessDecision
-// so owns_running_process is current. An empty list means the window can close.
+// Lists what still needs to stop before the window can close, and must be called
+// after acting on endOwnedProcessDecision so owns_running_process is current.
 QStringList shutdownWaitingOn(const ShutdownInputs& inputs);
 
 QString shutdownStatusText(const QStringList& waiting);

@@ -451,7 +451,7 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->main_splitter->setSizes({520, 980});
     main_layout->addWidget(ui->main_splitter, 1);
 
-    // Added last so it sees every text field. The window owns it.
+    // Added last so it sees every text field.
     new LineEditStartKeeper(window);
     return ui;
 }

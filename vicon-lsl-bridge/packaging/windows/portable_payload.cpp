@@ -61,9 +61,8 @@ std::uint32_t readDword(const unsigned char* bytes) {
            (static_cast<std::uint32_t>(bytes[3]) << 24);
 }
 
-// A signed .exe keeps its signature at the end of the file, and its header
-// records where the signature starts as a file offset. Our ZIP and footer sit
-// before the signature, so that offset is where our data ends.
+// Our data ends where a signed .exe's signature starts, which the .exe header
+// records, because the ZIP and footer sit just before the signature.
 std::uint64_t logicalFileEnd(std::ifstream& input, std::uint64_t file_size) {
     std::array<unsigned char, 64> dos_header{};
     if (file_size < dos_header.size() || !readAt(input, 0, dos_header.data(), dos_header.size()) ||

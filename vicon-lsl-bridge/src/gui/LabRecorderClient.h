@@ -11,8 +11,8 @@
 #include "gui/LabRecorderFilenamePolicy.h"
 #include "gui/SessionState.h"
 
-// Controls LabRecorder through its remote-control port. Runs one group of
-// commands at a time and sends each command only after the last one got "OK".
+// Controls LabRecorder through its remote-control port, running one group of
+// commands at a time and sending each command only after the last got "OK".
 class LabRecorderClient : public QObject {
     Q_OBJECT
 public:

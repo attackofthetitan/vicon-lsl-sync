@@ -50,8 +50,8 @@ data out of this app.
 - The first time reading the first frame fails, retry right away, because a
   server that is still starting up usually answers on the next try. If it keeps
   failing, wait the reconnect interval before each later retry, so a server that
-  accepts connections but never sends a frame cannot cause a tight retry loop.
-  Getting past the first frame resets the count.
+  accepts connections but never sends a frame cannot make the bridge retry
+  nonstop. Getting past the first frame resets the count.
 - Treat the connection as lost when either our own record or the Vicon SDK says
   it is no longer connected.
 - `stop()` only flips the run flag.
@@ -146,20 +146,19 @@ Both Vicon streams carry these exact details:
 
 Origins are in `meters`, directions are `normalized`, and valid flags are `bool`.
 
-The app opens the stream only after the eye tracker says it is running at 90 Hz and gives a position anchor (a spatial graph node). It sends the original capture time, which must be positive and finite. If a sample has a bad time, the app drops it instead of making up a new time.
+The app opens the stream only after the eye tracker says it is running at 90 Hz and gives a position anchor (`SpatialGraphNode`). It sends the original capture time, which must be positive and finite. If a sample has a bad time, the app drops it instead of making up a new time.
 
 The declared rate is the rate the tracker reported for the mode it accepted. It
-is fixed in the stream header and says what the device was asked for, not what
-it actually delivers: a tracker that slows itself down still reports the rate it
-was set to. So the app also measures the real rate from the capture times it
-accepts, and logs a warning while that stays below 80% of the declared rate. It
-does not reopen the stream when this happens, because the declared rate cannot
-change partway through and reopening would lose more data than the low rate
-does.
+is fixed in the stream header and only says what the device was asked for. A
+tracker that slows itself down still reports the rate it was set to, so the app
+also measures the real rate from the capture times it accepts. It logs a warning
+while that rate stays below 80% of the declared rate. It does not reopen the
+stream when this happens, because the declared rate cannot change partway
+through, and reopening would lose more data than the low rate does.
 
 If the tracker has no data for one eye, that eye still takes up its place in the 21 values and is marked invalid.
 
-If the gaze reader keeps failing, the app stops the worker, looks for the tracker again, and later reopens the stream. Any other serious worker or stream error logs the error and turns publishing off.
+If the gaze reader keeps failing, the app stops the worker, looks for the tracker again, and later reopens the stream. Any other serious worker or stream error logs the error and stops sending.
 
 The gaze stream carries these details:
 
@@ -201,7 +200,7 @@ That reference averages the positions and rotations (with rotation signs lined
 up first) in the already-flipped shared world. It is not flipped a second time.
 All 20 samples must stay within 2 cm and 3 degrees of the first one. Without a
 steady reference, paused samples stay invalid. Turning Vuforia back on or
-turning the outlet off clears the reference. If a tracked position suddenly
+turning off `VuforiaModelTargetPoseOutlet` clears the reference. If a tracked position suddenly
 jumps, the old reference is thrown away before a new one is collected.
 
 Compatibility: the stream keeps its eight channels, labels, order, source ID,
@@ -227,19 +226,19 @@ Each of these counts as a stream change that needs its own plan:
 
 - Default host: `localhost`.
 - Default port: `22345`.
-- A request to connect again is refused while Start, Stop, confirmed recording,
-  or a Start that may have been sent is still active on the current connection.
-- Otherwise, the app stops both timers, fails any work in progress, closes the
-  old connection, sets the recording state to unknown, and starts the new
-  connection timer. Reconnecting after the connection was lost still remembers
-  that a Start may have been sent, until Stop is confirmed.
+- A request to connect again is refused while the current connection is running
+  Start or Stop, is confirmed to be recording, or may have sent a Start.
+- Otherwise, the app stops both timers, marks any work in progress as failed,
+  closes the old connection, sets the recording state to unknown, and starts the
+  new connection timer. Reconnecting after the connection was lost still
+  remembers that a Start may have been sent, until Stop is confirmed.
 - End each command with a newline.
 - Send one group of commands at a time.
 - Send the next command only after the current reply starts with `OK`.
 - Skip spaces, tabs, and line breaks before `OK`.
 - Keep partial replies until enough text arrives.
-- An unexpected reply, connection error, command timeout, or disconnect fails
-  the current group.
+- An unexpected reply, connection error, command timeout, or disconnect ends
+  the current group as failed.
 - It also sets the recording state to unknown and closes the connection.
 - The connection timeout and command timeout are separate.
 
@@ -286,17 +285,30 @@ break the recorder command, so the app refuses them and says which field to fix.
 It never quietly changes a path it accepted. Spaces at the start and end are
 removed. Empty optional fields are left out of the remote `filename` command.
 
-Do not start recording unless all of these hold: the study folder is a full path
-that exists; the template is a relative path; participant, session, task,
-acquisition, modality, and a positive run are filled in; no `%` token is left
-over; and the final file stays inside the study folder, unless the advanced
-"allow outside the study folder" option is on. Add `.xdf` if the template does
-not already end with it. Refuse `..` steps that climb out of a folder, links
-that point outside it, full paths as templates, names or characters Windows does
-not allow, names ending in a space or a dot, paths that are too long, places that
-cannot be written to, and files that already exist unless overwriting is turned
-on. Missing folders are only created once Start is accepted. Low or unknown free
-space shows a warning at the level you set; it is never silent.
+Only start recording when all of these are true:
+
+- The study folder is a full path that exists.
+- The template is a relative path.
+- Participant, session, task, acquisition, modality, and a positive run are
+  filled in.
+- No `%` token is left over.
+- The final file stays inside the study folder, unless the advanced "allow
+  outside the study folder" option is on.
+
+Add `.xdf` if the template does not already end with it.
+
+Refuse:
+
+- `..` steps that climb out of a folder, and links that point outside it.
+- Full paths as templates.
+- Names or characters Windows does not allow, and names ending in a space or a
+  dot.
+- Paths that are too long.
+- Places that cannot be written to.
+- Files that already exist, unless overwriting is turned on.
+
+Missing folders are only created once Start is accepted. Low or unknown free
+space always shows a warning at the level you set.
 
 The path in **Recording Destination** must be exactly the path given to the
 recorder. So the app fills in the tokens itself instead of letting the
@@ -372,13 +384,14 @@ new work, cancels stream searches and file checks, asks the preview and bridge
 to stop, and asks the recorder to shut down exactly once. If Start is already
 running, that group finishes first and then the recorder gets exactly one Stop.
 Closing again does not start the steps over. The window stays open and responsive
-until every part that must stop has stopped. The four-second bridge, two-second
-preview and file, and 15-second recorder limits are shown as status. They are
-not permission to kill work that is still running. Only a recorder this app
-started may be closed. A recorder someone else started is left alone, even after
-the connection is lost, which is logged as `Recorder connection lost`. Normal
-window actions, including Stop, should take no more than 50 ms, and no window
-clean-up waits forever.
+until every part that must stop has stopped.
+
+The four-second bridge, two-second preview and file, and 15-second recorder
+limits are only shown as status, and the app never kills work because a limit
+has passed. Only a recorder this app started may be closed. A recorder someone
+else started is left alone, even after the connection is lost, which is logged
+as `Recorder connection lost`. Normal window actions, including Stop, should
+take no more than 50 ms, and no window clean-up waits forever.
 
 ## Preview
 
@@ -434,7 +447,7 @@ clean-up waits forever.
 - List every stream before building frames. Read the number streams the preview
   understands, count and skip text streams, and refuse a file that has nothing
   the preview can use.
-- Ignore a cut-off final chunk only when its length or declared body is cut off. Report any other broken data as an error.
+- Skip the final chunk only when the file ends in the middle of it, either in its length field or in its contents. Report any other broken data as an error.
 - A missing timestamp can only be filled in when there is an earlier timestamp and a positive expected rate.
 - Work out and apply the recorded clock corrections exactly once.
 - Fix corrected timestamps so they always go up.
@@ -469,7 +482,8 @@ the system theme, and can draw without a screen and without OpenGL.
 - The decoded preview holds at most 200,000 frames, and one XDF stream keeps at
   most 2,000,000 values. Safety limits are 64 GiB per XDF file, 100,000,000
   declared samples per stream, 65,536 channels, 4,096 streams, and a 4 MiB
-  header. Going over a limit is an error; the app does not try to allocate it.
+  header. Going over a limit is an error, and the app does not try to load the
+  extra data.
 - File loading checks for cancel at least every 1,024 steps and aims to stop
   within 250 ms. Progress covers reading, indexing, stream details, timestamps,
   calibration, and frame preparation. The live preview aims for less than 100 ms
@@ -483,17 +497,20 @@ alignment, gaze and target coordinate names, setup notes, when it was made,
 sample count, position and angle error, whether missing stream details were
 confirmed, and a hidden flag. The stored error fields are still named
 `translationRmsM` and `rotationRmsDegrees`, and the hidden flag is still named
-`retired`, so older files keep working. Saved calibrations can be picked,
-applied, copied, hidden, imported, and exported. Picking one only shows it. The
-quality shown still describes the calibration actually in use, and one that is
-only picked is marked as not applied. Buttons that need a picked calibration, a
-running preview, or a calibration in use are only enabled then. Applying one is
-visible and can be undone with **Clear Calibration**, which takes the preview
-back to the HoloLens's own coordinates. A new automatic result only lasts for
-this session until **Save Session Calibration** is chosen. Collection progress,
-quality, rejection reasons, and whether coordinates match stay visible. If
-coordinate details are missing, the user must confirm before a saved
-calibration is complete.
+`retired`, so older files keep working.
+
+Saved calibrations can be picked, applied, copied, hidden, imported, and
+exported. Picking one only shows it. The quality shown still describes the
+calibration actually in use, and one that is only picked is marked as not
+applied. Buttons that need a picked calibration, a running preview, or a
+calibration in use are only enabled then.
+
+Applying one is visible and can be undone with **Clear Calibration**, which
+takes the preview back to the HoloLens's own coordinates. A new automatic result
+only lasts for this session until **Save Session Calibration** is chosen.
+Collection progress, quality, rejection reasons, and whether coordinates match
+stay visible. If coordinate details are missing, the user must confirm before a
+saved calibration is complete.
 
 ### Check the file after recording
 
@@ -546,7 +563,7 @@ Do dependency updates and package layout changes separately from a code tidy-up.
 
 Tick every line the change could affect:
 
-- [ ] Public headers still compile from the same paths with the same names and signatures.
+- [ ] Public headers still compile from the same paths with the same names, parameters, and return types.
 - [ ] Command-line defaults, help, errors, output, and exit codes match the last version.
 - [ ] Marker and segment order, units, invalid values, rates, source IDs, timestamps, and LSL details match the saved expected results.
 - [ ] Empty layouts, send failures, reopening streams, and timestamp pass-through tests pass.

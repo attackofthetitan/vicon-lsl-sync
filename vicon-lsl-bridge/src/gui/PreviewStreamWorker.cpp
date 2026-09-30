@@ -23,8 +23,8 @@ constexpr double kGazeLowRateFraction = 0.8;
 constexpr double kMetadataTimeoutSeconds = 0.25;
 constexpr double kResolveTimeoutSeconds = 0.05;
 
-// Channel labels from the stream details. When they are incomplete, uses the
-// fixed HoloLens labels for that role, or else ch_0, ch_1, and so on.
+// Channel labels from the stream details, or when those are incomplete, the fixed
+// HoloLens labels for that role or else ch_0, ch_1, and so on.
 std::vector<std::string> channelLabels(lsl::stream_info& info, PreviewStreamRole role,
                                        bool& complete) {
     const auto channel_count = static_cast<std::size_t>(info.channel_count());
@@ -242,7 +242,7 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
                                      state.role == PreviewStreamRole::HoloLensCalibrationTarget;
     state.identity.metadata_complete = metadata_complete &&
         gui::identityDescribesItself(state.identity, coordinate_required);
-    // Remember the source ID so a restart reconnects to the same publisher.
+    // Remember the source ID so a restart reconnects to the same stream.
     if (state.binding.reconnection == gui::StreamReconnectionMode::SourceIdentity &&
         !state.identity.source_id.isEmpty()) {
         state.bound_source_id = state.identity.source_id;
@@ -257,7 +257,7 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
     return true;
 }
 
-// Reads up to 16 waiting samples without blocking and keeps the newest.
+// Reads up to 16 waiting samples without waiting for more, and keeps the newest.
 bool PreviewStreamWorker::pollStream(StreamState& state, qint64 now_ms) {
     if (!state.inlet) return false;
     int samples_in_pass = 0;
@@ -307,7 +307,7 @@ void PreviewStreamWorker::replaceInventory(PreviewStreamRole role,
             inventory_.push_back(std::move(stream));
         }
     }
-    // Emit after unlocking, because receivers may read the inventory.
+    // Signal after unlocking, since whoever receives it may read the stream list.
     for (const auto& stream : streams) emit streamIdentityChanged(stream, warning);
 }
 

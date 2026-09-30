@@ -25,7 +25,7 @@ namespace SDK = ViconDataStreamSDK::CPP;
 
 namespace {
 
-// Limit each TCP attempt so a missing server does not delay Stop for long.
+// Limit each connection check so a missing server does not hold up Stop for long.
 constexpr int kReachabilityTimeoutMs = 500;
 
 constexpr const char* kDefaultViconPort = "801";
@@ -87,7 +87,7 @@ bool waitForConnection(SocketHandle handle, int timeout_ms) {
     }
 #endif
 
-    // A writable socket may have failed to connect; check its error too.
+    // A socket can look writable even when it failed to connect, so check its error too.
     int pending_error = 0;
     SocketLength length = sizeof(pending_error);
     return getsockopt(handle, SOL_SOCKET, SO_ERROR,
@@ -114,7 +114,7 @@ bool addressAccepts(const addrinfo& candidate, int timeout_ms) {
     return accepted;
 }
 
-// Treat a final colon followed by digits as the port; otherwise use port 801.
+// Uses the digits after the last colon as the port, or port 801 if there are none.
 std::pair<std::string, std::string> splitServerAddress(const std::string& address) {
     const std::size_t separator = address.rfind(':');
     if (separator == std::string::npos || separator + 1 == address.size()) {
@@ -129,8 +129,8 @@ std::pair<std::string, std::string> splitServerAddress(const std::string& addres
     return {address.substr(0, separator), port};
 }
 
-// A quick TCP check before the SDK's Connect(), which can block for a long time
-// when nothing is listening. Name lookup and Connect() itself can still block.
+// Quickly checks that something is listening, because the SDK's Connect() can
+// hang for a long time when nothing is.
 bool serverIsListening(const std::string& address) {
 #ifdef _WIN32
     WSADATA winsock_data;

@@ -56,7 +56,7 @@ bool finiteRigid(const PreviewRigidTransform& r) {
            std::isfinite(q.w) && (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 1e-12;
 }
 
-// The stair pose that shipped before the 2026-09-17 measurement.
+// True for the estimated stair position that shipped before the 2026-09-17 measurement.
 bool usesLegacyStairEstimate(const PreviewRigidTransform& r) {
     const auto& t = r.translation;
     const auto& q = r.rotation;
@@ -174,8 +174,8 @@ QVector<ManagedCalibrationProfile> CalibrationProfileStore::load(QSettings& sett
     } else if (existing->quality.sample_count == 0 &&
                existing->physical_setup_id == built_in.physical_setup_id &&
                usesLegacyStairEstimate(existing->vicon_from_target)) {
-        // Update the built-in setup to the new measurement if it was never used
-        // for a solve. Saved solutions keep the pose they were solved with.
+        // Move the built-in setup to the new measurement only if no calibration
+        // was ever made with it, since saved ones keep the position they used.
         existing->vicon_from_target = built_in.vicon_from_target;
         existing->setup_notes = built_in.setup_notes;
     }

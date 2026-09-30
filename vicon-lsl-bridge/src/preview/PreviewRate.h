@@ -5,9 +5,8 @@
 
 namespace vicon_lsl {
 
-// Measures a stream's actual sample rate over the last few seconds. No rate is
-// given until the samples cover the whole window, so a burst at startup is not
-// mistaken for the steady rate.
+// Measures a stream's real sample rate over the last few seconds, giving none
+// until the samples fill the window so a burst at startup does not count.
 class PreviewRateTracker {
 public:
     static constexpr double kDefaultWindowSeconds = 2.0;
@@ -15,9 +14,8 @@ public:
     explicit PreviewRateTracker(double window_seconds = kDefaultWindowSeconds);
 
     void reset();
-    // Ignores a time that is not a number or repeats the last one, and returns
-    // false for it. A time that goes backward starts a new window, because
-    // clock correction can move time back.
+    // Returns false for a time that is not a number or repeats the last one, and
+    // starts a new window when time goes backward, which clock correction can cause.
     bool addTimestamp(double corrected_timestamp);
 
     bool hasFullWindow() const;

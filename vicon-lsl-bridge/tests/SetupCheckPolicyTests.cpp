@@ -143,8 +143,8 @@ void testSetupCheckRequiredStreamReadiness() {
     QVector<StreamIdentity> inventory{gaze};
     expect(requiredStreamReady(binding, inventory), "a visible, current, matching stream is ready");
 
-    // A stream that has never been measured is accepted; one measured long ago
-    // is not, because the source has gone quiet.
+    // A stream that has never been measured is accepted, but one measured long
+    // ago is not, because its source has gone quiet.
     inventory[0].freshness_ms = -1;
     expect(requiredStreamReady(binding, inventory), "an unmeasured stream is accepted");
     inventory[0].freshness_ms = 5000;

@@ -10,8 +10,8 @@
 
 namespace vicon_lsl::bridge_internal {
 
-// The Vicon reads the bridge needs. The real client wraps the Vicon SDK; tests
-// use a fake.
+// The Vicon reads the bridge needs, done by the Vicon SDK in the app and by a
+// fake in tests.
 class ViconClient {
 public:
     virtual ~ViconClient() = default;

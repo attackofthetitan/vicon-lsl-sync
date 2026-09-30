@@ -3,35 +3,24 @@ using System.Collections.Generic;
 
 namespace GazeLSL
 {
-    // We do not know how fast SystemRelativeTime.Ticks runs on the HoloLens. It
-    // is not the usual TimeSpan speed, and it does not match Stopwatch either:
-    // on the device, a reading 0.020 s old by the SDK's clock was 231 s in the
-    // future by Stopwatch, and the gap kept growing.
-    //
-    // So those ticks are only used to put readings in order and to pass to
-    // SpatialGraphNode.TryLocate. Every length of time is measured on the LSL
-    // clock instead, which each reading carries as GazeSample.Timestamp.
+    // SystemRelativeTime.Ticks runs at an unknown speed on the HoloLens, so it is
+    // only used to put readings in order and for SpatialGraphNode.TryLocate, and
+    // every length of time uses the LSL time in GazeSample.Timestamp instead.
     internal static class GazeTiming
     {
         // Must be longer than one full catch-up batch (32 readings at 90 Hz is
-        // 355 ms). A shorter limit would empty the queue partway through a batch
-        // and throw away the readings that were just caught up.
+        // 355 ms), or the queue would throw away readings it just caught up on.
         public const double MaxBacklogSpanSeconds = 0.500;
 
-        // Only a reading fetched for "now" is judged on age. Later readings are
-        // fetched by working forward from the last one, not by asking for "now".
+        // Only a reading fetched for "now" is judged on age, because later ones are
+        // fetched by working forward from the last reading.
         public const double MaxSeedCaptureAgeSeconds = 0.050;
 
         // Limits how much work is done while holding the tracker lock.
         public const int MaxReadingsPerAcquire = 32;
 
-        // The age comes from the SDK's own reading time and the clock time we
-        // asked at, which are on the same clock. Never work it out from
-        // SystemRelativeTime ticks and one of our timers: they do not agree, so
-        // every reading would look far too old and none would be accepted.
-        //
-        // Either sign is allowed, because the reading for "now" can be taken one
-        // frame before or after we ask.
+        // Allows an age of either sign, because the reading for "now" can be taken
+        // one frame before or after we ask.
         public static bool IsFreshSeedAge(double ageSeconds)
         {
             return !double.IsNaN(ageSeconds) &&
@@ -40,9 +29,8 @@ namespace GazeLSL
         }
     }
 
-    // Compares the SDK's whole-number timestamps, not converted times. A new
-    // tracker session calls Reset, so readings from different sessions are
-    // never compared.
+    // Compares the SDK's whole-number timestamps, not converted times, and a new
+    // tracker session calls Reset so readings from two sessions are never compared.
     internal sealed class GazeReadingGate
     {
         private bool hasLastTimestamp;
@@ -72,10 +60,8 @@ namespace GazeLSL
         }
     }
 
-    // The rate that actually arrived, measured from capture times. A tracker that
-    // slows itself down still reports its set rate, so only this shows the drop.
-    // It uses LSL capture times, not SDK ticks, because we do not know how fast
-    // the ticks run.
+    // The rate that actually arrived, measured from LSL capture times, because a
+    // tracker that slows itself down still reports the rate it was set to.
     internal sealed class GazeRateEstimator
     {
         public const int WindowSize = 90;
@@ -115,8 +101,8 @@ namespace GazeLSL
             return true;
         }
 
-        // A tracker that is just slow shows a similar min and max. One that runs
-        // at full speed but loses readings shows a low min and a high max.
+        // A tracker that is just slow shows a similar min and max, while one that
+        // runs at full speed but loses readings shows a low min and a high max.
         public bool TryGetIntervalSummary(out double minMilliseconds, out double maxMilliseconds)
         {
             minMilliseconds = 0.0;
@@ -149,21 +135,17 @@ namespace GazeLSL
         }
     }
 
-    // The only way to learn there is no newer reading is to ask and get nothing
-    // back. On the HoloLens 2, "nothing" is not a null: the SDK throws a
-    // NullReferenceException inside itself and leaves behind an object that
-    // throws again later. A few of those are fine; one per step crashes the app.
-    // So this decides when it is worth asking, and when to stop catching up for
-    // a while and just read the reading at the current time.
+    // Decides when to ask for a newer reading and when to pause catching up,
+    // because on the HoloLens 2 an empty answer throws inside the SDK and leaves a
+    // broken object behind, and one of those per step crashes the app.
     internal sealed class GazeDrainPolicy
     {
-        // Small on purpose. Each failure leaks a broken SDK object, so catching up
-        // has to stop well before they pile up.
+        // Small on purpose, because each failure leaks a broken SDK object and
+        // catching up has to stop well before they pile up.
         public const int FailedEmptyResultsBeforeSuspend = 3;
 
-        // Long enough that a catch-up that cannot work costs about one failure
-        // every three seconds instead of one per step. Short enough that the
-        // session gets back to the full rate instead of staying on the fallback.
+        // Long enough that a catch-up that cannot work fails only about once every
+        // three seconds, but short enough that the session soon gets back to full rate.
         public const double SuspensionSeconds = 10.0;
 
         private int failedEmptyResultsSinceResume;
@@ -174,17 +156,15 @@ namespace GazeLSL
 
         public int Suspensions => suspensions;
 
-        // How long after a reading is taken the SDK hands it over. Zero until a
-        // reading has been seen, which just means catching up asks as often as it
-        // did before this was measured.
+        // How long after a reading is taken the SDK hands it over, or zero before
+        // the first reading, which just means catching up asks as often as it used to.
         public double PublicationLatencySeconds =>
             double.IsPositiveInfinity(minimumReadingAgeSeconds)
                 ? 0.0
                 : minimumReadingAgeSeconds;
 
-        // Empty results are expected while the tracker is not making readings.
-        // Pausing for that is right, but giving up for the whole session is not:
-        // the tracker may start later, and the fallback cannot keep up with it.
+        // Catching up only ever pauses, because empty results are normal while the
+        // tracker is not making readings, and the fallback cannot keep up once it starts.
         public bool IsSuspended(double nowSeconds)
         {
             if (!suspended)
@@ -202,10 +182,9 @@ namespace GazeLSL
             return true;
         }
 
-        // The youngest age any reading has been offered at is the shortest time
-        // the tracker takes to hand one over. Use the minimum, because a reading
-        // picked up while catching up can be any age and says nothing about how
-        // quickly a new one arrives.
+        // Keeps the smallest reading age seen, which is how long the tracker takes
+        // to hand over a new reading, since a reading found while catching up can
+        // be any age.
         public void NoteReadingAge(double ageSeconds)
         {
             if (double.IsNaN(ageSeconds) || double.IsInfinity(ageSeconds))
@@ -213,8 +192,8 @@ namespace GazeLSL
                 return;
             }
 
-            // A reading can look very slightly newer than the ask. That is small
-            // clock jitter, not a negative delay.
+            // A reading can look very slightly newer than the ask because of tiny
+            // clock differences, which is not a negative delay.
             double age = ageSeconds > 0.0 ? ageSeconds : 0.0;
             if (age < minimumReadingAgeSeconds)
             {
@@ -222,14 +201,9 @@ namespace GazeLSL
             }
         }
 
-        // A new reading cannot exist until one frame has passed since the last
-        // capture AND the tracker has had time to hand it over. Asking sooner only
-        // gets an empty result. This is also when catching up stops: once the
-        // newest reading has been taken, do not ask for one more.
-        //
-        // The delivery delay matters. Readings arrive about 20 ms after they are
-        // taken, while one frame is about 11 ms. Checking only the frame time let
-        // one extra ask through on every step, and each of those threw and leaked.
+        // A new reading cannot exist until one frame (about 11 ms) plus the delivery
+        // delay (about 20 ms) has passed since the last capture, so this also
+        // decides when catching up should stop.
         public static bool CouldHaveNewerReading(
             double queryTimeSeconds,
             double lastCaptureTimeSeconds,
@@ -248,7 +222,7 @@ namespace GazeLSL
                 return true;
             }
 
-            // Without a usable delay, use the frame time alone. That asks too
+            // Without a usable delay, use the frame time alone, which asks too
             // often rather than not at all.
             double latencySeconds =
                 publicationLatencySeconds > 0.0 &&
@@ -259,13 +233,9 @@ namespace GazeLSL
             return elapsedSeconds >= framePeriodSeconds + latencySeconds;
         }
 
-        // Only counts empty results that threw. A clean null is normal and free.
-        // Returns true on the failure that starts a pause.
-        //
-        // Counts every failure since catching up last resumed, not just failures
-        // in a row. A step that gets one reading and then fails never has two
-        // failures in a row, so resetting on each reading once let a failing
-        // catch-up run all session and leak thousands of objects.
+        // Counts empty results that threw (a clean null is fine) since catching up
+        // last resumed, not just failures in a row, and returns true on the one
+        // that starts a pause.
         public bool NoteFailedEmptyResult(double nowSeconds)
         {
             if (suspended)
@@ -297,9 +267,8 @@ namespace GazeLSL
         }
     }
 
-    // A queue can hold a normal small batch, but never one that covers more time
-    // than the limit. The newest item is kept, so a reader that fell behind
-    // starts again from the current position.
+    // Lets a queue hold a normal small batch but never more time than the limit,
+    // keeping the newest item so a reader that fell behind starts again from now.
     internal static class GazeBacklogPolicy
     {
         public static void Enqueue<T>(
@@ -369,11 +338,9 @@ namespace GazeLSL
             return true;
         }
 
-        // Written as "not within the limit" so a span that is NaN also empties the
-        // queue: dropping one old batch is better than a backlog that never ends.
-        // A span just below zero is normal clock jitter and counts as within the
-        // limit. A new tracker session, which could reset the clock, empties both
-        // queues itself.
+        // Written as "not within the limit" so a NaN span also empties the queue,
+        // while a span just below zero comes from tiny clock differences and counts
+        // as within the limit.
         private static bool SpanExceedsLimit<T>(
             Queue<T> queue,
             T newest,

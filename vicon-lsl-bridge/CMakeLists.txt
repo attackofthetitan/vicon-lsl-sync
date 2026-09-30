@@ -156,8 +156,8 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
     if(VICON_LSL_BRIDGE_BUILD_GUI)
         find_package(Qt6 COMPONENTS Core Widgets Network QUIET)
         if(Qt6_FOUND)
-            # Some Qt 6 macOS packages still link the AGL framework, which
-            # current macOS SDKs no longer have. Remove it.
+            # Remove the AGL framework that some Qt 6 macOS packages still link,
+            # because current macOS SDKs no longer have it.
             if(APPLE AND TARGET WrapOpenGL::WrapOpenGL)
                 get_target_property(_wrap_gl_libs
                     WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)

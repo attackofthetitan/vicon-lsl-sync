@@ -2,7 +2,7 @@ namespace GazeLSL
 {
     public struct GazeSample
     {
-        // Capture time in seconds on the LSL clock. It travels with the sample but
+        // Capture time in seconds on the LSL clock, which travels with the sample but
         // is not one of the LSL channels.
         public double Timestamp;
 

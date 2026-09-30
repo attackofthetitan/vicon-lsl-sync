@@ -297,7 +297,7 @@ void testInvalidNominalRatesAndMetadata() {
 }
 
 // The streams turn reads into channel values themselves, so check that the
-// order the schema lists matches what is actually sent.
+// order StreamSchema lists matches what is actually sent.
 void testFlattenedSampleOrder() {
     auto marker_state = std::make_shared<OutletState>();
     MarkerStream markers(fakeFactory(marker_state));

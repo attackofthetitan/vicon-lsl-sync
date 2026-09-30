@@ -25,7 +25,7 @@ fail() {
   exit 1
 }
 
-# Lists the folders (rpaths) a program searches for its @rpath libraries.
+# Prints the folders a program searches when it looks for its libraries.
 rpaths() {
   otool -l "$1" | awk '/cmd LC_RPATH/ { found = 1; next }
     found && $1 == "path" { sub(/^ *path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; found = 0 }'
@@ -86,7 +86,7 @@ assert_libraries_resolve() {
     case "$dependency" in
       /System/*|/usr/lib/*) found=true ;;
       @rpath/*)
-        # The guard keeps an empty list usable under set -u in bash 3.2.
+        # Written this way so an empty list does not stop the script in macOS's old bash.
         for rpath in ${search[@]+"${search[@]}"}; do
           if [[ -e "$rpath/${dependency#@rpath/}" ]]; then
             found=true
@@ -164,8 +164,8 @@ verify_disk_image() {
   local recorder_app="$bridge_app/Contents/Helpers/LabRecorder.app"
   local tools="$root/Command Line Tools"
 
-  # Drag-to-install layout: one app next to a link to /Applications. The
-  # recorders are inside it, so macOS approves them along with the app.
+  # One app sits next to a link to /Applications, with the recorders inside it
+  # so macOS approves them along with the app.
   test -d "$bridge_app"
   test ! -e "$root/LabRecorder.app"
   test -L "$root/Applications"

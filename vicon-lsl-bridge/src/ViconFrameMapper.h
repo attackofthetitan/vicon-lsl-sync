@@ -19,14 +19,14 @@ struct ViconTimestampState {
     double last_timestamp = 0.0;
 };
 
-// Estimates capture time by subtracting Vicon latency from receipt time.
-// Uses receipt time if the latency is missing, negative, or not finite.
+// Estimates capture time as receipt time minus Vicon's delay, or just receipt
+// time if the delay is missing, negative, or not finite.
 double viconFrameTimestamp(double receipt_timestamp,
                            double latency_seconds,
                            bool latency_valid);
 
-// Keeps times finite and increasing, using receipt time or the next possible
-// time after the last sample. Returns false if neither works.
+// Keeps times finite and increasing by falling back to receipt time or the next
+// possible time after the last one, and returns false if neither works.
 bool enforceViconTimestamp(double candidate_timestamp,
                            double receipt_timestamp,
                            ViconTimestampState& state,
@@ -75,7 +75,7 @@ std::string formatDiagnostic(const ViconDiagnostic& diagnostic);
 std::string diagnosticKey(const ViconDiagnostic& diagnostic);
 std::string summarizeDiagnostics(const std::vector<ViconDiagnostic>& diagnostics);
 
-// Uses the SDK's error text when there is one. Hidden items are warnings.
+// Uses the SDK's error text when there is one, and treats hidden items as warnings.
 template <class Read>
 ViconDiagnostic readFailure(const Read& read,
                             unsigned int frame_number,
@@ -95,8 +95,8 @@ ViconDiagnostic readFailure(const Read& read,
     };
 }
 
-// Reads every subject, marker, and segment name in Vicon's order. Any failed
-// read discards the whole layout, so a partial layout is never published.
+// Reads every subject, marker, and segment name in Vicon's order, and throws
+// the whole layout away if any read fails, so half a layout is never sent.
 template <class Client>
 ViconDiscoveryResult discoverLayout(Client& client, unsigned int frame_number) {
     ViconDiscoveryResult result;

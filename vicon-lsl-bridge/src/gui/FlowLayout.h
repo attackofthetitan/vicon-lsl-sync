@@ -12,8 +12,7 @@
 namespace vicon_lsl::gui_detail {
 
 // Places items left to right and wraps onto a new line when the width runs out,
-// so a row of controls never forces sideways scrolling. Its minimum width is
-// the width of its widest item.
+// so it is never narrower than its widest item and never needs sideways scrolling.
 class FlowLayout : public QLayout {
 public:
     explicit FlowLayout(int horizontal_spacing = 6, int vertical_spacing = 4)

@@ -92,8 +92,8 @@ QString RecorderProcessController::embeddedRecorderDirectory(const QString& app_
     return QDir::cleanPath(app_dir + "/../Helpers/LabRecorder.app/Contents/MacOS");
 }
 
-// Looks beside the app, in a labrecorder folder, inside a macOS app bundle, and
-// next to it.
+// Looks next to the app and in a labrecorder folder beside it, and on a Mac also
+// inside the app and next to its .app folder.
 QString RecorderProcessController::bundledGraphicalRecorderExecutable(const QString& app_dir) {
     QStringList candidates = {
         QDir(app_dir).filePath("labrecorder/LabRecorder.exe"),
@@ -135,8 +135,8 @@ QString RecorderProcessController::bundledSelectedStreamExecutable(
     return firstExistingFile(candidates);
 }
 
-// LabRecorderCLI arguments: the output file, then one query per selected stream.
-// A query matches the source ID when known, or else the name and host.
+// Builds the LabRecorderCLI arguments: the output file, then one query per chosen
+// stream that matches its source ID, or its name and computer if that is unknown.
 QStringList RecorderProcessController::selectedStreamArguments(const QString& absolute_output_path,
                                                         const QVector<StreamIdentity>& selected_streams,
                                                         QString* error) {
@@ -265,8 +265,8 @@ void RecorderProcessController::setState(RecorderProcessState state, const QStri
     emit stateChanged(state_, detail);
 }
 
-// Keeps the last 64 KiB of output and reports each complete line. Standard
-// output and error each keep their own unfinished line, so the two never mix.
+// Keeps the last 64 KiB of output and reports each complete line, holding the
+// unfinished lines of standard output and error apart so they never mix.
 void RecorderProcessController::appendOutput(const QByteArray& bytes, EventSeverity severity,
                                              QByteArray& partial_line) {
     if (bytes.isEmpty()) return;
@@ -288,7 +288,7 @@ void RecorderProcessController::appendOutput(const QByteArray& bytes, EventSever
     }
 }
 
-// Quotes a value for a LabRecorderCLI query. Fails when it cannot be quoted safely.
+// Quotes a value for a LabRecorderCLI query, and fails if it cannot be quoted safely.
 QString RecorderProcessController::queryLiteral(const QString& value, QString* error) {
     if (value.contains('\n') || value.contains('\r')) {
         if (error) *error = "Stream source contains a line break";

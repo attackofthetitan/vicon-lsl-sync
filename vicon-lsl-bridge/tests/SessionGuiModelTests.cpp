@@ -64,8 +64,8 @@ void testNormalizedPathPolicy() {
     expect(valid.absolute_path.endsWith(".xdf", Qt::CaseInsensitive),
            "appends the XDF extension consistently");
 
-    // The destination is two folders below the root. Its checks must still use
-    // the root, not the working folder: a macOS app opened from Finder runs in /.
+    // The destination is two folders below the root, and its checks must use the
+    // root, not the working folder, which is / for a macOS app opened from Finder.
     const QString working_directory = QDir::currentPath();
     QDir::setCurrent(QDir::rootPath());
     const RecordingPathResult from_root = LabRecorderFilenamePolicy::validate(fields);
@@ -80,9 +80,8 @@ void testNormalizedPathPolicy() {
         LabRecorderFilenamePolicy::filenameCommand(valid.normalized_fields);
     expect(valid_command.contains("{root:" + valid.normalized_fields.root + "}"),
            "filename command uses the canonical normalized root");
-    // LabRecorder writes the root plus its own version of the template. Putting
-    // the checked path in %b, which it copies unchanged, makes it write exactly
-    // the file the app showed and checked.
+    // LabRecorder copies %b unchanged, so putting the checked path there makes it
+    // write exactly the file the app showed and checked.
     expect(valid_command.contains("{template:%b}") &&
                valid_command.contains("{task:" + valid.relative_path + "}"),
            "filename command sends the checked destination the recorder will write");

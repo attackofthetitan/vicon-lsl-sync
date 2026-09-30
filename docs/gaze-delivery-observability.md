@@ -9,7 +9,7 @@ The publisher is always in one of four states:
 - `PublishingSamplesWithoutValidRays`: samples are being sent, but the latest one had no usable ray for either eye or both eyes combined.
 - `PublishingValidGaze`: the latest sample sent had at least one usable ray.
 
-When the worker asks and gets nothing, that is counted, but it does not change the state. The worker asks more often than the tracker makes readings on purpose, so it can clear any backlog, and many of those asks will come back empty.
+When the worker asks and gets nothing, that is counted, but it does not change the state. The worker asks more often than the tracker makes readings on purpose, so it can catch up on readings that are waiting, and many of those asks will come back empty.
 
 Unity logs a change of state straight away. The one exception is the normal "waiting" state at startup, which gets one second to clear first. Any state other than `PublishingValidGaze` is logged again every five seconds, with running totals. Reaching `PublishingValidGaze` is logged once.
 

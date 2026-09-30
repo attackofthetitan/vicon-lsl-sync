@@ -34,7 +34,7 @@ inline StreamIdentity identityFromStreamInfo(lsl::stream_info& info) {
 }
 
 // True when the stream gives a source ID, a channel count, and (when needed) a
-// coordinate frame name.
+// coordinate name.
 inline bool identityDescribesItself(const StreamIdentity& identity, bool needs_coordinate_frame) {
     return !identity.source_id.isEmpty() && identity.channel_count > 0 &&
            (!needs_coordinate_frame || !identity.coordinate_frame.isEmpty());

@@ -5,9 +5,8 @@ using Vuforia;
 
 namespace GazeLSL
 {
-    // Sends the Vuforia stair target position as its own LSL stream. It must run
-    // in the same Unity world as GazeDataProvider, and uses the same coordinates
-    // as gaze: metres, with Unity's Z flipped.
+    // Sends the Vuforia stair target position as its own LSL stream, from the same
+    // Unity world as GazeDataProvider and in the same metres with Unity's Z flipped.
     public sealed class VuforiaModelTargetPoseOutlet : MonoBehaviour
     {
         private const int ChannelCount = ModelTargetStreamContract.ChannelCount;

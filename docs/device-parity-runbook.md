@@ -213,7 +213,7 @@ instead of treating a fallback as complete.
 - Rate over the whole recording and over useful two-second windows.
 - Number of repeated or earlier times. It should be zero.
 - Number and length of gaps over 500 ms.
-- How much of the 90 Hz grid was captured: divide the sample count by the recording length in 11.111 ms steps. The app catches up on every reading the tracker makes, so this should be close to 100%. A steady shortfall means readings are being lost before the queues, not dropped by them.
+- How many of the expected 90 Hz readings were captured: divide the sample count by the recording length in 11.111 ms steps. The app catches up on every reading the tracker makes, so this should be close to 100%. A steady shortfall means readings are being lost before the queues, not dropped by them.
 - A screenshot of stream health after a normal update, and after the stream is
   left to go out of date on purpose.
 - Skipped older input, replaced display frames, and the largest preview delay
@@ -253,7 +253,7 @@ Save:
 
 ## Test 5: tracker errors and restart
 
-Use app focus, suspend, tracker session tools, or safe fault switches that you can repeat and that suit the real Unity project.
+Use app focus, suspending the app, tracker session tools, or other safe ways to cause errors that you can repeat and that suit the real Unity project.
 
 ### Short error
 

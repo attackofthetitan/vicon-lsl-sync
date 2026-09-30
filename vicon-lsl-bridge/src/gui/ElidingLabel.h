@@ -8,9 +8,8 @@
 
 namespace vicon_lsl::gui_detail {
 
-// A one-line label that cuts its text short with "…" when space runs out,
-// instead of wrapping or forcing the window wider. When the text is cut, the
-// full text is shown as a tooltip.
+// A one-line label that cuts its text short with "…" instead of wrapping or
+// widening the window, and shows the full text as a tooltip when it does.
 class ElidingLabel : public QLabel {
 public:
     explicit ElidingLabel(const QString& text = {}, QWidget* parent = nullptr,

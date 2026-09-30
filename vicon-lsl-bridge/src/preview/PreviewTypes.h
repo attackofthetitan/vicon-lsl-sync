@@ -18,15 +18,15 @@ struct PreviewQuaternion {
     double w = 1.0;
 };
 
-// Moves points from a source stream into the preview's Vicon coordinates:
-// scale, flip axes, rotate, then translate.
+// Moves points from a source stream into the preview's Vicon coordinates by
+// scaling, flipping axes, rotating, and then shifting them.
 struct PreviewTransformProfile {
     std::string name;
     double scale = 1.0;
     // Multiplies each input axis before rotating, for example to flip Z.
     PreviewVec3 input_axis_sign{1.0, 1.0, 1.0};
-    // Fixed transforms use these angles. Solved calibrations use the quaternion
-    // instead, so no accuracy is lost converting to angles and back.
+    // Fixed settings use these angles, but worked-out calibrations use the
+    // quaternion so no accuracy is lost converting to angles and back.
     PreviewVec3 rotation_degrees{};
     bool use_quaternion_rotation = false;
     PreviewQuaternion rotation{};
@@ -58,7 +58,7 @@ struct PreviewFrame {
     std::vector<PreviewMarker> markers;
     std::vector<PreviewSegment> segments;
     std::vector<PreviewGazeRay> gaze_rays;
-    // True when the stream is connected. It does not mean the frame holds its data.
+    // True when the stream is connected, even if the frame holds none of its data.
     bool marker_stream_present = false;
     bool segment_stream_present = false;
     bool gaze_stream_present = false;

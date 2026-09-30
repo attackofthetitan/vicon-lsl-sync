@@ -24,10 +24,8 @@ QColor gridColor() { return QColor(70, 80, 88, 130); }
 
 constexpr double kPi = 3.14159265358979323846;
 
-// How far the drawn floor reaches past the stair model. In the recorded walking
-// runs (sub-04 and sub-05, 33 runs), markers reach 4.10 m past the far end of
-// the stairs, stop just short of the near end, and stay within the stair width.
-// These values add a small margin.
+// How far the drawn floor reaches past the stairs, a small margin beyond where
+// markers went in 33 recorded walks (at most 4.10 m past the far end).
 constexpr double kFloorBeyondStairM = 4.6;
 constexpr double kFloorBehindStairM = 0.6;
 constexpr double kFloorBesideStairM = 0.6;
@@ -386,7 +384,7 @@ PreviewWidget::FloorPlane PreviewWidget::floorPlane() const {
 
     FloorPlane floor;
     floor.valid = true;
-    // The floor is at the height the stairs stand on. Without a stair model it
+    // The floor sits at the stairs' base height, and without a stair model it
     // covers only the samples.
     floor.z = base.lower.z;
     const double beyond = stair_bounds_.valid ? kFloorBeyondStairM : 0.0;
@@ -432,7 +430,7 @@ void PreviewWidget::resetViewFit() {
     view_bounds_ = {};
 }
 
-// Grows the view to include the whole scene. It never shrinks, so the picture
+// Grows the view to include the whole scene but never shrinks it, so the picture
 // does not jump as markers move.
 void PreviewWidget::lockViewToCurrentScene() {
     const Bounds bounds = currentSceneBounds();

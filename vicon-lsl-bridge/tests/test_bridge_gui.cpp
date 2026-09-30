@@ -60,8 +60,8 @@ bool controlsAreDescribed(const QWidget& window) {
     return true;
 }
 
-// Controls packed into a row that cannot shrink push their last members off the
-// edge and force sideways scrolling. Nothing in this window should need it.
+// Controls packed into a row that cannot shrink push the last ones off the edge
+// and force sideways scrolling, which nothing in this window should need.
 bool noHorizontalScrolling(const QWidget& window) {
     bool ok = true;
     for (const QScrollArea* area : window.findChildren<QScrollArea*>()) {
@@ -76,16 +76,15 @@ bool noHorizontalScrolling(const QWidget& window) {
     return ok;
 }
 
-// Two visible siblings whose rectangles intersect are painted over each other.
-// The preview controls used to be laid across the drawing area this way when the
-// window was short, which is what "overlapping buttons" looks like on screen.
+// Two visible widgets in the same parent whose rectangles cross are drawn over
+// each other, which is how the preview controls once covered a short window.
 bool noOverlappingSiblings(const QWidget& window) {
     bool ok = true;
     QList<const QWidget*> parents{&window};
     for (const QWidget* w : window.findChildren<QWidget*>()) parents << w;
     for (const QWidget* parent : parents) {
-        // A crowded QTabBar overlaps its own scroll arrows. That is the style's
-        // business, not this layout's, and it is not something the app can fix.
+        // A crowded QTabBar overlaps its own scroll arrows, which the style
+        // controls and the app cannot fix.
         if (qobject_cast<const QTabBar*>(parent)) continue;
         QList<QWidget*> siblings;
         for (QObject* child : parent->children()) {
@@ -111,15 +110,15 @@ bool noOverlappingSiblings(const QWidget& window) {
     return ok;
 }
 
-// A caption cut off mid-word reads as text running into the control beside it.
-// Labels that shorten themselves are excluded: eliding is their whole job.
+// A caption cut off mid-word looks like text running into the control beside it,
+// but labels built to shorten themselves are skipped.
 bool labelsAreNotCutOff(const QWidget& window) {
     bool ok = true;
     for (const QLabel* label : window.findChildren<QLabel*>()) {
         if (!label->isVisible() || label->wordWrap()) continue;
         if (dynamic_cast<const vicon_lsl::gui_detail::ElidingLabel*>(label)) continue;
         if (label->sizePolicy().horizontalPolicy() == QSizePolicy::Ignored) continue;
-        // "&" marks the keyboard accelerator and is never drawn.
+        // "&" marks the keyboard shortcut and is never drawn.
         QString drawn = label->text();
         drawn.remove(QLatin1Char('&'));
         if (drawn.trimmed().isEmpty()) continue;
@@ -154,7 +153,7 @@ int main(int argc, char* argv[]) {
     QWidget render_host;
     render_host.setAttribute(Qt::WA_DontShowOnScreen);
     BridgeWindow window(&render_host, true, std::move(settings));
-    // Shown, but never on a screen: the layout checks below ask each widget
+    // Show the window off screen, because the layout checks below ask each widget
     // whether it is visible, which stays false until the window is shown.
     render_host.show();
     window.show();

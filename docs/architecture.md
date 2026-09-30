@@ -19,11 +19,11 @@ Related guides:
 | `vicon-lsl-bridge/src` | Reads settings and command-line options, talks to Vicon, turns each frame into samples, opens LSL streams, and reconnects after errors | C++17. Some files also use the Vicon SDK and liblsl |
 | `vicon-lsl-bridge/src/preview` | Reads recordings and live samples, does the preview math and calibration, runs playback, and measures rates | The C++17 standard library only |
 | `vicon-lsl-bridge/src/gui` | The Qt desktop app: live preview, LabRecorder control, saved settings, and drawing | The bridge and preview code, liblsl, and Qt 6 |
-| `hololens-gaze-lsl/Assets/Scripts` | Reads HoloLens gaze, moves it into the Unity world, sends it to LSL, and sends the Vuforia stair target position | Unity, Extended Eye Tracking, Mixed Reality OpenXR, Vuforia, and the C# liblsl wrapper |
+| `hololens-gaze-lsl/Assets/Scripts` | Reads HoloLens gaze, moves it into the Unity world, sends it to LSL, and sends the Vuforia stair target position | Unity, Extended Eye Tracking, Mixed Reality OpenXR, Vuforia, and the C# version of liblsl |
 | `stream-contracts` | The HoloLens stream layouts, as JSON | JSON |
 | `tools/generate_stream_contracts.py` | Writes matching C++ and C# stream definitions from those JSON files | The Python standard library |
 | `vicon-lsl-bridge/packaging/windows` | Builds the Windows packages and collects the license files they need | PowerShell and Windows build tools |
-| `.github/workflows/build-bridge.yml` and `.github/scripts` | Build, test, package, and publish the project | GitHub's build machines and pinned actions |
+| `.github/workflows/build-bridge.yml` and `.github/scripts` | Build, test, package, and publish the project | GitHub's build machines, and GitHub Actions pinned to exact versions |
 
 ## Other people's code
 
@@ -33,7 +33,7 @@ These folders are Git submodules: copies of other projects, pinned to one versio
 - `vicon-lsl-bridge/external/vicon-datastream-sdk` is the Vicon DataStream SDK.
 - `hololens-gaze-lsl/external/liblsl` is the version of liblsl built for HoloLens (ARM64 UWP) and used by Unity.
 
-Do not edit these folders during a normal tidy-up. Treat a new submodule version, a local patch, a LabRecorder protocol change, or a new liblsl version as a separate dependency update.
+Do not edit these folders during a normal tidy-up. Treat a new submodule version, a local patch, a change to LabRecorder's remote commands, or a new liblsl version as a separate dependency update.
 
 The desktop bridge uses an installed liblsl if it finds one, and otherwise downloads the version named in `vicon-lsl-bridge/CMakeLists.txt`. Changing that rule is also a dependency update.
 
@@ -83,9 +83,10 @@ Each class has one main job:
 - `ViconFrameMapper` keeps the order Vicon lists things in, decides which values are usable, fills in fixed-size "missing" values, collects errors, and makes sure timestamps only go forward.
 - `MarkerStream` and `SegmentStream` keep their public interfaces. They share one private helper that sets up the LSL stream details, checks sample sizes, owns the stream, and handles send errors.
 - `ViconLSLBridge::run()` connects, reads the first frame, opens the streams, and
-  cleans up before trying again. `streamFrames()` sends frames and watches for
-  layout changes. Deciding whether to retry stays in `run()`.
-  `refreshStreams()` reads the layout once and uses it to open or replace
+  cleans up before trying again. It is also the only place that decides whether
+  to retry.
+- `streamFrames()` sends frames and watches for layout changes.
+- `refreshStreams()` reads the layout once and uses it to open or replace
   streams. If a regular layout check fails, the current streams stay open. If
   the first check fails, the bridge waits and reconnects.
 - The marker and segment streams build their values with plain loops, then hand
@@ -117,8 +118,8 @@ The main desktop parts are:
 - `BridgeWindow` holds the setup check result, a limited event log, the last
   error, dashboard values, the shutdown steps, and the shared settings object,
   which it passes to `PreviewPanel`.
-- The window and panel create their background workers themselves. There is no
-  factory or extra controller layer.
+- The window and panel create their background workers themselves, with no
+  extra layer in between.
 - `BridgeWorker` runs one `ViconLSLBridge` off the window thread and reports its
   state.
 - `PreviewStreamWorker` opens the chosen LSL streams and keeps only the newest
@@ -162,9 +163,10 @@ replace proper XDF analysis tools.
 
 The preview is a quick visual check, so `PreviewWidget` is a plain `QWidget`
 drawn with `QPainter`. It does not need OpenGL. It has Fit View, Reset Camera,
-growing bounds, axis and unit labels, counts of usable values, trail clean-up,
-readable colours, and can draw without a screen for tests. It does not hide
-objects behind other objects, light the 3D model, or let you click on objects.
+a view that grows to fit everything, axis and unit labels, counts of usable
+values, trail clean-up, and readable colours, and it can draw without a screen
+for tests. It does not hide objects behind other objects, light the 3D model, or
+let you click on objects.
 
 ## How HoloLens data moves
 
@@ -199,7 +201,7 @@ Gaze and the stair target use separate LSL streams but the same coordinates. Gaz
 | Who | What it owns | Rule to keep |
 | --- | --- | --- |
 | Command-line process | `ViconLSLBridge` and the stop request | `stop()` only flips the run flag. The bridge loop closes connections and streams itself. |
-| `BridgeWorker` | The running bridge | It only updates the window through queued Qt signals. |
+| `BridgeWorker` | The running bridge | It only updates the window through Qt signals, which the window handles on its own thread. |
 | Window thread | Widgets, session data, settings, timers, `LabRecorderClient`, and `QProcess` | It never waits forever. When you close the window, it stays in Closing until the work that must finish has finished. |
 | `PreviewStreamWorker` | Four LSL inputs, rate measurement, and the newest waiting frame | Stream searches and detail reads have time limits, sample reads never wait, and alignment updates use a lock. |
 | `PreviewFileLoader` | Reading CSV/XDF, choosing streams, calibration, and preparing frames | It checks for cancel between small batches of lines, chunks, and samples. It only returns a result once loading is complete. |
@@ -212,7 +214,7 @@ Gaze and the stair target use separate LSL streams but the same coordinates. Gaz
 
 ### C++
 
-Keep the same header paths, names, and function signatures for:
+Keep the same header paths, names, parameters, and return types for:
 
 - `Config`, command-line results, and command-line parsing and printing.
 - `ViconLSLBridge`, `BridgeState`, `BridgeStatus`, and the status callback.
@@ -232,7 +234,7 @@ Unity scenes and assets save type and field names. Keep these names unless the c
 - The saved `config`, `gazeProvider`, and `modelTarget` fields.
 - Public fields on `GazeLSLConfig`.
 - `GazeSample` field names and their order.
-- The interfaces and method signatures the tests use: `IGazeSampleProvider`, `IGazeSampleOutlet`, `GazePublisherWorker`, `GazeCoordinateTransform`, and `ModelTargetPoseEncoder`.
+- The interfaces and methods the tests use: `IGazeSampleProvider`, `IGazeSampleOutlet`, `GazePublisherWorker`, `GazeCoordinateTransform`, and `ModelTargetPoseEncoder`.
 
 ### Commands, streams, files, and settings
 
@@ -283,10 +285,10 @@ Still missing:
 
 - A saved example of the full LSL stream description for every stream.
 - A single example that sends the same fake samples through both the live and XDF preview while keeping their different clock rules.
-- Unity, Windows device features, Vuforia, and real hardware still need the [hardware test guide](device-parity-runbook.md).
-- Real screens, remote desktop, virtual machines, Vicon, HoloLens, and Vuforia
-  still need the hardware guide. Because the preview is a plain `QWidget`, the
-  automated tests can draw it without a graphics card.
+- Unity, Windows device features, Vuforia, Vicon, the HoloLens, real screens,
+  remote desktop, and virtual machines still need the [hardware test
+  guide](device-parity-runbook.md). The automated tests can still draw the
+  preview without a graphics card, because it is a plain `QWidget`.
 
 ## Main source files
 

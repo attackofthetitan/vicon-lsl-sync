@@ -12,9 +12,8 @@
 
 namespace vicon_lsl::detail {
 
-// The LSL setup and sending shared by the marker and segment streams. It builds
-// the stream details, checks each sample's size, and closes the stream after a
-// failed send.
+// Shared by the marker and segment streams to build the stream details, check
+// each sample's size, and close the stream after a failed send.
 class ViconOutlet {
 public:
     ViconOutlet(StreamOutletFactory outlet_factory,

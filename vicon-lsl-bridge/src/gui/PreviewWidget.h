@@ -12,8 +12,8 @@
 
 namespace vicon_lsl {
 
-// Draws markers, segment axes, gaze rays, and the stair model with QPainter.
-// Drag to rotate and scroll to zoom.
+// Draws markers, segment axes, gaze rays, and the stair model with QPainter,
+// and lets the user drag to rotate and scroll to zoom.
 class PreviewWidget : public QWidget {
     Q_OBJECT
 

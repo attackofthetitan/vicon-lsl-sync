@@ -256,8 +256,8 @@ TEST_CASE("Preview XDF playback calibrates shared Unity-world gaze from the stai
 }
 
 TEST_CASE("Preview XDF recorded entirely after Vuforia pause retains stair alignment") {
-    // No live calibration exists in this fresh reader. Everything needed must
-    // come from the frozen references carried inside the XDF itself.
+    // This fresh reader has no live calibration, so everything it needs must come
+    // from the frozen references inside the XDF itself.
     for (const int state : {0, 1, 2}) {
         const TemporaryFilePath path(".xdf");
         std::vector<double> gaze(vicon_lsl::kHoloLensGazeChannelCount, 0.0);

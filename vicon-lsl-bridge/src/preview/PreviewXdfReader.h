@@ -14,7 +14,7 @@ struct XdfClockOffset {
     double offset = 0.0;
 };
 
-// One stream from an XDF file. Long streams keep every Nth sample, while the
+// One stream from an XDF file, where long streams keep every Nth sample but the
 // counts, times, and gaps describe the full stream.
 struct XdfStreamData {
     std::uint32_t stream_id = 0;
@@ -53,8 +53,8 @@ struct XdfLoadResult {
 };
 
 // Reads every stream in an XDF file, corrects its times with the recorded clock
-// offsets, and keeps a memory-limited set of samples. String streams are counted
-// but their values are skipped.
+// offsets, and keeps as many samples as the memory limit allows, counting text
+// streams but skipping their values.
 XdfLoadResult loadXdfNumericStreams(const std::string& path,
                                     const PreviewLoadOptions& options = {});
 

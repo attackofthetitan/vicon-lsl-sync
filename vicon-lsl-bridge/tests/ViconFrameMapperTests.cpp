@@ -147,7 +147,7 @@ struct FakeClient {
     }
 };
 
-// Lets the cases below compare brace-initialized layouts, which `!=` cannot
+// Lets the cases below compare layouts written inside braces, which `!=` cannot
 // take directly.
 bool differs(const vicon_lsl::ViconLayout& left, const vicon_lsl::ViconLayout& right) {
     return left != right;

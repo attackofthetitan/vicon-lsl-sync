@@ -45,7 +45,7 @@ struct PreviewLoadOptions {
 
 const char* previewLoadStageName(PreviewLoadStage stage);
 
-// Throws when the load was canceled; otherwise passes progress to the caller.
+// Throws if the load was cancelled, and otherwise passes progress to the caller.
 void reportPreviewLoadProgress(const PreviewLoadOptions& options,
                                PreviewLoadStage stage,
                                std::uint64_t completed,
@@ -54,8 +54,8 @@ void reportPreviewLoadProgress(const PreviewLoadOptions& options,
 
 int previewLoadPercent(const PreviewLoadProgress& progress);
 
-// Halves a list by keeping every other item, starting with the first. With
-// keep_last, the final item is kept too.
+// Halves a list by keeping every other item from the first one, plus the final
+// item when keep_last is set.
 template <class T>
 void keepEveryOther(std::vector<T>& values, bool keep_last) {
     std::vector<T> kept;

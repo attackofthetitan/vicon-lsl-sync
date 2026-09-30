@@ -175,8 +175,8 @@ TEST_CASE("Preview calibrated gaze follows the fixed stair ascent direction") {
 }
 
 TEST_CASE("Preview stair calibration preserves left and right for rotated worlds") {
-    // Both the published world and Vicon are right-handed. Facing upstairs,
-    // forward is -X, right is +Y, and up is +Z in the drawn stair model.
+    // Both the published world and Vicon are right-handed, and facing upstairs in
+    // the drawn stair model, forward is -X, right is +Y, and up is +Z.
     const std::vector<vicon_lsl::PreviewRigidTransform> holo_poses{
         {},
         {{1.0, 2.0, 3.0}, vicon_lsl::normalizeQuaternion({0.2, -0.3, 0.4, 0.5})},
@@ -188,9 +188,9 @@ TEST_CASE("Preview stair calibration preserves left and right for rotated worlds
             calibration.vicon_from_target.rotation = rotation;
             const auto transform = vicon_lsl::gazeTransformFromTargetCalibration(
                 calibration, holo_from_target);
-            // Check left, combined, and right origins with gaze sweeping
-            // to either side. In the target's own coordinates, +X faces up
-            // the stairs and -Z points up; sideways +Y must stay +Y.
+            // Check left, combined, and right origins with gaze sweeping to
+            // either side, where in the target's own coordinates +X faces up
+            // the stairs, -Z points up, and sideways +Y must stay +Y.
             for (const double side : {-1.0, 0.0, 1.0}) {
                 const auto published_origin = vicon_lsl::applyRigidTransformPoint(
                     holo_from_target, {-3.0, side * 0.032, -1.6});

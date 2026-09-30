@@ -20,14 +20,14 @@ The app looks for the Vicon server at `localhost:801` unless you change it.
 
 The Mac download needs Apple Silicon. Open the disk image and drag the app into
 the **Applications** folder shown next to it. LabRecorder is already inside the
-app. Open the app from **Applications** and it ejects the disk image for you. If
-you open it from the disk image instead, it offers to move itself to
-**Applications** first. The command-line tools are in a separate folder on the
-disk image, so copy them before opening the app if you want them.
+app. If you want the command-line tools, copy them from their own folder on the
+disk image first. Then open the app from **Applications**, and it ejects the
+disk image for you. If you open it from the disk image instead, it offers to
+move itself to **Applications** first.
 
-Apple has not checked (notarized) this app. The first time you open it, macOS
-says it could not verify the app. Open **System Settings > Privacy & Security**
-and choose **Open Anyway**. macOS then asks once before the app uses your local
+Apple has not checked this app, so the first time you open it, macOS says it
+could not verify the app. Open **System Settings > Privacy & Security** and
+choose **Open Anyway**. macOS then asks once before the app uses your local
 network, which LSL needs. It also asks before the app saves recordings in
 Documents, Desktop, or Downloads, or on an external or network drive. If you
 said no, the path check tells you, and **Open Privacy Settings** takes you to
@@ -56,14 +56,15 @@ With the desktop app you can:
 
 - Start and stop a whole session in one step, or control the bridge, preview,
   and recorder one at a time.
-- Find LSL streams and pick each one by its source ID. If source IDs change
-  between runs, you can choose to follow a stream by name instead.
+- Find LSL streams and pick each one by its source ID, which is a fixed name the
+  stream keeps when it restarts. If source IDs change between runs, you can
+  choose to follow a stream by name instead.
 - See the final file path and chosen streams before you start.
 - Keep an eye on the bridge, recorder, preview, calibration, file path, free
   space, stream health, errors, and file check results.
 - Open a merged CSV or XDF recording and play it back, jump around, step
   through it, or loop it.
-- Line up HoloLens gaze with the Vicon space and keep saved calibrations.
+- Line up HoloLens gaze with the Vicon data and save that alignment for later.
 - Connect to a recorder you started yourself, or let the app start its own copy,
   without the window freezing.
 
@@ -91,7 +92,8 @@ In Unity:
 1. Use Microsoft Mixed Reality OpenXR 1.5.1 or later.
 2. Add `GazeDataProvider` and `GazeLSLOutlet` to the scene.
 3. Add `VuforiaModelTargetPoseOutlet` to the same scene.
-4. Give the target component the stair `ModelTargetBehaviour`. Give the gaze and target components the same `GazeLSLConfig` asset.
+4. Give the target component the stair `ModelTargetBehaviour`.
+5. Give the gaze and target components the same `GazeLSLConfig` asset.
 
 In the desktop preview:
 
@@ -101,10 +103,10 @@ In the desktop preview:
 4. Select **Calibrate from Stair Target**.
 5. Keep the target still while the app collects 20 good samples.
 
-You can then pause Vuforia with **M**. Keep the target outlet running and
-include `HoloLensModelTargetPose` in every recording. While Vuforia is paused,
-the HoloLens keeps sending the last steady stair position and marks it as frozen
-instead of live. That way a recording started after calibration can still be
+You can then pause Vuforia with **M**. Keep `VuforiaModelTargetPoseOutlet`
+turned on and include `HoloLensModelTargetPose` in every recording. While
+Vuforia is paused, the HoloLens keeps sending the last steady stair position and
+marks it as frozen instead of live. That way a recording started after calibration can still be
 lined up when you open it later. After you turn Vuforia back on, it has to find
 the stairs again. Playback warns you if a file has nothing it can use to line up
 gaze.

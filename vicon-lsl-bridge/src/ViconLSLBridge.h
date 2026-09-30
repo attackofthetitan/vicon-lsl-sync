@@ -32,8 +32,8 @@ struct BridgeStatus {
     std::string message;
 };
 
-// Connects to Vicon, publishes the marker and segment streams, and reconnects
-// after errors until stop() is called.
+// Connects to Vicon, sends the marker and segment streams, and reconnects after
+// errors until stop() is called.
 class ViconLSLBridge {
 public:
     using StatusCallback = std::function<void(const BridgeStatus&)>;
@@ -44,7 +44,7 @@ public:
                    vicon_lsl::bridge_internal::Dependencies dependencies);
 
     void run();
-    // Only asks run() to finish. run() closes the streams and connection itself.
+    // Only asks run() to finish, and run() closes the streams and connection itself.
     void stop();
     void setStatusCallback(StatusCallback callback);
 

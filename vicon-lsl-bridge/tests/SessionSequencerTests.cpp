@@ -69,7 +69,7 @@ void testShutdownEndsOwnedRecorderOnceOrOnDeadline() {
            "an owned recorder is never asked to close twice");
 
     // A recorder that never reports a clean stop must not hold closing open
-    // forever; the deadline closes it and says so.
+    // forever, so the deadline closes it and says so.
     ShutdownInputs stuck = settledShutdown();
     stuck.owns_running_process = true;
     stuck.recorder_settled_safely = false;

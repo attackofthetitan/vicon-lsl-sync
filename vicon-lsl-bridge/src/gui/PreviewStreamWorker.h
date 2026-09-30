@@ -21,8 +21,7 @@ class stream_info;
 
 namespace vicon_lsl {
 
-// Which streams to open. Each binding's name, source ID, and reconnection mode
-// are used.
+// Which streams to open, using each binding's name, source ID, and reconnection mode.
 struct PreviewWorkerConfig {
     gui::StreamBinding markers;
     gui::StreamBinding segments;
@@ -33,8 +32,8 @@ struct PreviewWorkerConfig {
     PreviewTransformProfile gaze_transform;
 };
 
-// Reads the four live preview streams on its own thread. Only the newest frame
-// waits for display; stream rates and calibration poses are tracked separately.
+// Reads the four live preview streams on its own thread, keeping only the newest
+// frame for display while tracking rates and calibration samples separately.
 class PreviewStreamWorker : public QThread {
     Q_OBJECT
 

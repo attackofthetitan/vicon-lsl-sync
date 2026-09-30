@@ -15,7 +15,7 @@ namespace GazeLSL
         private const float DeliveryStateReportIntervalSeconds = 5f;
         private const float FirstDeliveryStateReportDelaySeconds = 1f;
 
-        // The same low-rate line the desktop preview and hardware test guide use.
+        // The same low-rate limit the desktop preview and hardware test guide use.
         private const double LowRateFraction = 0.8;
 
         [SerializeField] private GazeLSLConfig config;
@@ -83,8 +83,8 @@ namespace GazeLSL
             bool reminderDue = now >= nextDeliveryStateReportTime &&
                                snapshot.State != GazeDeliveryState.PublishingValidGaze;
 
-            // Give a working tracker a moment to send its first reading before
-            // logging the normal "waiting" state. Other states are logged at once.
+            // Give a working tracker a moment to send its first reading before logging
+            // the normal "waiting" state, while other states are logged at once.
             if (!deliveryStateReported &&
                 snapshot.State == GazeDeliveryState.WaitingForProviderSample &&
                 now < nextDeliveryStateReportTime)
@@ -133,9 +133,8 @@ namespace GazeLSL
             }
         }
 
-        // The delivery state only shows what the outlet can see. This shows the
-        // three steps inside the gaze reader, any of which could lose every reading
-        // and leave the same "pushed 0 samples" line behind.
+        // Shows the three steps inside the gaze reader, since any of them could lose
+        // every reading while the delivery state only says "pushed 0 samples".
         private void ReportAcquisitionCounters()
         {
             GazeAcquisitionSnapshot acquisition;
@@ -168,8 +167,8 @@ namespace GazeLSL
                 $"after capturing it.");
         }
 
-        // Never restarts the outlet: the declared rate is fixed in the stream
-        // header, and closing the stream mid-recording loses more than the low rate.
+        // Never restarts the stream, because the declared rate is fixed in its header
+        // and closing it mid-recording would lose more than the low rate does.
         private void ReportMeasuredRate()
         {
             if (nominalRate == 0u || Time.realtimeSinceStartup < nextRateCheckTime)

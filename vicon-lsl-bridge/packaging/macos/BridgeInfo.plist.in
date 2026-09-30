@@ -24,14 +24,12 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>${MACOSX_BUNDLE_COPYRIGHT}</string>
-	<!-- Lab Streaming Layer discovers and reads streams over UDP on the local
-	     network. Without this string macOS has no reason to show the user, and
-	     the local-network prompt is unhelpful or the access is simply denied. -->
+	<!-- LSL finds and reads streams on the local network, and without this reason
+	     macOS shows an unhelpful prompt or simply denies the access. -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Vicon LSL Bridge finds and records Lab Streaming Layer streams published by Vicon and the HoloLens on your local network.</string>
-	<!-- macOS asks before an app uses these folders or volumes. The bundled
-	     recorders run as this app's helpers, so the request made here also
-	     covers the XDF file they write. Each string says why it is asked. -->
+	<!-- macOS asks before the app uses these folders or drives, and because the
+	     bundled recorders run as its helpers, the answer also covers their XDF files. -->
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>Vicon LSL Bridge saves recordings in the study folder you choose, and opens recordings for preview.</string>
 	<key>NSDesktopFolderUsageDescription</key>

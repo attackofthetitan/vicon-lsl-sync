@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-// Sends samples to LSL. Tests replace it with a fake through StreamOutletFactory.
+// Sends samples to LSL, and tests swap in a fake through StreamOutletFactory.
 class StreamOutlet {
 public:
     virtual ~StreamOutlet() = default;

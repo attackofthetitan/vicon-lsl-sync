@@ -60,7 +60,7 @@ namespace GazeLSL
 
     public sealed class GazePublisherWorker
     {
-        // Run faster than the tracker so a backlog can clear after a short delay.
+        // Run faster than the tracker so readings that pile up during a short delay can clear.
         private const double PublishOversample = 1.25;
 
         private readonly object lifecycleLock = new object();
@@ -162,8 +162,8 @@ namespace GazeLSL
             signal.Set();
             if (!threadToJoin.Join(timeoutMilliseconds))
             {
-                // The worker may still be inside a gaze reader or outlet call. Keep
-                // everything it uses, and the stop signal, until that call returns.
+                // The worker may still be inside a gaze reader or outlet call, so keep
+                // everything it uses, including the stop signal, until that call returns.
                 return false;
             }
 
@@ -227,8 +227,8 @@ namespace GazeLSL
                             break;
                         }
 
-                        // Focus changes can briefly interrupt the tracker. Try again
-                        // at the next scheduled read.
+                        // Focus changes can briefly interrupt the tracker, so try
+                        // again at the next scheduled read.
                         hasSample = false;
                         sample = default(GazeSample);
                     }

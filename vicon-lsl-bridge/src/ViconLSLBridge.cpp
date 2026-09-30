@@ -67,8 +67,8 @@ void ViconLSLBridge::stop() {
 }
 
 void ViconLSLBridge::run() {
-    // LabRecorder joins reconnects with the same source ID, so keep timestamps
-    // increasing across reconnects too.
+    // Keep timestamps increasing across reconnects, because LabRecorder joins a
+    // reopened stream with the same source ID onto the old one.
     vicon_lsl::ViconTimestampState timestamp_state;
     bool previous_first_frame_failed = false;
     while (running_) {
@@ -82,8 +82,8 @@ void ViconLSLBridge::run() {
             std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
             reportStatus(BridgeState::Connecting, "Failed to get initial frame, reconnecting");
             client_->disconnect();
-            // Retry once right away, since a server that is still starting
-            // usually sends a frame on the next try. Wait before later retries.
+            // Retry the first failure right away, since a server that is still
+            // starting usually sends a frame next time, but wait before later ones.
             if (previous_first_frame_failed) waitForRetry();
             previous_first_frame_failed = true;
             continue;
@@ -179,9 +179,8 @@ void ViconLSLBridge::waitForRetry() {
     }
 }
 
-// Connecting: read the layout and create the streams.
-// Streaming: recreate both streams only if the layout changed. A failed read
-// keeps the working streams.
+// Opens the streams when connecting, and while streaming reopens both only if
+// the layout changed, keeping the working streams if the read fails.
 bool ViconLSLBridge::refreshStreams(BridgeState state) {
     const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
     if (!discovery.ok()) {

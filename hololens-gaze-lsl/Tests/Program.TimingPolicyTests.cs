@@ -7,10 +7,8 @@ internal static partial class Program
 {
     private static void GazeTimingTakesDurationsInOneDomain()
     {
-        // Never turn SystemRelativeTime ticks into seconds. On a HoloLens 2 they
-        // do not match Stopwatch: one reading was 0.020 s old by the SDK's clock
-        // and -231 s by Stopwatch, and the gap kept growing. Everything that
-        // allowed that conversion has been removed.
+        // Nothing may turn SystemRelativeTime ticks into seconds, because on a
+        // HoloLens 2 they drift away from Stopwatch by more every second.
         foreach (string name in new[]
                  {
                      "SystemRelativeTicksPerSecond",
@@ -36,9 +34,8 @@ internal static partial class Program
 
     private static void GazeTimingJudgesSeedAgeOnOneClock()
     {
-        // The age must come from the SDK's own clock. Comparing the reading's
-        // ticks with one of our timers refused every reading, even though
-        // nothing was wrong with them.
+        // The age must come from the SDK's own clock, because comparing a reading's
+        // ticks with one of our timers once refused every good reading.
         foreach (string name in new[] { "IsFreshCaptureTimestamp", "MaxSeedCaptureAgeTicks" })
         {
             True(
@@ -111,16 +108,15 @@ internal static partial class Program
         double framePeriod = 1.0 / 90.0;
         double latency = 0.020;
 
-        // A step that runs on time lands between tracker frames. Asking then only
+        // A step that runs on time lands between tracker frames, where asking only
         // fails inside the SDK on the device, so it must not ask at all.
         False(
             GazeDrainPolicy.CouldHaveNewerReading(1000.005, 1000.0, framePeriod, latency),
             "A step inside one frame of the last capture should not ask.");
 
-        // The key stop rule. A reading just taken is already as old as the
-        // tracker's delivery delay, so checking against the frame time alone
-        // always allowed one more ask. That ask failed and leaked on every step
-        // for a whole session.
+        // The key stop rule: a reading just taken is already as old as the delivery
+        // delay, so checking the frame time alone let one failing ask through on
+        // every step.
         False(
             GazeDrainPolicy.CouldHaveNewerReading(
                 1000.0 + latency, 1000.0, framePeriod, latency),
@@ -130,9 +126,9 @@ internal static partial class Program
                 1000.0 + latency, 1000.0, framePeriod, 0.0),
             "Without the delay that same step asks, which is the regression.");
 
-        // Not tested exactly at the edge: capture times are large numbers, so
-        // adding and then subtracting a frame can land very slightly either side.
-        // A step that just misses simply asks on the next one, about 9 ms later.
+        // Not tested exactly at the edge, because rounding on large capture times
+        // can land very slightly either side, and a step that just misses simply
+        // asks on the next one, about 9 ms later.
         True(
             GazeDrainPolicy.CouldHaveNewerReading(
                 1000.0 + (framePeriod + latency) * 1.01, 1000.0, framePeriod, latency),
@@ -141,9 +137,9 @@ internal static partial class Program
             GazeDrainPolicy.CouldHaveNewerReading(1000.5, 1000.0, framePeriod, latency),
             "A late step should ask, and keep asking while it catches up.");
 
-        // Broken input must not stop readings being fetched. Without a usable
-        // delay, the frame time alone is used, which asks too often rather than
-        // not at all.
+        // Broken input must not stop readings being fetched, so without a usable
+        // delay the frame time alone is used, which asks too often rather than not
+        // at all.
         True(
             GazeDrainPolicy.CouldHaveNewerReading(1000.005, 1000.0, 0.0, latency),
             "An unknown frame period should not block the drain.");
@@ -185,8 +181,8 @@ internal static partial class Program
         policy.NoteReadingAge(double.PositiveInfinity);
         Near(0.012, policy.PublicationLatencySeconds);
 
-        // A reading very slightly newer than the ask is clock jitter, not a
-        // negative delay.
+        // A reading very slightly newer than the ask is a tiny clock difference, not
+        // a negative delay.
         policy.NoteReadingAge(-0.001);
         Equal(0.0, policy.PublicationLatencySeconds);
 
@@ -225,9 +221,8 @@ internal static partial class Program
             policy.IsSuspended(now + GazeDrainPolicy.SuspensionSeconds - 0.001),
             "The drain should stay down for the whole suspension.");
 
-        // Empty results happen while the tracker is not making readings yet, and
-        // it may start later. Giving up for the whole session would leave the run
-        // on a fallback that cannot keep up.
+        // Empty results are normal before the tracker starts, so giving up for the
+        // whole session would leave the run on a fallback that cannot keep up.
         False(
             policy.IsSuspended(now + GazeDrainPolicy.SuspensionSeconds),
             "The drain should be tried again once the suspension is over.");
@@ -244,10 +239,9 @@ internal static partial class Program
 
     private static void GazeDrainReadingsDoNotForgiveSdkFailures()
     {
-        // A step that gets one reading and then fails never has two failures in a
-        // row. Counting only failures in a row let one session leak thousands of
-        // SDK objects and pause just eleven times. The count lasts until the next
-        // pause, not until the next reading.
+        // The count lasts until the next pause, not the next reading, because
+        // counting only failures in a row once let a session leak thousands of SDK
+        // objects with just eleven pauses.
         var policy = new GazeDrainPolicy();
         double now = 1000.0;
 
@@ -341,8 +335,7 @@ internal static partial class Program
 
     private static void GazeBacklogKeepsDrainedBatch()
     {
-        // A caught-up batch must survive the queue limits, or catching up is
-// pointless.
+        // A caught-up batch must survive the queue limits, or catching up is pointless.
         double step = 1.0 / 90.0;
         var queue = new Queue<double>();
 
@@ -399,9 +392,8 @@ internal static partial class Program
 
     private static void GazeBacklogToleratesJitterButNotAnUnusableSpan()
     {
-        // Capture times mix our LSL clock with the SDK's clock, so batches can
-        // land very slightly out of order. That is not a backlog, and dropping
-        // them would throw away perfectly fresh readings.
+        // Capture times mix our LSL clock with the SDK's clock, so a batch can land
+        // very slightly out of order, which is not a backlog and must not be dropped.
         var jittery = new Queue<double>();
         jittery.Enqueue(1000.010);
         jittery.Enqueue(1000.009);

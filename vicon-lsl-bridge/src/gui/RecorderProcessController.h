@@ -16,8 +16,8 @@ enum class RecorderProcessKind {
     SelectedStreamRecorder,
 };
 
-// Starts and stops the recorder programs this app launches. A recorder that was
-// already running is never closed from here.
+// Starts and stops the recorder programs this app launches, and never closes a
+// recorder that was already running.
 class RecorderProcessController : public QObject {
     Q_OBJECT
 

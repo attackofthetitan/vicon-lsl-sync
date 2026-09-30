@@ -22,7 +22,7 @@ std::string summaryRoleName(PreviewStreamRole role) {
                                                                 : previewStreamRoleName(role);
 }
 
-// The sample closest in time to `absolute_timestamp`, if one is within the tolerance.
+// The sample closest in time to `absolute_timestamp`, if one is within the time limit.
 std::optional<std::size_t> nearestSampleIndex(const XdfStreamData& stream,
                                               double absolute_timestamp,
                                               double tolerance_seconds) {
@@ -32,7 +32,7 @@ std::optional<std::size_t> nearestSampleIndex(const XdfStreamData& stream,
 
     auto nearest = std::lower_bound(
         stream.timestamps.begin(), stream.timestamps.end(), absolute_timestamp);
-    // Only the samples on either side can be closest. Ties use the later one.
+    // Only the samples on either side can be closest, and a tie goes to the later one.
     if (nearest == stream.timestamps.end() ||
         (nearest != stream.timestamps.begin() &&
          std::abs(*std::prev(nearest) - absolute_timestamp) <
@@ -46,8 +46,8 @@ std::optional<std::size_t> nearestSampleIndex(const XdfStreamData& stream,
     return std::nullopt;
 }
 
-// The stream whose samples become the playback frames. Without a choice, prefers
-// markers, then segments, then gaze.
+// Picks the stream whose samples become the playback frames, preferring markers,
+// then segments, then gaze when the user has not chosen one.
 const XdfStreamData* chooseMasterStream(const std::vector<XdfStreamData>& streams,
                                         std::uint32_t preferred_stream_id) {
     const auto usable = [](const XdfStreamData& stream, PreviewStreamRole role) {
@@ -132,9 +132,9 @@ std::string buildSummary(const XdfLoadResult& xdf,
     return summary.str();
 }
 
-// Builds one frame per master-stream sample and adds the nearest sample from
-// every other stream within the time tolerance. Gaze is aligned from the
-// recorded stair target when a stable pose is found.
+// Builds one frame per main-stream sample with the nearest sample from each
+// other stream within the time limit, and lines up gaze from the recorded stair
+// target when it finds a steady stretch.
 PreviewRecording assembleRecording(const XdfLoadResult& xdf,
                                    const PreviewTransformProfile& vicon_transform,
                                    const PreviewTransformProfile& gaze_transform,

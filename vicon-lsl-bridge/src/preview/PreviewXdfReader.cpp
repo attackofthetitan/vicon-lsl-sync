@@ -24,7 +24,7 @@ enum class XdfChunkTag : std::uint16_t {
     StreamFooter = 6,
 };
 
-// Reads little-endian values and throws instead of reading past the end.
+// Reads numbers stored lowest byte first, and throws instead of reading past the end.
 class BinaryReader {
 public:
     explicit BinaryReader(const std::string& path) : input_(path, std::ios::binary) {
@@ -182,7 +182,7 @@ double parseDoubleTag(const std::string& xml, const std::string& tag, double def
     }
 }
 
-// Uses the <label> values when there is one per channel. Otherwise names the
+// Uses the <label> values when there is one per channel, or else names the
 // channels ch_0, ch_1, and so on.
 std::vector<std::string> parseChannelLabels(const std::string& xml, int channel_count) {
     std::vector<std::string> labels;
@@ -263,9 +263,8 @@ struct ClockOffsetFit {
     long double slope = 0.0L;
 };
 
-// Fits a straight line through the clock offsets. Both values are centered on
-// their means first, because XDF times are large numbers and the small drift
-// would otherwise be lost to rounding.
+// Fits a straight line through the clock offsets after centring both values on
+// their averages, because XDF times are large and rounding would lose the drift.
 std::optional<ClockOffsetFit> fitClockOffsets(const std::vector<XdfClockOffset>& offsets) {
     if (offsets.empty()) {
         return std::nullopt;
@@ -301,9 +300,9 @@ std::optional<ClockOffsetFit> fitClockOffsets(const std::vector<XdfClockOffset>&
     return ClockOffsetFit{stream_center, offset_center, slope};
 }
 
-// Applies the clock offsets, then nudges any time that does not increase to
-// just after the previous one. Later times shift by the same amount so gaps
-// keep their size. Returns how many times were changed.
+// Applies the clock offsets, moves any time that does not increase to just after
+// the previous one (shifting later times too so gaps keep their size), and
+// returns how many times it changed.
 std::size_t correctAndRepairTimestamps(XdfStreamData& stream) {
     std::stable_sort(stream.clock_offsets.begin(), stream.clock_offsets.end(),
                      [](const XdfClockOffset& left, const XdfClockOffset& right) {
@@ -480,7 +479,7 @@ void parseClockOffsetChunk(BinaryReader& reader,
     if (reader.position() > chunk_end || chunk_end - reader.position() != 2 * sizeof(double)) {
         throw std::runtime_error("Invalid XDF clock-offset chunk size");
     }
-    // The time is on the source stream's clock. Adding the offset gives the
+    // The time is on the source stream's clock, and adding the offset gives the
     // recorder's clock.
     const double stream_time = reader.readDouble();
     const double offset = reader.readDouble();
@@ -568,7 +567,7 @@ XdfLoadResult loadXdfNumericStreams(const std::string& path,
     while (!reader.eof()) {
         reportPreviewLoadProgress(options, PreviewLoadStage::Indexing,
                                   reader.position(), reader.size(), "XDF chunks");
-        // A final chunk cut off by a crash is skipped. Other damage is an error.
+        // Skip a final chunk cut off by a crash, but treat other damage as an error.
         const std::uint8_t varlen_width = reader.peekU8();
         if (varlen_width != 1 && varlen_width != 4 && varlen_width != 8) {
             throw std::runtime_error("Unsupported XDF variable-length integer width");

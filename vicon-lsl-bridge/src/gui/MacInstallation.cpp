@@ -28,14 +28,14 @@ bool isInside(const QString& path, const QString& folder) {
     return QDir::cleanPath(path).startsWith(QDir::cleanPath(folder) + '/');
 }
 
-// macOS runs a downloaded app from a randomized read-only copy until the user
-// moves it out of the disk image or folder it arrived in.
+// macOS runs a downloaded app from a hidden read-only copy until the user moves
+// it out of the disk image or folder it came in.
 bool isTranslocated(const QString& bundle_path) {
     return bundle_path.contains("/AppTranslocation/");
 }
 
-// Only the app from the disk image carries the recorders. The one in the
-// archive needs the recorders beside it, so it cannot move on its own.
+// Only the disk-image app has the recorders inside it, while the archive app
+// needs them beside it and so cannot move on its own.
 bool carriesRecorders(const QString& bundle_path) {
     const QDir helpers(RecorderProcessController::embeddedRecorderDirectory(
         QDir(bundle_path).filePath("Contents/MacOS")));
@@ -66,8 +66,8 @@ bool runWithProgress(const QString& label, const QString& program,
     return false;
 }
 
-// The user has already opened this app. Its copy would keep the mark of a
-// downloaded file, and macOS would block the copy's first launch all over again.
+// Removes the downloaded-file mark from the copy, because the user already
+// opened this app and macOS would otherwise block the copy's first launch.
 void clearQuarantine(const QString& bundle) {
     QStringList paths{bundle};
     QDirIterator entries(bundle, QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
@@ -127,8 +127,8 @@ void ejectImage(const QString& mount_point, int attempt, QObject* context,
 QStringList mountedReadOnlyVolumes() {
     QStringList roots;
     for (const QStorageInfo& volume : QStorageInfo::mountedVolumes()) {
-        // A disk image attaches as a local disk. Leaving out network shares
-        // avoids waiting on a server that has gone away.
+        // Only count local disks, which include disk images, so the app never
+        // waits on a network server that has gone away.
         if (volume.isValid() && volume.isReady() && volume.isReadOnly() &&
             volume.rootPath().startsWith("/Volumes/") &&
             volume.device().startsWith("/dev/disk")) {
@@ -164,7 +164,7 @@ bool shouldOfferMove(const QString& bundle_path, const QStringList& installer_im
 }
 
 QStringList imagesToEject(const QString& bundle_path, const QStringList& installer_images) {
-    // A translocated app does not show which image it came from.
+    // An app running from macOS's temporary copy does not show which image it came from.
     if (isTranslocated(bundle_path)) return {};
     QStringList images;
     for (const QString& image : installer_images) {

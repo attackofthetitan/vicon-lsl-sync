@@ -41,7 +41,7 @@ The work is split across two threads:
 
 - A background worker collects gaze readings from the eye-tracking SDK. It runs
   1.25 times as often as the tracker's 90 Hz, because each step sends at most one
-  sample, and a backlog built up during a pause can only shrink if steps run
+  sample, and readings that pile up during a pause can only clear if steps run
   faster than the tracker.
 - Unity's main thread moves each reading into the Unity world, using where the headset was at the moment the reading was taken.
 
@@ -50,17 +50,17 @@ This keeps gaze in the same fixed world as the optional Vuforia stair target str
 ## Record with Vuforia paused
 
 Keep `VuforiaModelTargetPoseOutlet` turned on and record `HoloLensModelTargetPose`
-along with gaze. While it can see the stairs, the outlet builds a steady
+along with gaze. While it can see the stairs, that component builds a steady
 reference from 20 positions that stay within 2 cm and 3 degrees of each other.
-Once the stairs have been found, press **M** to pause Vuforia. The outlet keeps
-sending that reference with `Tracked = 2`, even for recordings started after the
-pause. Playback can then line up gaze using the reference saved in the XDF.
+Once the stairs have been found, press **M** to pause Vuforia. The component
+keeps sending that reference with `Tracked = 2`, even for recordings started
+after the pause. Playback can then line up gaze using the reference saved in the XDF.
 
 `Tracked = 1` means a live position, and `0` means invalid (seven NaNs). Normal
 tracking loss still sends invalid positions; only turning Vuforia off on purpose
 sends the frozen reference. If there is no steady reference yet, pausing leaves
 the samples invalid and logs a warning. Turn tracking back on to get one. Turning
-Vuforia back on, or turning the outlet off, clears the old reference.
+Vuforia back on, or turning the component off, clears the old reference.
 
 Do not move the stairs or reset the Unity world while using a frozen reference.
 If you do, find the stairs again. Frozen samples carry the current time but are
@@ -81,11 +81,11 @@ The app drops a reading when its time is:
 - The same as the last reading.
 - Earlier than the last reading.
 
-Only a reading fetched for the current time is judged on age, and it must be no more than 50 ms old. Once there is a last capture time, an old reading just means the step is catching up, not that the tracker has stalled.
+Only a reading fetched for the current time is judged on age, and it must be within 50 ms of the time asked for, either way. Once there is a last capture time, an old reading just means the step is catching up, not that the tracker has stalled.
 
 On this headset, the SDK cannot say "there is nothing newer" cleanly. It throws an error inside the SDK instead of returning nothing, and leaves behind an object that throws again later. If that happens on every step, the app crashes within seconds. So the app only asks for a newer reading when one can exist: once one frame has passed since the last capture, *and* the tracker has had time to hand it over. It stops as soon as it has the newest reading.
 
-The second part matters. Readings arrive about 20 ms after they are taken, while one frame is about 11 ms, so without it every step would make one more ask that could not be answered. The delay is measured, not guessed: it is the youngest age any reading has been offered at.
+The second part matters. Readings arrive about 20 ms after they are taken, while one frame is about 11 ms, so without it every step would make one more ask that could not be answered. The delay is measured, not guessed: it is the smallest age of any reading the SDK has offered.
 
 If the SDK still fails this way three times since catching up last resumed, the app stops catching up for ten seconds and asks for the reading at the current time instead. That takes at most one reading per step and may fall behind the tracker. The pause is short on purpose. The SDK only says "nothing newer" while the tracker has nothing new to give, which is when it is not making readings. A tracker that starts later would otherwise be stuck on the slower method for the rest of the session. The first pause is logged, and the total is in the reading counters.
 
@@ -101,7 +101,7 @@ LSL and LabRecorder still handle the clock difference between the HoloLens and t
 
 If `liblsl.dll` cannot load, or the LSL stream cannot start, Unity logs an error and gaze stops being sent. There is no backup route.
 
-The stream always has 21 values: the start point and direction for both eyes combined, the left eye, and the right eye, plus one valid flag for each. HoloLens 2 vergence (where the two eyes meet) is not included.
+The stream always has 21 values: the start point and direction for both eyes combined, the left eye, and the right eye, plus one valid flag for each. It does not include the point where the two eyes' lines of sight meet.
 
 The layout stays the same even when one eye is not available. That eye's values are just marked invalid.
 

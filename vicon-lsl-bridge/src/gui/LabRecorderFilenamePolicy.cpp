@@ -78,8 +78,8 @@ bool pathIsWithin(const QString& root, const QString& path) {
     return norm_path.startsWith(norm_root);
 }
 
-// Walks up by name: QDir::cdUp() refuses to enter a folder that does not exist,
-// so it stops as soon as two levels are missing.
+// Walks up by name, because QDir::cdUp() refuses to enter a missing folder and
+// would give up as soon as two levels are missing.
 QString nearestExistingDirectory(const QString& path) {
     const QFileInfo info(path);
     QString directory = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
@@ -156,9 +156,8 @@ QString RecordingPathResult::summary() const {
 }
 
 QString LabRecorderFilenamePolicy::filenameCommand(const LabRecorderFilenameFields& fields) {
-    // LabRecorder would change an explicit template (lowercase it, switch to %n,
-    // and pad the run), but it copies %b unchanged. So the template is "%b" and
-    // the task carries the checked path, and LabRecorder writes exactly that path.
+    // LabRecorder copies %b unchanged but would rewrite a full template, so send
+    // "%b" as the template and the checked path as the task.
     LabRecorderFilenameFields wire_fields = fields;
     wire_fields.templ = "%b";
     wire_fields.task = renderedFilename(fields);
@@ -400,8 +399,8 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
     if (options.verify_write_access && QDir(writable_directory).exists()) {
         QTemporaryFile probe(QDir(writable_directory).filePath(".vicon-lsl-writecheck-XXXXXX"));
         probe.setAutoRemove(true);
-        // The first write to a protected folder is what makes macOS ask the
-        // user. A refusal after that lasts until it is changed in Settings.
+        // The first write to a protected folder makes macOS ask the user, and a
+        // refusal then lasts until it is changed in Settings.
         if (!probe.open()) {
             if (refusedByMacOS(writable_directory)) {
                 result.privacy_blocked = true;

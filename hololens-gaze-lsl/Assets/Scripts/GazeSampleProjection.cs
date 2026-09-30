@@ -21,7 +21,7 @@ namespace GazeLSL
     }
 
     // Checks gaze rays, moves them into the world, and packs them into a flat
-    // sample, without needing Unity or Windows. Callers pass System.Numerics values.
+    // sample using System.Numerics values, so it needs neither Unity nor Windows.
     internal static class GazeSampleProjection
     {
         private const float MinimumDirectionMagnitudeSquared = 0.000001f;
@@ -129,8 +129,8 @@ namespace GazeLSL
                 return false;
             }
 
-            // The Eye Tracking SDK ray is right-handed while the tracker pose
-            // is expressed in Unity's left-handed OpenXR playspace.
+            // The Eye Tracking SDK ray is right-handed, while the tracker's position
+            // is given in Unity's left-handed OpenXR playspace.
             Vector3 originInTrackerUnity =
                 SharedWorldBasis.ReflectPolarVector(ray.Origin);
             Vector3 directionInTrackerUnity =

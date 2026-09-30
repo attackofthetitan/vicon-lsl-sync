@@ -14,16 +14,16 @@ namespace vicon_lsl::gui {
 void mergeStreamInventory(QVector<StreamIdentity>& inventory,
                           const QVector<StreamIdentity>& seen);
 
-// Rebuilds the list after a stream search. Known streams keep the user's choices
-// and last measurements. Streams named in the saved settings are selected, and
-// the rest follow `record_every_visible_stream`. A selected or required stream
-// that is no longer visible stays in the list, marked as missing.
+// Rebuilds the list after a stream search, keeping known streams' choices and
+// measurements, selecting new streams the settings name (or every new stream
+// when `record_every_visible_stream` is on), and keeping selected or required
+// streams that disappeared, marked as missing.
 QVector<StreamIdentity> reconcileDiscoveredStreams(
     const QVector<StreamIdentity>& known,
     QVector<StreamIdentity> discovered,
     const SessionConfiguration& configuration);
 
-// The streams a recording should capture. Recording every visible stream
+// The streams a recording should capture, where recording every visible stream
 // overrides the per-stream choices.
 QVector<StreamIdentity> selectedStreams(const QVector<StreamIdentity>& inventory,
                                         bool record_every_visible_stream);

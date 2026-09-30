@@ -11,9 +11,8 @@ $packagingSafetyModule = (Resolve-Path -LiteralPath (
 Import-Module -Name $packagingSafetyModule -Scope Local -Force `
     -DisableNameChecking -ErrorAction Stop
 
-# The C++ runtime DLLs come from the x64 VC143 redistributable folder of the
-# installed Visual Studio. Keep this list explicit: it names every runtime DLL
-# that current MSVC builds need, without copying anything else from that folder.
+# Name every C++ runtime DLL that current MSVC builds need from Visual Studio's
+# x64 VC143 redistributable folder, so nothing else in that folder is copied.
 $mandatoryDlls = @(Get-MandatoryMsvcRuntimeDllNames)
 $requiredDlls = @(
     $mandatoryDlls
@@ -227,7 +226,7 @@ try {
     Assert-NoReparseAncestors $stage "CRT staging directory"
     New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
     foreach ($dll in @($selectedDlls | Sort-Object Name)) {
-        # DLLs only: do not copy PDBs, manifests, catalog files, or signatures.
+        # Copy only the DLLs, not PDBs, manifests, catalog files, or signatures.
         Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $stage $dll.Name) -Force -ErrorAction Stop
     }
     Assert-NoReparseTree $stage "CRT staging directory"

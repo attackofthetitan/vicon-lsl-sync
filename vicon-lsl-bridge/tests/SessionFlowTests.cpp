@@ -108,7 +108,7 @@ TEST_CASE("Stop Session stops the selected recorder during startup and while rec
             return !recorder->ownsRunningProcess() && sessionStopped(window);
         });
         const bool stop_received = recorder->boundedOutput().contains("Stop received");
-        // Clean up the child even if the behavior under test failed.
+        // Clean up the child process even if the behavior under test failed.
         recorder->endOwnedProcess();
         waitUntil([&] { return !recorder->ownsRunningProcess(); });
         window.close();
@@ -151,17 +151,16 @@ TEST_CASE("Session waits for the bridge unless recorder-only mode is enabled, an
         QMetaObject::invokeMethod(&window, "onStartSession", Qt::DirectConnection);
         const bool bridge_started = window.findChild<BridgeWorker*>() != nullptr;
         const bool discovery_started = window.findChild<StreamDiscoveryWorker*>() != nullptr;
-        // Cancel the bridge from inside its connection attempt. The attempt is
-        // the one part of a start that a stop cannot interrupt directly, so
-        // cancelling before it begins would leave the slow path untested.
+        // Cancel the bridge from inside its connection attempt, the one part of a
+        // start that a stop cannot interrupt directly, so the slow path is tested.
         const bool connecting = !bridge_started ||
             waitUntil([&] { return bridgeStateText(window).startsWith("Connecting"); });
         QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
         const bool canceled = waitUntil([&] { return sessionStopped(window); });
         window.close();
-        // Destroying a QThread that is still running is fatal, and the process
-        // dies before any assertion below can be reported. Wait generously, and
-        // if one is still going, name it while the window is still alive.
+        // Wait generously and name any thread still running while the window is
+        // alive, because destroying a running QThread kills the process before
+        // any check below can report.
         const bool threads_stopped = waitUntil([&] {
             for (auto* thread : window.findChildren<QThread*>()) if (thread->isRunning()) return false;
             return true;

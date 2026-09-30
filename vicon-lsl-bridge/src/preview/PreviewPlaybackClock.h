@@ -7,10 +7,10 @@
 
 namespace vicon_lsl {
 
-// Maps elapsed time to a recording position. Pass time from a steady clock.
+// Turns elapsed time from a steady clock into a position in the recording.
 class PreviewPlaybackClock {
 public:
-    // Times must not go backward. Playback starts paused at zero.
+    // The times must never go backward, and playback starts paused at zero.
     void setTimeline(std::vector<double> timestamps);
     void setFrameTimeline(const std::vector<PreviewFrame>& frames);
     void play(double monotonic_seconds);

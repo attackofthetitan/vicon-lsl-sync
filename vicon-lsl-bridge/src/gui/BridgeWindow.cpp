@@ -480,7 +480,7 @@ void BridgeWindow::applyConfigurationToUi() {
     updateDashboard();
 }
 
-// Loads new settings into the window. Streams found for the old settings are dropped.
+// Loads new settings into the window and drops the streams found for the old ones.
 void BridgeWindow::replaceConfiguration(SessionConfiguration configuration) {
     configuration_ = std::move(configuration);
     stream_inventory_.clear();
@@ -652,8 +652,8 @@ void BridgeWindow::appendEvent(SessionComponent comp, EventSeverity sev, const Q
     event_log_.append(comp, sev, msg);
     if (!ui_ || !ui_->event_log) return;
 
-    // A full log drops its oldest entry, so redraw everything. Otherwise add
-    // just the new line, since recorder output can arrive a line at a time.
+    // Redraw everything if a full log just dropped its oldest entry, and
+    // otherwise add only the new line, since recorder output arrives line by line.
     if (event_log_.entries().size() == previous_count) {
         updateEventLog();
         return;

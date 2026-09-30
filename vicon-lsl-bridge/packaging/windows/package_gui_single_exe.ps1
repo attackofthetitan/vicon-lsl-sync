@@ -530,9 +530,8 @@ if ($UseExistingLicenseBundle) {
     Validate-PackageManifest $deployPath
 }
 
-# Use the same folder layout for the normal ZIP and the single-file package.
-# The recorder gets its own folder on purpose, so its Qt and LSL libraries
-# cannot clash with the bridge's.
+# Use the same layout for the ZIP and the single-file package, with the recorder
+# in its own folder so its Qt and LSL libraries cannot clash with the bridge's.
 if ($LabRecorderDeployDir) {
     $labRecorderPath = Join-Path $deployPath "labrecorder"
     Remove-TreeSafe $labRecorderPath "LabRecorder deployment directory" `
@@ -608,8 +607,8 @@ Assert-X64PeFile $recorderLsl.FullName "LabRecorder liblsl runtime"
 Assert-X64PeFile (Join-Path $labRecorderPath "platforms\qwindows.dll") "LabRecorder Qt platform plugin"
 Assert-MsvcRuntime $labRecorderPath "LabRecorder deployment"
 
-# A new package must collect its licenses. An existing license bundle can only
-# be reused after checking it against its file list.
+# Collect licenses for a new package, and only reuse an existing license bundle
+# after checking it against its file list.
 if ($UseExistingLicenseBundle) {
     Validate-LicenseBundle $deployPath
 } else {

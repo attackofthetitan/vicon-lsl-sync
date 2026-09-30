@@ -16,7 +16,7 @@ bool writeFile(const QString& path, const QByteArray& contents = {}) {
     return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
 }
 
-// The disk-image app carries both recorders; the archive app does not.
+// The disk-image app carries both recorders, but the archive app does not.
 QString createBundle(const QString& folder, bool carries_recorders) {
     const QString bundle = QDir(folder).filePath("vicon-lsl-bridge-gui.app");
     writeFile(QDir(bundle).filePath("Contents/MacOS/vicon-lsl-bridge-gui"));

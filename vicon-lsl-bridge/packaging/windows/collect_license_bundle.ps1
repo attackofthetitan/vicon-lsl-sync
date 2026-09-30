@@ -22,9 +22,8 @@ $ErrorActionPreference = "Stop"
 
 $packagingSafetyModule = (Resolve-Path -LiteralPath (
     Join-Path $PSScriptRoot "PackagingSafety.psm1") -ErrorAction Stop).Path
-# package_gui_single_exe.ps1 runs this script in the same process. Reuse its
-# copy of the module: reloading it here would break the commands the calling
-# script already imported.
+# Reuse the module package_gui_single_exe.ps1 already loaded, because loading it
+# again here would break that script's commands.
 Import-Module -Name $packagingSafetyModule -Scope Local `
     -DisableNameChecking -ErrorAction Stop
 
@@ -123,8 +122,8 @@ Assert-GitRevision $liblslPath $expectedRevisions.liblsl "liblsl"
 $noticeSource = Require-File (Join-Path $PSScriptRoot "THIRD_PARTY_NOTICES.txt") "third-party notice"
 Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $outputPath "THIRD_PARTY_NOTICES.txt") -Force
 
-# Copy these from the exact sources the build used. Do not replace them with
-# summaries: the release must include the original license text.
+# Copy these from the exact sources the build used, because the release must
+# include the original license text and not a summary.
 $viconLicense = Require-File (Join-Path $viconSdkPath "LICENSE") "Vicon DataStream SDK license"
 Copy-Item -LiteralPath $viconLicense -Destination (Join-Path $outputPath "VICON-DATASTREAM-SDK-LICENSE.txt") -Force
 Copy-License $viconLicense "Vicon-DataStream-SDK\LICENSE"
@@ -161,8 +160,8 @@ if ((Get-Content -LiteralPath $boostLicense.FullName -Raw) -notmatch
 }
 Copy-License $boostLicense.FullName "Boost\LICENSE_1_0.txt"
 
-# install-qt-action puts every Qt and plugin notice under LICENSES. Copy them
-# all, not just LGPL.txt, so the plugin notices are kept.
+# Copy every notice install-qt-action puts under LICENSES, not just LGPL.txt,
+# so the plugin notices are kept.
 $qtLicenses = Join-Path $qtRootPath "LICENSES"
 if (-not (Test-Path -LiteralPath $qtLicenses -PathType Container)) {
     $qtLicenses = Get-ChildItem -LiteralPath $qtRootPath -Directory -Filter "LICENSES" -Recurse |

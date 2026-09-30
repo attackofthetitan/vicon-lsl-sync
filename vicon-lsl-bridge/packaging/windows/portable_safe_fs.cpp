@@ -169,11 +169,8 @@ bool handleContentsEqual(HANDLE handle, const char* expected, std::size_t expect
     return true;
 }
 
-// Opens a folder without FILE_SHARE_DELETE. Holding it open while unpacking
-// stops other programs from deleting or renaming the folder while
-// Expand-Archive fills it. A program run by the same user could still swap
-// single items inside it, so the launcher also refuses links (reparse points)
-// and only unpacks into a brand-new folder.
+// Opens a folder without FILE_SHARE_DELETE, so no other program can delete or
+// rename it while Expand-Archive fills it.
 ScopedHandle openDirectoryNoDelete(const std::filesystem::path& directory) {
     if (directory.empty() || hasReparsePointInAncestors(directory)) {
         return {};
@@ -222,9 +219,8 @@ std::filesystem::path createTempDirectory() {
         }
         if (CreateDirectoryW(candidate.c_str(), nullptr)) {
             if (hasReparsePointInAncestors(candidate)) {
-                // A parent folder changed after we checked it. Do not use the
-                // path again to clean up: leaving an empty folder behind is
-                // safer than deleting through a link someone swapped in.
+                // A parent folder changed after our check, so leave the empty
+                // folder rather than delete through a link someone swapped in.
                 return {};
             }
             return candidate;
@@ -236,9 +232,8 @@ std::filesystem::path createTempDirectory() {
     return {};
 }
 
-// A destination is only safe if neither it nor any parent folder that exists is
-// a link (reparse point). Check every level, for TEMP and --extract paths alike:
-// a junction further up could send the files somewhere the user did not choose.
+// A destination is only safe if neither it nor any existing parent folder is a
+// link, because a link anywhere above it could send the files somewhere else.
 bool hasReparsePointInAncestors(const std::filesystem::path& requested) {
     std::error_code absolute_error;
     auto current = std::filesystem::absolute(requested, absolute_error);
@@ -270,10 +265,8 @@ bool removeTreeIfSafe(const std::filesystem::path& path) {
         return !status_error && !std::filesystem::exists(absolute, status_error);
     }
 
-    // Keep the folder open without delete sharing while listing and deleting
-    // what is inside, so no other program can swap it for a junction during
-    // cleanup. Items swapped inside it are caught by the link checks below,
-    // which never follow a link.
+    // Keep the folder open while emptying it, so no other program can swap it
+    // for a link during cleanup.
     ScopedHandle root_handle = openDirectoryNoDelete(absolute);
     if (!root_handle.valid()) {
         return false;
@@ -336,9 +329,8 @@ bool removeTreeIfSafe(const std::filesystem::path& path) {
         }
     }
 
-    // Close the folder before removing it. Check its parent again straight
-    // away; if it can no longer be trusted, leave the empty folder rather than
-    // delete through a swapped-in parent.
+    // Close the folder and check its parent again just before removing it, and
+    // leave the empty folder if the parent can no longer be trusted.
     root_handle.reset();
     if (hasReparsePointInAncestors(absolute) || hasReparsePoint(absolute)) {
         return false;
@@ -371,14 +363,13 @@ bool createFreshExtractionDirectory(const std::filesystem::path& requested,
         return false;
     }
 
-    // CreateDirectoryW fails if the folder already exists, so a folder it makes
-    // is always empty. If something else made it after our check, that counts
-    // as a failure.
+    // CreateDirectoryW fails if the folder already exists, so we only unpack
+    // into a new, empty folder, even if another program makes one after our check.
     if (!CreateDirectoryW(absolute.c_str(), nullptr)) {
         return false;
     }
     if (hasReparsePointInAncestors(absolute)) {
-        // A parent folder changed after we checked it. Do not clean up through
+        // A parent folder changed after our check, so do not clean up through
         // a path we can no longer trust.
         return false;
     }

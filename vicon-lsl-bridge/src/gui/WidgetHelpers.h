@@ -165,7 +165,7 @@ inline std::pair<QWidget*, QVBoxLayout*> makePage() {
     return {page, layout};
 }
 
-// Size the area to its content, including wrapped rows. Callers may cap its height.
+// A scroll area sized to its content, including wrapped rows, whose height callers may cap.
 class ContentSizedScrollArea : public QScrollArea {
 public:
     QSize sizeHint() const override {

@@ -8,8 +8,8 @@
 
 namespace vicon_lsl {
 
-// Frames ready for playback. Long recordings keep every Nth frame to fit the
-// memory limit, while the source counts and times stay exact.
+// Frames ready for playback, where long recordings keep every Nth frame to fit
+// the memory limit but the source counts and times stay exact.
 struct PreviewRecording {
     std::vector<PreviewFrame> frames;
     std::string summary;

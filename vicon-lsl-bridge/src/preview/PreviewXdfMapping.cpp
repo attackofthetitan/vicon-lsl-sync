@@ -88,8 +88,8 @@ const Group* chooseSuggestedGroup(const std::vector<Group>& groups, PreviewStrea
     return best;
 }
 
-// Joins the pieces of a restarted stream in time order. Past the sample limit it
-// keeps every other sample, but always keeps the last one.
+// Joins the pieces of a restarted stream in time order, keeping every other
+// sample past the sample limit but always keeping the last one.
 XdfStreamData stitchGroup(const Group& group, std::size_t maximum_samples) {
     XdfStreamData result = *group.streams.front();
     result.timestamps.clear();

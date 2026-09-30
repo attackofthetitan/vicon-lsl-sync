@@ -63,7 +63,7 @@ std::optional<PreviewFileType> recordingFileType(const QString& path) {
     return std::nullopt;
 }
 
-// Vicon sends millimetres; the preview draws metres.
+// Vicon sends millimetres, but the preview draws metres.
 PreviewTransformProfile viconPreviewTransform() {
     PreviewTransformProfile transform;
     transform.scale = 0.001;
@@ -337,8 +337,8 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     controls_scroll_ = new ContentSizedScrollArea();
     controls_scroll_->setWidgetResizable(true);
     controls_scroll_->setFrameShape(QFrame::NoFrame);
-    // Sized to fit the controls. resizeEvent() caps its height, so the controls
-    // scroll only when the panel is short.
+    // Sized to fit the controls, with resizeEvent() capping its height so they
+    // only scroll when the panel is short.
     controls_scroll_->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
     controls_scroll_->setAccessibleName("Scrollable preview controls");
     controls_scroll_->setWidget(controls_group);
@@ -517,8 +517,8 @@ void PreviewPanel::openRecording(const QString& path) {
 void PreviewPanel::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     if (!controls_scroll_) return;
-    // Keep a little over half the panel for the drawing and cap the controls at
-    // the rest. Only a maximum is set: a minimum would stop the window from
+    // Cap the controls so a little over half the panel stays free for the
+    // drawing, setting only a maximum because a minimum would stop the window
     // getting shorter.
     const int reserved = (std::max)(widget_->minimumHeight(),
                                     static_cast<int>(height() * 0.55));
@@ -554,7 +554,7 @@ void PreviewPanel::startPreview() {
     widget_->resetForNewSource();
     calibration_samples_.clear();
 
-    // The stream names come from the text fields; the rest from the bindings.
+    // The stream names come from the text fields, and the rest from the bindings.
     const auto named = [](gui::StreamBinding binding, const QLineEdit* edit) {
         binding.name = edit->text().trimmed();
         return binding;
@@ -731,7 +731,7 @@ void PreviewPanel::handleTargetPose(CalibrationTargetPose pose) {
     calibration_samples_.clear();
     if (!solution) {
         calibration_rejection_reason_ = "Position or angle error exceeded the selected limits";
-        // A rejected solve leaves no calibration, so draw gaze uncalibrated again.
+        // A rejected calibration leaves none in use, so draw gaze without one again.
         calibration_quality_ = {};
         if (worker_) worker_->setGazeTransform(gazeTransform());
         widget_->requestViewRefit();
@@ -1158,7 +1158,7 @@ void PreviewPanel::refreshCalibrationProfileUi(const QString& select_id) {
     stair_qy_spin_->setValue(p->vicon_from_target.rotation.y);
     stair_qz_spin_->setValue(p->vicon_from_target.rotation.z);
     stair_qw_spin_->setValue(p->vicon_from_target.rotation.w);
-    // Selecting an entry only shows it. While a calibration is in use, the
+    // Selecting an entry only shows it, so while a calibration is in use the
     // quality text keeps describing that one.
     if (!calibrationInUse()) {
         calibration_quality_label_->setText(

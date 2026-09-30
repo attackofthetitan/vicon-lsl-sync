@@ -68,7 +68,7 @@ struct RecordingVerificationRequest {
 };
 
 // Reads a finished XDF on its own thread and reports each stream's sample count,
-// timing, and gaps. It never changes the file.
+// timing, and gaps, without ever changing the file.
 class RecordingVerifier : public QThread {
     Q_OBJECT
 

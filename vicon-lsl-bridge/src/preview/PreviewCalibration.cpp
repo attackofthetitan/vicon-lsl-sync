@@ -33,9 +33,8 @@ double angleBetweenDegrees(const PreviewQuaternion& left, const PreviewQuaternio
     return 2.0 * std::acos(orientation_dot) * 180.0 / 3.14159265358979323846;
 }
 
-// Undoes the published world's Z flip and the Unity model import's X flip.
-// Together they map (x, y, z) to (-x, y, -z). For a rotation, the quaternion's
-// X and Z parts change sign.
+// Undoes the published world's Z flip and Unity's X flip on model import, which
+// maps (x, y, z) to (-x, y, -z) and changes the sign of a rotation's X and Z parts.
 PreviewVec3 flipXZ(const PreviewVec3& value) {
     return {-value.x, value.y, -value.z};
 }
@@ -47,9 +46,9 @@ PreviewQuaternion flipXZ(const PreviewQuaternion& value) {
 } // namespace
 
 const CalibrationProfile& defaultStairCalibrationProfile() {
-    // Permanent setup measured 2026-09-17: facing up the stairs, forward is
-    // -X, left is -Y, and the floor is Z=0. The measured point is the bottom
-    // front-left corner, not the OBJ/target origin. The OBJ uses millimetres.
+    // The bottom front-left stair corner as measured on 2026-09-17 and as found in
+    // the model file, in metres, where facing up the stairs forward is -X, left is
+    // -Y, and the floor is Z=0.
     static const PreviewVec3 measured_corner_m{-1.205, -0.213, 0.0};
     static const PreviewVec3 model_corner_m{1.677676086, -0.523499985, 0.0};
     static const CalibrationProfile profile{
@@ -209,8 +208,8 @@ std::optional<CalibrationTargetPose> parseCalibrationTargetPose(
         {{*x, *y, *z}, normalizeQuaternion(raw_rotation)}, true, *tracked == 2.0};
 }
 
-// Averages positions and rotations. Each quaternion is flipped to the same
-// sign as the first, since q and -q are the same rotation.
+// Averages positions and rotations, first giving each rotation the same sign as
+// the first one, since q and -q are the same rotation.
 std::optional<PreviewRigidTransform> averageTrackedTargetPoses(
     const std::vector<CalibrationTargetPose>& poses) {
     PreviewVec3 translation_sum{};
@@ -254,8 +253,9 @@ PreviewTransformProfile gazeTransformFromTargetCalibration(
     const PreviewRigidTransform& holo_from_target) {
     const PreviewRigidTransform target_from_holo = inverseRigidTransform(holo_from_target);
 
-    // Move gaze into the target's coordinates, undo Unity's axis flips, then
-    // place it in Vicon. Flip both the pose and input signs to avoid mirroring.
+    // Move gaze into the target's coordinates, undo Unity's axis flips, and place
+    // it in Vicon, flipping the target's position and rotation as well as the
+    // input signs so nothing is mirrored.
     PreviewTransformProfile transform;
     transform.name = "HoloLens";
     transform.use_quaternion_rotation = true;

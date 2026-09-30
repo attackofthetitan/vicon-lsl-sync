@@ -14,7 +14,7 @@ Changing a formula or stream detail here changes behavior. Review it separately 
 | Vicon receipt time | The desktop's LSL clock, read just after `GetFrame()` succeeds |
 | Vicon processing delay | `GetLatencyTotal().Total`: Vicon's guess at how long it took to process the frame. It does not include network delay and is not an exact capture time |
 | HoloLens system-relative time | `SystemRelativeTime.Ticks` from a gaze reading. We only use it to put readings in order, because we do not know how fast it ticks on this device |
-| Gaze delivery delay | How long after capturing a reading the eye-tracking SDK hands it over, measured as the youngest age any reading has been offered at |
+| Gaze delivery delay | How long after capturing a reading the eye-tracking SDK hands it over, measured as the smallest age of any reading the SDK has offered |
 | Corrected live time | A live sample's time after LSL corrects for the clock difference between computers |
 | XDF stream time | The time the sender wrote, before the recorder's saved clock correction |
 | XDF recorder time | Stream time plus the clock correction saved in the XDF |
@@ -36,7 +36,7 @@ After Vicon's `GetFrame()` succeeds:
 
    `candidate = receipt`
 
-5. If `receipt` itself is not finite, the candidate is `NaN`. The next step can only rescue it if its own backup receipt time is finite.
+5. If `receipt` itself is not finite, the candidate is `NaN`. The next step then falls back to a clock reading of its own, which only helps if that one is finite.
 
 This is only a best guess at when Vicon captured the frame. It leaves out the time the data spent on the network. Do not call it an exact capture time.
 
@@ -82,8 +82,8 @@ We do not know how fast it ticks on this device, so it is never turned into
 seconds. It has exactly two uses:
 
 - putting readings in order, and marking the last reading taken;
-- as the value `SpatialGraphNode.TryLocate` expects, where the SDK sets the
-  unit on both sides.
+- passing to `SpatialGraphNode.TryLocate`, which takes the SDK's own tick value
+  as it is.
 
 Every length of time on the gaze path (the queue's time limit, the measured
 rate, the delivery delay, how old a reading is) is measured on the LSL clock
@@ -105,67 +105,65 @@ the moment the sample is sent.
 
 The publisher does not simply ask for the reading at the current time. Asking
 for "now" gives back exactly one reading, so if the ask comes more than one
-tracker frame after the last, every frame in between is lost. The publisher
-runs at the same speed the tracker makes readings, so normal timing jitter was
-enough to lose about one reading in six.
+tracker frame after the last one, every reading in between is lost. The
+publisher runs at the same speed as the tracker, so small timing differences
+were enough to lose about one reading in six.
 
 Instead, each step works forward from the last capture time it accepted:
 
 `TryGetReadingAfterSystemRelativeTime(TimeSpan.FromTicks(last_accepted_ticks))`
 
 It keeps going until the SDK has nothing newer, or until it has taken 32
-readings. That way, how many readings we capture does not depend on the step
-running on time.
+readings. That way, no reading is lost when a step runs late.
 
-On this device, the SDK cannot say "nothing newer" cleanly. Its C# wrapper does
-not check for that empty result, so the normal end of a catch-up shows up as a
-`NullReferenceException` thrown inside the SDK. It also leaves behind an object
-that throws again later, when .NET cleans it up. One of those per step crashes
-the app within seconds. So the app never asks for a reading that cannot exist
-yet:
+On this device, the SDK cannot say "nothing newer" cleanly. Its C# code does not
+check for that empty result, so the normal end of a catch-up shows up as a
+`NullReferenceException` thrown inside the SDK. It also leaves behind a broken
+object that throws again later, when .NET cleans it up. One of those per step
+crashes the app within seconds. So the app never asks for a reading that cannot
+exist yet:
 
 - It does not ask at all until one frame period **plus the delivery delay** has
   passed since the last accepted capture time.
 - It stops as soon as a reading brings it up to the newest reading the tracker
   has made, because it has then caught up.
 
-Both checks compare capture times in LSL seconds. The delivery delay is the part
-the frame period alone got wrong. A reading is not ready the instant it is
-captured: on this device it arrives about 20 ms later, while one frame is about
-11 ms. So a reading the app had just taken was always already older than one
-frame, and the check let through one more ask on every step, and that ask could
-never be answered. Over one session, that was 2428 failures against 2184
-readings: one thrown, leaked SDK object per step.
+Both checks compare capture times in LSL seconds. The delivery delay matters
+because a reading is not ready the instant it is captured. On this device it
+arrives about 20 ms later, while one frame is about 11 ms. When the check used
+the frame time alone, a reading the app had just taken was always already more
+than one frame old, so every step made one extra ask that could never be
+answered. Over one session, that was 2428 failures against 2184 readings, which
+is about one leaked SDK object per step.
 
-The delay is measured, not assumed. It is the youngest age any reading has been
-offered at in this tracker session. It uses the smallest value because a reading
-picked up while catching up can be any age, and says nothing about how fast the
-tracker hands over a new one. Before any reading has been seen, the delay is
-zero, which just makes the app ask as often as it did before the delay was
-measured.
+The delay is measured, not guessed. It is the smallest age of any reading the
+SDK has offered in this tracker session. It uses the smallest value because a
+reading picked up while catching up can be any age, which says nothing about how
+fast the tracker hands over a new one. Before the first reading, the delay is
+zero, so the app simply asks as often as it did before the delay was measured.
 
-These checks stop the bad ask in the normal case, but not while the tracker is
-making readings slower than its set rate. So the failure is also caught and
-counted where it happens. After three of them since catching up last resumed,
-catching up pauses for ten seconds. In the meantime the app asks for the reading
-at the current time, taking at most one reading per step.
+These checks prevent the bad ask in the normal case, but not while the tracker
+is making readings more slowly than its set rate. So the app also catches and
+counts the failure. After three failures since catching up last resumed, it
+stops catching up for ten seconds. Meanwhile it asks for the reading at the
+current time, which gets at most one reading per step.
 
-The pause is not permanent, and that matters. The SDK only says "nothing newer"
-while the tracker has nothing new to give, which is while it is not making
-readings. A tracker that starts a minute later would otherwise be stuck for the
-whole session on a fallback that cannot keep up.
+The pause is short on purpose. The SDK only says "nothing newer" when the
+tracker has nothing new to give, such as before it starts making readings. If
+the pause lasted all session, a tracker that started a minute late would be
+stuck on the slower method, which cannot keep up.
 
-The count runs until the next pause, not until the next good reading. If a
-catch-up gets one reading and then fails, it never has two failures in a row.
-So counting only failures in a row let a catch-up that failed on every step run
-for a whole session: thousands of leaked objects and only eleven pauses. A clean
-`null` answer is normal and never counted, so on a version of the SDK that works
-properly, catching up is never paused.
+The count only starts over when a pause ends, not at the next good reading. A
+catch-up that gets one reading and then fails never has two failures in a row.
+An older version counted only failures in a row, so a catch-up that failed on
+every step ran for a whole session, leaking thousands of objects with only
+eleven pauses. A clean `null` answer is normal and never counted, so with an SDK
+version that works properly, catching up never pauses.
 
 The first step of a tracker session has no last capture time yet, so it gets one
 from `TryGetReadingAtTimestamp(now)`. That reading is the only one judged on age.
-Its age is `query_time - reading.Timestamp`. Both of those are wall-clock values
-the SDK gives us, so no guess about the headset's own timer is involved.
+Its age is `query_time - reading.Timestamp`. Both of those are ordinary date and
+time values from the SDK, so no guess about the headset's own timer is needed.
 
 - The age must be finite.
 - It must be no more than 50 ms either way. It can go either way because the
@@ -204,15 +202,15 @@ One catch-up can return several readings at once, so the time limit has to be
 bigger than a full batch. Otherwise the queue would throw away exactly the
 readings the catch-up just recovered. At 90 Hz, a full batch of 32 readings
 already covers 355 ms. The limit only exists to stop the data getting too old
-after a real stall. Both numbers are seconds on the LSL clock, so the comparison
-means what it says. An older version worked out the limit from
-`Stopwatch.Frequency` and compared it with SDK ticks, so it was really some
-other length of time and could end up shorter than one batch.
+after a real stall. Both numbers are seconds on the LSL clock, so they can be
+compared directly. An older version worked out the limit from
+`Stopwatch.Frequency` and compared it with SDK ticks, so its real length was
+unknown and could end up shorter than one batch.
 
 When adding an item:
 
 1. While the queue already has 360 items, remove the oldest.
-2. If the new item makes the time between oldest and newest more than 500 ms, or makes it impossible to work out, empty the queue. A span just below zero is normal jitter between the two clocks behind a capture time and is fine. A new tracker session, which could reset the clock completely, empties both queues itself.
+2. If the new item makes the time between oldest and newest more than 500 ms, or makes it impossible to work out, empty the queue. A span just below zero is fine, because capture times come from two clocks that can differ very slightly. A new tracker session, which could reset the clock completely, empties both queues itself.
 3. Add the new item.
 
 Before sending a converted sample, if the queue is over its limit, keep only the newest item.
@@ -268,8 +266,8 @@ While Vuforia is turned off on purpose, target samples carry the last steady
 stair reference with `Tracked = 2`. Their times say when the reference was sent,
 not when a new position was measured. Live tracked samples use 1. Invalid
 samples use 0 and seven NaNs. The reference is built from 20 steady positions
-taken before the pause, and is cleared when Vuforia is turned back on or the
-outlet is turned off. This lets a recording started after calibration still be
+taken before the pause, and is cleared when Vuforia is turned back on or
+`VuforiaModelTargetPoseOutlet` is turned off. This lets a recording started after calibration still be
 lined up without keeping Vuforia running. The real stairs and the Unity world
 must not change. Normal tracking loss never sends a frozen reference by itself.
 
@@ -372,7 +370,7 @@ Pick the first usable stream in this order:
 4. The `HoloLensGaze` role.
 5. Any number stream.
 
-For each main stream time, use a binary search to find the closest sample in each other stream. Look at both the first sample at or after that time and the one just before it. Only accept the closer one if it is within the chosen time limit.
+For each main stream time, find the closest sample in each other stream. Look at both the first sample at or after that time and the one just before it, and only accept the closer one if it is within the chosen time limit.
 
 Keep the full corrected times in `XdfStreamData.timestamps` for matching. Show each frame at:
 
@@ -495,7 +493,7 @@ go up along `-X`.
 The stair OBJ file is in millimetres. Its matching corner is at
 `(1677.676086, -523.499985, 0.0)`, not at the model's origin. With no rotation,
 take that corner, scale it by `0.001`, and subtract it from the measured Vicon
-corner to get the fixed model position above. Scale the mesh by `0.001`, then
+corner to get the fixed model position above. Scale the model by `0.001`, then
 apply the fixed rotation and position to place it in the preview's metre space.
 
 The built-in **Default stair setup**, before any alignment has been worked out,
@@ -512,7 +510,7 @@ needs a new gaze-to-Vicon calibration.
 - If the target moved more than either limit, clear the set and start again from the new position.
 - Average the finite positions and rotations. Rotations can be written two ways with opposite signs, so line up their signs before averaging.
 - Need at least 20 usable positions.
-- The spread (RMS) of both position and rotation must stay within their limits.
+- The spread of both position and rotation must stay within their limits.
 - Use the same rules when searching an XDF recording for a steady stretch.
 
 ### Work out the gaze-to-Vicon alignment

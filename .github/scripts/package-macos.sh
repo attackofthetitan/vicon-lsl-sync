@@ -3,7 +3,7 @@ set -euo pipefail
 
 artifact_name="$1"
 
-# Lists the folders (rpaths) a program searches for its @rpath libraries.
+# Prints the folders a program searches when it looks for its libraries.
 rpaths() {
   otool -l "$1" | awk '/cmd LC_RPATH/ { found = 1; next }
     found && $1 == "path" { sub(/^ *path /, ""); sub(/ \(offset [0-9]+\)$/, ""); print; found = 0 }'
@@ -48,8 +48,7 @@ fi
 EOF
 chmod +x package/vicon-lsl-bridge-gui
 
-# The stair model the preview draws. Windows packaging already ships it; without
-# it the preview has no stair to align gaze against.
+# Ship the stair model, which the preview needs to line up gaze.
 test -f vicon-lsl-bridge/assets/stair_model/stair_model1.obj
 mkdir -p package/stair_model package/vicon-lsl-bridge-gui.app/Contents/Resources/stair_model
 cp -- vicon-lsl-bridge/assets/stair_model/stair_model1.obj \
@@ -107,7 +106,7 @@ fi
 # Fail if no liblsl was found.
 find package -maxdepth 1 -name 'liblsl*.dylib' -print -quit | grep -q .
 
-# Keep only the Apple Silicon (arm64) part of any universal binary.
+# Strip the Intel code from programs built for both Intel and Apple Silicon.
 while IFS= read -r binary; do
   [[ "$(lipo -archs "$binary" 2>/dev/null)" == *" "* ]] || continue
   lipo -thin arm64 "$binary" -output "$binary.arm64"
@@ -124,9 +123,8 @@ for bin in package/vicon-lsl-bridge package/LabRecorderCLI; do
   fi
 done
 
-# Absolute rpaths name folders on the build machine, such as the liblsl build
-# or Homebrew. Other computers do not have them, and a library found there
-# instead of the bundled one would not be the build that was tested.
+# Remove library folders that only exist on the build machine, so every
+# computer uses the bundled libraries that were tested.
 while IFS= read -r binary; do
   file -b "$binary" | grep -q '^Mach-O' || continue
   while IFS= read -r rpath; do
@@ -136,12 +134,12 @@ while IFS= read -r binary; do
   done < <(rpaths "$binary")
 done < <(find package -type f)
 
-# macdeployqt gives LabRecorder no path to the lsl framework it bundles, so
-# without this it only starts on the machine that built it.
+# macdeployqt does not tell LabRecorder where its bundled lsl framework is,
+# so without this it only starts on the computer that built it.
 add_rpath package/LabRecorder.app/Contents/MacOS/LabRecorder "@executable_path/../Frameworks"
 
-# LabRecorder asks for the same access as the bridge when it runs on its own.
-# macOS shows these reasons in its requests.
+# Give LabRecorder the same reasons the bridge shows when macOS asks for
+# network and folder access.
 recorder_plist=package/LabRecorder.app/Contents/Info.plist
 chmod u+w "$recorder_plist"  # The LabRecorder build writes it read-only.
 plutil -replace NSLocalNetworkUsageDescription -string \
@@ -154,7 +152,7 @@ for key in NSDocumentsFolderUsageDescription NSDesktopFolderUsageDescription \
     "$recorder_plist"
 done
 
-# Sign everything with an ad hoc signature (no Apple developer ID).
+# Sign everything with a local signature that needs no Apple developer ID.
 for app in package/vicon-lsl-bridge-gui.app package/LabRecorder.app; do
   if [[ -d "$app" ]]; then
     codesign --force --deep --sign - "$app"
@@ -174,14 +172,8 @@ codesign --force --sign - package/LabRecorderCLI
 
 tar -czf "${artifact_name}.tar.gz" -C package .
 
-# The disk image is set up for drag-to-install, not as a copy of the tar.gz
-# layout. An app run from the mounted image has a different path each time, so
-# macOS forgets it between launches and asks for permissions again. Dragging it
-# to /Applications gives it one fixed place.
-#
-# There is one app to drag. LabRecorder and LabRecorderCLI are inside it, so
-# macOS approves them along with the app instead of blocking the recorder the
-# first time the app starts it, and the app finds them wherever it is put.
+# Put both recorders inside the one app on the disk image, so macOS approves
+# them with the app and remembers its permissions once it is in /Applications.
 dmg_root=dmg-root
 rm -rf "$dmg_root"
 mkdir -p "$dmg_root"
@@ -195,14 +187,13 @@ add_rpath "$helpers/LabRecorder.app/Contents/MacOS/LabRecorderCLI" "@executable_
 codesign --force --deep --sign - "$bridge_app"
 ln -s /Applications "$dmg_root/Applications"
 
-# The app ejects the image once it runs from somewhere else. This marker names
-# the version the image installs, so the app knows the image is its own.
+# This file holds the version the image installs, so the app can tell the
+# image is its own before it ejects it.
 plutil -extract CFBundleShortVersionString raw package/vicon-lsl-bridge-gui.app/Contents/Info.plist \
   > "$dmg_root/.vicon-lsl-bridge-installer"
 
-# Everything that is not an app goes in its own folder, out of the way of the
-# app to drag. The small launcher scripts are left out: they expect the tar.gz
-# layout and would not work here.
+# Put everything except the apps in its own folder, leaving out the launcher
+# scripts because they only work in the tar.gz layout.
 mkdir -p "$dmg_root/Command Line Tools"
 for entry in package/*; do
   name="$(basename "$entry")"

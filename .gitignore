@@ -1,4 +1,4 @@
-# build artifacts
+# Build output
 build/
 build-*/
 cmake-build-*/
@@ -51,7 +51,7 @@ venv/
 *.csv
 *.xdf
 
-# Local tools and generated deliverables
+# Local tools and generated files
 /.agents/
 /.vscode/
 /aqtinstall.log

@@ -88,13 +88,13 @@ struct ViconDiscoveryResult {
     bool ok() const { return diagnostics.empty(); }
 };
 
-// A segment's pose needs both reads to become one LSL sample.
+// A segment needs both its position and rotation reads to make one LSL sample.
 struct SegmentPoseRead {
     SegmentTranslationRead translation;
     SegmentRotationRead rotation;
 };
 
-// Values follow layout order. Failed reads are described in diagnostics.
+// Values follow the layout order, and failed reads are described in diagnostics.
 struct ViconFrameResult {
     std::vector<MarkerTranslationRead> markers;
     std::vector<SegmentPoseRead> segments;
