@@ -1,45 +1,43 @@
-# v1.15.0 release checklist
+# v1.15.1 release checklist
 
 ## Release details
 
-- Version: `1.15.0`
-- Previous release: `v1.14.7`
-- Target date: 2026-09-23
-- Pull requests: none; released straight from `main`
-- Status: ready; waiting for the tagged build to publish
-- Scope: an easier Mac install, bundled recorders that work on any Mac, and a
-  path check that looks at the study folder
+- Version: `1.15.1`
+- Previous release: `v1.15.0`
+- Target date: 2026-10-01
+- Pull requests: #40
+- Status: ready; waiting for the pull request build, then the tagged build
+- Scope: fixes from a code review, including a crash when stopping a session
+  and a Linux download that did not run on its own
 
-A minor release. The Mac disk image now holds one app with LabRecorder inside it.
-The app ejects its disk image, offers to move itself to Applications, and explains
-the Mac folder permissions it asks for. The bundled recorders start on any Mac,
-and the path check looks at the study folder instead of the folder the app was
-started from.
+A patch release. Stopping a session no longer crashes the app, and a lost
+recorder connection can be reconnected so the recording can be stopped. The
+Linux download carries everything it needs. The release also fixes number
+reading on computers that use a decimal comma, recorders stopping after the app
+closes, short Vicon pauses restarting the streams, and several smaller problems
+with calibrations, the setup check, the file check, and playback.
 
 ## Before publishing
 
-- [x] The CMake version and the dated changelog section both say `1.15.0`.
-- [x] The full desktop build and all six test programs pass on an Apple Silicon
-  Mac, including the window tests at normal and 1.5x scale and the new Mac
-  install tests.
-- [x] A package built on this Mac passes `.github/scripts/test-package-macos.sh`,
-  with one local exception: Homebrew's Qt gives the bundled `libbrotlicommon` a
-  fixed full path to where it was installed, which the Qt used by the release
-  build does not. A v1.14.7 package built on this Mac fails the same check.
-- [x] The packaged LabRecorder loads Qt and `lsl` from inside its own bundle, with
-  the build folders hidden. The v1.14.7 package could not load `lsl` that way.
-- [x] The app ejected a disk image of its own version, left other versions alone,
-  tried again when the image was busy, and reported the result.
-- [x] Moving the app copies it with a valid signature and without the "downloaded
-  from the internet" flag, and reopening waits for the old copy to quit.
+- [x] The CMake version and the dated changelog section both say `1.15.1`.
+- [x] The full desktop build and all six test programs pass on Linux, also with
+  a German language setting. This used the system's Qt 6.4, not the Qt 6.8.3
+  the release build uses.
+- [x] The logic tests pass with memory and undefined-behavior checks, and with
+  Catch2.
+- [x] The HoloLens tests pass.
+- [x] A Linux package built here passes `.github/scripts/test-package-linux.sh`.
+  With the build folders and the system's Qt hidden, all four programs start;
+  the v1.15.0 package could not find liblsl that way.
+- [x] Each new test fails without its fix.
 - [x] Generated stream files pass `tools/generate_stream_contracts.py --check`.
 - [x] The release version passes `.github/scripts/verify-release-version.sh`.
 - [x] `git diff --check` finds nothing.
 
 ## Publishing
 
-- [ ] The release commit is pushed to `main` and its build passes before tagging.
-- [ ] Tag `v1.15.0` points at the release commit.
+- [ ] The pull request build passes and #40 is merged into `main`.
+- [ ] Tag `v1.15.1` points at the merge commit.
 - [ ] The tagged build passes the logic tests, HoloLens tests, and the full
   desktop build, tests, and packaging on Linux x64, Windows x64, and Apple
   Silicon Mac.
@@ -47,10 +45,10 @@ started from.
 
 ## Not tested
 
-- The Move to Applications prompt, the **Open Anyway** step, and the Mac folder
-  and local network prompts need a Mac that has never run the app. Download the
-  disk image, open the app from it, and record once.
-- Real Unity/OpenXR/Vuforia, HoloLens, and Vicon tests were not run. Nothing
-  about the devices changed.
-- Windows and Linux builds, Windows packaging, and the HoloLens tests only run on
-  the build server.
+- Windows and Mac builds, and the recorder change for Qt 6.6 and newer, only run
+  on the build server.
+- The HoloLens scripts need Unity and a headset: check that the stair target
+  stream closes when it stops, and that gaze times stay right after a time zone
+  change.
+- Real Vicon and LabRecorder tests were not run. Check a short recording, a
+  Vicon pause, and Stop Session after unplugging the recorder's network.
