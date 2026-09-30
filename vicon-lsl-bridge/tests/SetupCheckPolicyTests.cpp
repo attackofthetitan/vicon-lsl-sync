@@ -176,6 +176,37 @@ void testSetupCheckRequiredStreamReadiness() {
            "a stream in the expected coordinate frame is ready");
 }
 
+void testSetupCheckRateWarnings() {
+    vicon_lsl::gui::SessionConfiguration configuration = configurationWithoutBindings();
+    StreamBinding binding;
+    binding.role = "gaze";
+    binding.name = "Gaze";
+    binding.source_id = "g";
+    binding.expected_nominal_rate = 90.0;
+    configuration.recording_streams = {binding};
+    StreamIdentity gaze;
+    gaze.role = "gaze";
+    gaze.name = "Gaze";
+    gaze.source_id = "g";
+    gaze.nominal_rate = 90.0;
+    gaze.effective_rate = 89.0;
+
+    const auto warned = [&](const QString& text) {
+        const SetupCheckResult result =
+            vicon_lsl::gui::runSetupCheck(readyInputs(), configuration, validPath(), {gaze});
+        return mentions(result, text) && !result.hasRequiredFailures();
+    };
+    expect(!warned("stream arrives at") && !warned("the settings expect"),
+           "a stream at its expected rate gets no rate warning");
+    gaze.effective_rate = 60.0;
+    expect(warned("gaze stream arrives at 60.0 Hz, below 80% of its 90.0 Hz"),
+           "a stream arriving below 80% of its rate is a warning");
+    gaze.effective_rate = 89.0;
+    gaze.nominal_rate = 60.0;
+    expect(warned("gaze stream declares 60.0 Hz; the settings expect 90.0 Hz"),
+           "a stream that declares another rate than the saved one is a warning");
+}
+
 void testSetupCheckCalibration() {
     const vicon_lsl::gui::SessionConfiguration configuration = configurationWithoutBindings();
     SetupCheckInputs inputs = readyInputs();

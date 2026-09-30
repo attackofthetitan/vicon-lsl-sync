@@ -80,12 +80,15 @@ Each class has one main job:
 
 - `ViconClient` turns Vicon SDK results into this project's own types. Nothing
   from the SDK leaks past this class, except as text in error messages.
+- `ViconServerAddress` splits the server setting into the hosts and ports the
+  Vicon SDK will try, so the quick check before connecting probes the same ones.
 - `ViconFrameMapper` keeps the order Vicon lists things in, decides which values are usable, fills in fixed-size "missing" values, collects errors, and makes sure timestamps only go forward.
 - `MarkerStream` and `SegmentStream` keep their public interfaces. They share one private helper that sets up the LSL stream details, checks sample sizes, owns the stream, and handles send errors.
 - `ViconLSLBridge::run()` connects, reads the first frame, opens the streams, and
   cleans up before trying again. It is also the only place that decides whether
   to retry.
-- `streamFrames()` sends frames and watches for layout changes.
+- `streamFrames()` sends frames, waits out a few frames that do not arrive in
+  time, and watches for layout changes.
 - `refreshStreams()` reads the layout once and uses it to open or replace
   streams. If a regular layout check fails, the current streams stay open. If
   the first check fails, the bridge waits and reconnects.
@@ -298,6 +301,7 @@ Still missing:
 - `vicon-lsl-bridge/src/ViconLSLBridge.*`
 - `vicon-lsl-bridge/src/ViconClient.*`
 - `vicon-lsl-bridge/src/ViconFrameMapper.*`
+- `vicon-lsl-bridge/src/ViconServerAddress.*`
 - `vicon-lsl-bridge/src/MarkerStream.*`
 - `vicon-lsl-bridge/src/SegmentStream.*`
 - `vicon-lsl-bridge/src/gui/*`

@@ -1,5 +1,6 @@
 #include "ViconClient.h"
 #include "ViconFrameMapper.h"
+#include "ViconServerAddress.h"
 
 #include <lsl_cpp.h>
 
@@ -27,8 +28,6 @@ namespace {
 
 // Limit each connection check so a missing server does not hold up Stop for long.
 constexpr int kReachabilityTimeoutMs = 500;
-
-constexpr const char* kDefaultViconPort = "801";
 
 #ifdef _WIN32
 using SocketHandle = SOCKET;
@@ -114,23 +113,8 @@ bool addressAccepts(const addrinfo& candidate, int timeout_ms) {
     return accepted;
 }
 
-// Uses the digits after the last colon as the port, or port 801 if there are none.
-std::pair<std::string, std::string> splitServerAddress(const std::string& address) {
-    const std::size_t separator = address.rfind(':');
-    if (separator == std::string::npos || separator + 1 == address.size()) {
-        return {address, kDefaultViconPort};
-    }
-
-    const std::string port = address.substr(separator + 1);
-    if (port.find_first_not_of("0123456789") != std::string::npos) {
-        return {address, kDefaultViconPort};
-    }
-
-    return {address.substr(0, separator), port};
-}
-
-// Quickly checks that something is listening, because the SDK's Connect() can
-// hang for a long time when nothing is.
+// Quickly checks that something is listening at one of the hosts, because the
+// SDK's Connect() can hang for a long time when nothing is.
 bool serverIsListening(const std::string& address) {
 #ifdef _WIN32
     WSADATA winsock_data;
@@ -143,25 +127,24 @@ bool serverIsListening(const std::string& address) {
     } winsock_release;
 #endif
 
-    const auto target = splitServerAddress(address);
-
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    addrinfo* candidates = nullptr;
-    if (getaddrinfo(target.first.c_str(), target.second.c_str(), &hints, &candidates) != 0) {
-        return false;
-    }
-
     bool listening = false;
-    for (const addrinfo* candidate = candidates; candidate && !listening;
-         candidate = candidate->ai_next) {
-        listening = addressAccepts(*candidate, kReachabilityTimeoutMs);
+    for (const auto& endpoint : vicon_lsl::viconServerEndpoints(address)) {
+        addrinfo* candidates = nullptr;
+        if (getaddrinfo(endpoint.host.c_str(), endpoint.port.c_str(), &hints, &candidates) != 0) {
+            continue;
+        }
+        for (const addrinfo* candidate = candidates; candidate && !listening;
+             candidate = candidate->ai_next) {
+            listening = addressAccepts(*candidate, kReachabilityTimeoutMs);
+        }
+        freeaddrinfo(candidates);
+        if (listening) break;
     }
-
-    freeaddrinfo(candidates);
     return listening;
 }
 
@@ -297,6 +280,7 @@ void ViconClient::disconnect() {
                       << describeSdkResult(result.Result) << std::endl;
         }
         connected_ = false;
+        frame_timed_out_ = false;
         frame_number_ = 0;
         frame_timestamp_ = 0.0;
         frame_rate_ = 0.0;
@@ -310,8 +294,13 @@ bool ViconClient::isConnected() const {
 
 bool ViconClient::getFrame() {
     auto result = client_.GetFrame();
+    // The SDK waits a second for a frame and then gives up with NoFrame, which
+    // the bridge reports itself.
+    frame_timed_out_ = result.Result == SDK::Result::NoFrame;
     if (result.Result != SDK::Result::Success) {
-        std::cerr << "GetFrame failed (" << describeSdkResult(result.Result) << ")" << std::endl;
+        if (!frame_timed_out_) {
+            std::cerr << "GetFrame failed (" << describeSdkResult(result.Result) << ")" << std::endl;
+        }
         return false;
     }
 
@@ -336,6 +325,10 @@ bool ViconClient::getFrame() {
         frame_rate_ = rate.FrameRateHz;
     }
     return true;
+}
+
+bool ViconClient::frameTimedOut() const {
+    return frame_timed_out_;
 }
 
 unsigned int ViconClient::frameNumber() const {

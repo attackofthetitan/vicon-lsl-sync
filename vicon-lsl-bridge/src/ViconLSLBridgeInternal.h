@@ -20,6 +20,8 @@ public:
     virtual void disconnect() = 0;
     virtual bool isConnected() const = 0;
     virtual bool getFrame() = 0;
+    // True when the last getFrame() failed only because no frame came in time.
+    virtual bool frameTimedOut() const { return false; }
     virtual unsigned int frameNumber() const = 0;
     virtual double frameTimestamp() const = 0;
     virtual double frameRate() const = 0;

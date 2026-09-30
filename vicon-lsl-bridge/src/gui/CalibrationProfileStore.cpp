@@ -91,6 +91,20 @@ bool ManagedCalibrationProfile::complete(QString* reason) const {
     return true;
 }
 
+bool ManagedCalibrationProfile::hasGazeCalibration() const {
+    if (quality.sample_count > 0) return true;
+    const PreviewTransformProfile unmeasured;
+    const auto same = [](const PreviewVec3& a, const PreviewVec3& b) {
+        return a.x == b.x && a.y == b.y && a.z == b.z;
+    };
+    const PreviewTransformProfile& g = gaze_transform;
+    const bool rotated = g.use_quaternion_rotation
+        ? !(g.rotation.x == 0.0 && g.rotation.y == 0.0 && g.rotation.z == 0.0 && g.rotation.w == 1.0)
+        : !same(g.rotation_degrees, unmeasured.rotation_degrees);
+    return g.scale != unmeasured.scale || !same(g.input_axis_sign, unmeasured.input_axis_sign) ||
+           rotated || !same(g.translation, unmeasured.translation);
+}
+
 CalibrationProfile ManagedCalibrationProfile::solverProfile() const {
     CalibrationProfile res = defaultStairCalibrationProfile();
     res.id = id.toStdString();

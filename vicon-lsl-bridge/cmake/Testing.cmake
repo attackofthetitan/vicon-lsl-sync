@@ -16,6 +16,7 @@ set(VICON_LSL_BRIDGE_TEST_SOURCES
     tests/PreviewRateTests.cpp
     tests/PreviewDeliveryTests.cpp
     tests/ViconFrameMapperTests.cpp
+    tests/ViconServerAddressTests.cpp
 )
 
 find_package(Catch2 3 QUIET)

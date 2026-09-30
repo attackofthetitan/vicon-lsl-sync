@@ -1,5 +1,6 @@
 #include "preview/PreviewCsv.h"
 #include "preview/PreviewPlaybackClock.h"
+#include "LocaleTestSupport.h"
 #include "PreviewCoreTestSupport.h"
 #include "TestSupport.h"
 
@@ -8,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+using locale_test_support::CommaDecimalLocale;
 using preview_core_test_support::TemporaryFilePath;
 using preview_core_test_support::near;
 
@@ -36,6 +38,46 @@ TEST_CASE("Preview merged CSV loader builds preview frames") {
     REQUIRE_EQ(recording.frames.front().gaze_rays.size(), static_cast<std::size_t>(1));
     REQUIRE(recording.frames.front().markers.front().valid);
     REQUIRE(near(recording.frames.front().markers.front().position.x, 1.0));
+}
+
+TEST_CASE("Preview CSV loader does not show segment columns as markers") {
+    const TemporaryFilePath temporary_path("_segments.csv");
+    const std::string path = temporary_path.string();
+    {
+        std::ofstream output(path);
+        output << "relative_time,ViconMarkers_S:LASI:X,ViconMarkers_S:LASI:Y,"
+                  "ViconMarkers_S:LASI:Z,ViconMarkers_S:LASI:Valid,"
+                  "ViconSegments_S:Pelvis:X,ViconSegments_S:Pelvis:Y,ViconSegments_S:Pelvis:Z,"
+                  "ViconSegments_S:Pelvis:QX,ViconSegments_S:Pelvis:QY,"
+                  "ViconSegments_S:Pelvis:QZ,ViconSegments_S:Pelvis:QW\n";
+        output << "0,1,2,3,1,10,20,30,0,0,0,1\n";
+    }
+    const auto recording = vicon_lsl::loadMergedPreviewCsv(path, {}, {});
+
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(recording.frames.front().markers.front().name, std::string("LASI"));
+    REQUIRE_EQ(recording.frames.front().segments.size(), static_cast<std::size_t>(1));
+}
+
+TEST_CASE("Preview CSV loader reads decimals the same in a locale that writes 0,5") {
+    const TemporaryFilePath temporary_path("_locale.csv");
+    const std::string path = temporary_path.string();
+    {
+        std::ofstream output(path);
+        output << "relative_time,ViconMarkers_M:X,ViconMarkers_M:Y,"
+                  "ViconMarkers_M:Z,ViconMarkers_M:Valid\n";
+        output << "0.25,1500.5,0,0,1\n";
+    }
+    const CommaDecimalLocale comma_locale;
+    vicon_lsl::PreviewTransformProfile vicon;
+    vicon.scale = 0.001;
+    const auto recording = vicon_lsl::loadMergedPreviewCsv(path, vicon, {});
+
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(recording.frames.front().timestamp, 0.25));
+    REQUIRE_EQ(recording.frames.front().markers.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(recording.frames.front().markers.front().position.x, 1.5005));
 }
 
 TEST_CASE("Preview CSV loader decimates predictably and honors cancellation") {

@@ -37,6 +37,13 @@ If an older version put a separate LabRecorder app in **Applications**, move it
 to the Trash. If **Recorder program** in the app still shows that app's path,
 clear the field.
 
+### On Linux
+
+Unpack the archive and run `./vicon-lsl-bridge-gui` from its folder. The archive
+carries its own Qt, liblsl, and LabRecorder, so nothing else needs installing on
+most desktops. If the app says Qt could not load the `xcb` platform plugin,
+install the X11 library it names, usually with `sudo apt install libxcb-cursor0`.
+
 ## Streams
 
 | Stream | What it holds |
@@ -48,7 +55,7 @@ clear the field.
 
 You can rename the two Vicon streams. The HoloLens stream names come from the Unity settings.
 
-If Vicon subjects, markers, or segments change during a session, the bridge closes the old Vicon streams and opens new ones that match.
+If Vicon subjects, markers, or segments change during a session, the bridge closes the old Vicon streams and opens new ones that match. LabRecorder cannot follow the new streams, so if this happens during a recording, the app shows an error: stop the recording and start a new one.
 
 ## Use the desktop app
 

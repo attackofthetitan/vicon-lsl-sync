@@ -2,6 +2,8 @@
 #include <QScreen>
 #include <QTimer>
 
+#include <clocale>
+
 #include "BridgeWindow.h"
 #ifdef Q_OS_MACOS
 #include "gui/MacInstallation.h"
@@ -13,6 +15,9 @@
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
+    // Qt takes number formats from the user's locale, where "0.5" is written
+    // "0,5"; LSL and the recording files always use the C form.
+    std::setlocale(LC_NUMERIC, "C");
     app.setApplicationName("Vicon LSL Bridge");
     app.setApplicationVersion(VICON_LSL_BRIDGE_VERSION);
     const bool verification_requested =

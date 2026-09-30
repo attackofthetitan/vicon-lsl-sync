@@ -22,7 +22,7 @@ Words used below:
 
 | Option | Default | Rule |
 | --- | --- | --- |
-| `--server <ip:port>` | `localhost:801` | The Vicon DataStream address. |
+| `--server <ip:port>` | `localhost:801` | The Vicon DataStream address. Several addresses separated by `;` go to the Vicon SDK, which uses them together; the app connects once any of them answers. |
 | `--marker-stream <name>` | `ViconMarkers` | The marker stream name. |
 | `--segment-stream <name>` | `ViconSegments` | The segment stream name. |
 | `--reconnect-interval <ms>` | `3000` | A whole number from 1 up to `INT_MAX`. |
@@ -54,6 +54,11 @@ data out of this app.
   nonstop. Getting past the first frame resets the count.
 - Treat the connection as lost when either our own record or the Vicon SDK says
   it is no longer connected.
+- While streaming, a frame read that times out (the Vicon SDK waits one second
+  and then reports `NoFrame`) keeps the connection and both streams open. The
+  first one logs `No Vicon frame arrived in time; waiting` and reports `Waiting
+  for Vicon frames`, and the next frame reports `Vicon frames resumed`. The
+  fifth timeout in a row, or any other failed read, counts as a lost connection.
 - `stop()` only flips the run flag.
 - Calling `run()` on a stopped `ViconLSLBridge` does not flip that flag back. A stopped bridge cannot be reused for a new session.
 
@@ -64,6 +69,11 @@ data out of this app.
 - An empty marker or segment layout is fine. No LSL stream is opened for an empty group, and sending to it counts as success.
 - Re-read the layout after every 100 frames handled.
 - If the marker or segment layout changes, close and reopen both Vicon streams.
+- Count every layout change in `BridgeStatus`, including a layout that differs
+  after a reconnect, because LabRecorder only takes a reopened stream back when
+  its channel count is the same, and then keeps the old channel names. The
+  desktop app logs a change as an error during a recording and as a warning
+  otherwise.
 - If one of these repeat layout checks fails, report the error but do not say the layout changed.
 
 ### Read and send frames
@@ -80,8 +90,10 @@ data out of this app.
 - Group read errors by action, subject, object, SDK result, and message.
 - By default, log the first copy of an error and every 100th repeat.
 - The summary shows how many times it repeated and the first error text.
-- The first clean frame after an error clears the group and reports that things recovered.
-- `BridgeStatus` holds the state, marker count, segment count, Vicon frame number, and a message.
+- Reads count as recovered only after 100 clean frames in a row, which clears
+  the group and reports `Vicon reads recovered`. A marker hidden every other
+  frame is therefore logged like any other repeated error.
+- `BridgeStatus` holds the state, marker count, segment count, Vicon frame number, how many times the layout changed, and a message.
 
 ## LSL streams
 
@@ -113,6 +125,10 @@ Both Vicon streams carry these exact details:
 - `synchronization/timestamp_origin = local_receipt_minus_valid_vicon_pipeline_latency`
 - `synchronization/offset_mean = 0`
 - `synchronization/can_drop_samples = true`
+
+`acquisition/nominal_srate` is the rate with a decimal point and six decimal
+places, such as `119.880000`, or `0.000000` for an irregular rate, whatever the
+computer's language settings.
 
 ### `ViconMarkers`
 
@@ -226,8 +242,9 @@ Each of these counts as a stream change that needs its own plan:
 
 - Default host: `localhost`.
 - Default port: `22345`.
-- A request to connect again is refused while the current connection is running
-  Start or Stop, is confirmed to be recording, or may have sent a Start.
+- A request to connect again is refused while a group of commands is running,
+  or while the connection is still open and is confirmed to be recording or may
+  have sent a Start. A lost connection can always be replaced.
 - Otherwise, the app stops both timers, marks any work in progress as failed,
   closes the old connection, sets the recording state to unknown, and starts the
   new connection timer. Reconnecting after the connection was lost still
@@ -332,8 +349,8 @@ The default pattern is:
 ### Starting and closing LabRecorder
 
 - Check the recorder address before starting LabRecorder. Use the program the
-  user picked if it is valid. Otherwise use `labrecorder/LabRecorder.exe` next to
-  the desktop app, if it is there.
+  user picked if it is valid. Otherwise use the LabRecorder in the `labrecorder`
+  folder next to the desktop app (`LabRecorder.exe` on Windows), if it is there.
 - Starting it never freezes the window. It runs from the program's own folder.
   The app records whether the recorder was already running, is starting here,
   was started here, has stopped, failed to start, or was detached.
@@ -344,6 +361,9 @@ The default pattern is:
 - Disconnecting from, or closing the app around, a recorder someone else started
   never closes it. Detach leaves a recorder started here running and stops the
   app from closing it later.
+- On Linux and macOS, a recorder started here ignores `SIGPIPE`. Once it is
+  detached and the app quits, its writes to the app's closed output pipes fail
+  quietly instead of ending the recording.
 - On shutdown, close a recorder started here only after Stop is done or the
   15-second recorder limit runs out. Give it one more second to close, then force
   it to close.
@@ -369,11 +389,16 @@ The default pattern is:
   finding streams, the setup check, and recording, while every separate control
   stays available. **Stop Session** does it in reverse: recording, preview,
   bridge, then a recorder the app started, if asked. If only some steps
-  finished, you can see which ones and stop them.
+  finished, you can see which ones and stop them. **Stop Session** waits for a
+  recorder command that is still running before it sends Stop, and if the
+  recorder connection was lost, it says so once and sends Stop after **Connect**
+  restores it.
 - The setup check sorts these into required, warning, or information: how recent
   the bridge status is, whether the recorder is ready, the exact path, chosen
   streams, sample age, channel layout, coordinate details, expected rate, stair
-  model, and calibration. Recorder-only mode drops the bridge requirement on
+  model, and calibration. A stream whose declared rate differs from the saved
+  one by more than 1%, or that arrives below 80% of its declared rate, is a
+  warning. Recorder-only mode drops the bridge requirement on
   purpose. A required failure blocks Start unless **Record Anyway** is given a
   reason. The result and reason are saved with the session details. **Record
   Anyway** is only offered while the latest check has a required failure that
@@ -381,16 +406,19 @@ The default pattern is:
 
 Closing always follows the same steps without freezing the window. It refuses
 new work, cancels stream searches and file checks, asks the preview and bridge
-to stop, and asks the recorder to shut down exactly once. If Start is already
+to stop, and asks the recorder to shut down exactly once. The Stop it sends does
+not start a new file check. If Start is already
 running, that group finishes first and then the recorder gets exactly one Stop.
 Closing again does not start the steps over. The window stays open and responsive
 until every part that must stop has stopped.
 
-The four-second bridge, two-second preview and file, and 15-second recorder
-limits are only shown as status, and the app never kills work because a limit
-has passed. Only a recorder this app started may be closed. A recorder someone
-else started is left alone, even after the connection is lost, which is logged
-as `Recorder connection lost`. Normal window actions, including Stop, should
+The four-second bridge and two-second preview and file limits are only shown
+as status, and the app never stops that work because a limit has passed. The
+15-second recorder limit is the one exception: once it passes, a recorder this
+app started is closed, and forced to close a second later, as described above.
+Only a recorder this app started may be closed. A recorder someone else started
+is left alone, even after the connection is lost, which is logged as `Recorder
+connection lost`. Normal window actions, including Stop, should
 take no more than 50 ms, and no window clean-up waits forever.
 
 ## Preview
@@ -438,7 +466,11 @@ take no more than 50 ms, and no window clean-up waits forever.
 - Use `relative_time` for frame time when it is there.
 - Otherwise, subtract the first finite `lsl_time` from each finite `lsl_time`.
 - Otherwise, use the row number, starting at zero.
-- Turn marker, segment, and gaze columns into the shared `PreviewFrame` form.
+- Read numbers written with a decimal point, such as `0.5`, whatever the
+  computer's language settings.
+- Turn marker, segment, and gaze columns into the shared `PreviewFrame` form. A
+  column group with `QX`, `QY`, `QZ`, and `QW` is a segment and is never also
+  drawn as a marker.
 - Keep a set of frames within the memory limit and skip frames when drawing if
   needed. Keep the exact source timing separately.
 
@@ -450,7 +482,11 @@ take no more than 50 ms, and no window clean-up waits forever.
 - Skip the final chunk only when the file ends in the middle of it, either in its length field or in its contents. Report any other broken data as an error.
 - A missing timestamp can only be filled in when there is an earlier timestamp and a positive expected rate.
 - Work out and apply the recorded clock corrections exactly once.
-- Fix corrected timestamps so they always go up.
+- Fix corrected timestamps so they always go up. The count of repaired
+  timestamps covers every sample in the file, not only the ones kept for
+  drawing.
+- Read numbers in stream headers, such as `nominal_srate`, with a decimal point,
+  whatever the computer's language settings.
 - Group candidate streams by role, source ID, name, computer, and channel layout.
   Join matching pieces across their whole time range. The same source ID on
   different computers is not assumed to be the same stream.
@@ -506,8 +542,13 @@ applied. Buttons that need a picked calibration, a running preview, or a
 calibration in use are only enabled then.
 
 Applying one is visible and can be undone with **Clear Calibration**, which
-takes the preview back to the HoloLens's own coordinates. A new automatic result
-only lasts for this session until **Save Session Calibration** is chosen.
+takes the preview back to the HoloLens's own coordinates. A calibration with no
+measured gaze alignment, such as the built-in stair setup, cannot be applied;
+measure one with **Calibrate from Stair Target** first. A new automatic result
+only lasts for this session until **Save Session Calibration** is chosen. Saving
+updates the saved calibration that the one in use was applied from or measured
+with. With a different one picked, it saves a new entry and leaves the picked
+one unchanged, keeping the stair position the alignment was measured against.
 Collection progress, quality, rejection reasons, and whether coordinates match
 stay visible. If coordinate details are missing, the user must confirm before a
 saved calibration is complete.
@@ -517,8 +558,11 @@ saved calibration is complete.
 After Stop is confirmed, wait for the exact file to appear and check it in the
 background. Compare the list of streams saved before Start with the recorded
 name, source ID, computer, channel layout, time range, sample count, measured
-rate, gaps, clock corrections, and repaired timestamps. The result is `Checked`,
-`Checked with warnings`, or `Needs attention`. A Stop reply alone is never shown
+rate, gaps, clock corrections, and repaired timestamps. A stream with a set
+rate that stops more than two seconds, or ten samples if that is longer, before
+the recording ends gets a warning, because its source stopped or was replaced,
+as happens when the Vicon layout changes. Closing the app skips the check. The
+result is `Checked`, `Checked with warnings`, or `Needs attention`. A Stop reply alone is never shown
 as proof that data was saved. The file check never changes or deletes the XDF.
 The findings go into the session details, and the file can be opened straight
 into playback.
@@ -555,6 +599,11 @@ Keep:
 - The C++ tests that run without the runtime, the desktop app, or any download.
 - Program names, and the packaged `labrecorder` (with `LabRecorder.exe` and
   `LabRecorderCLI.exe`), `stair_model`, runtime, and license folders.
+- The Linux archive's layout: both desktop programs at the top with `qt.conf`,
+  their Qt, ICU, Boost, and liblsl in `lib`, Qt's plugins in `plugins`, and
+  LabRecorder and LabRecorderCLI in `labrecorder` with their own liblsl in
+  `labrecorder/lib`. Every program finds these through `$ORIGIN` search paths,
+  never through a build folder.
 - The generated stream check and the C# test project that runs without a headset.
 
 Do dependency updates and package layout changes separately from a code tidy-up.
@@ -585,6 +634,7 @@ Tick every line the change could affect:
 - `vicon-lsl-bridge/src/ViconLSLBridge.*`
 - `vicon-lsl-bridge/src/ViconClient.*`
 - `vicon-lsl-bridge/src/ViconFrameMapper.*`
+- `vicon-lsl-bridge/src/ViconServerAddress.*`
 - `vicon-lsl-bridge/src/MarkerStream.*`
 - `vicon-lsl-bridge/src/SegmentStream.*`
 - `vicon-lsl-bridge/src/StreamSchema.*`

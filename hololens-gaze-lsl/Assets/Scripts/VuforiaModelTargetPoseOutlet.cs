@@ -172,13 +172,47 @@ namespace GazeLSL
         private void DisableWithError(string message)
         {
             Debug.LogError(message);
+            DisposeOutletResources();
             enabled = false;
         }
 
         private void OnDestroy()
         {
+            DisposeOutletResources();
+        }
+
+        // Closes the stream at once, so a recorder does not keep seeing one that
+        // no longer sends.
+        private void DisposeOutletResources()
+        {
+            StreamOutlet currentOutlet = outlet;
+            StreamInfo currentInfo = info;
             outlet = null;
             info = null;
+
+            if (currentOutlet != null)
+            {
+                try
+                {
+                    currentOutlet.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"Error disposing model target LSL outlet - {e.Message}");
+                }
+            }
+
+            if (currentInfo != null)
+            {
+                try
+                {
+                    currentInfo.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"Error disposing model target LSL stream info - {e.Message}");
+                }
+            }
         }
 
         private void OnDisable()

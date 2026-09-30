@@ -71,6 +71,25 @@ internal static partial class Program
             "An infinite age should be rejected.");
     }
 
+    private static void GazeTimingRejectsReadingsFromAfterTheAsk()
+    {
+        // Readings found while catching up can be any age, but none can be taken
+        // well after the ask unless the headset clock changed in between.
+        True(
+            GazeTiming.IsPossibleCaptureAge(0.4),
+            "A reading from earlier in a catch-up should be kept.");
+        True(
+            GazeTiming.IsPossibleCaptureAge(-GazeTiming.MaxSeedCaptureAgeSeconds),
+            "A reading slightly newer than the ask should be kept.");
+        False(
+            GazeTiming.IsPossibleCaptureAge(-2.0),
+            "A reading two seconds after the ask means the clock changed.");
+        False(GazeTiming.IsPossibleCaptureAge(double.NaN), "An unusable age should be rejected.");
+        False(
+            GazeTiming.IsPossibleCaptureAge(double.NegativeInfinity),
+            "An infinite age should be rejected.");
+    }
+
     private static void GazeReadingGateRejectsDuplicateAndRegression()
     {
         var gate = new GazeReadingGate();

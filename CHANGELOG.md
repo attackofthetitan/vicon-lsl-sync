@@ -2,6 +2,56 @@
 
 This file lists what changed in each release.
 
+## [Unreleased]
+
+### Fixed
+
+- **Stop Session** no longer crashes the app when the recorder answers at once,
+  or after the recorder connection was lost. It now waits for a recorder
+  command that is still running, and after a lost connection it waits for
+  **Connect** and then stops the recording.
+- **Connect** works again after the recorder connection was lost during a
+  recording. Before, the app refused to reconnect, so the recording could not be
+  stopped from the app.
+- The Linux download now runs on its own. Before, its programs looked for
+  liblsl in the folder they were built in and needed Qt 6.8 installed. It now
+  carries Qt, liblsl, and Boost, with LabRecorder in a `labrecorder` folder.
+- A LabRecorder started from the app keeps recording after you detach it and
+  close the app on Linux or a Mac. Before, it stopped the next time it printed
+  a message.
+- Numbers in CSV files and in XDF stream details are read correctly on
+  computers set to a language that writes `0,5`. Before, the app read `0.25` as
+  `0`, and on Linux the Vicon stream details could say `119,880000`.
+- The file check counts every timestamp that had to be repaired. Before, it
+  counted only the few samples it keeps, so it usually said none.
+- Closing the app during a recording no longer waits up to 15 seconds to check
+  the file.
+- A marker hidden every other frame is logged like any other repeated problem.
+  Before, it was logged and reported on every other frame.
+- A Vicon pause of a few seconds no longer closes and reopens the Vicon streams.
+  The bridge reconnects after about five seconds without frames.
+- Server settings with several Vicon addresses separated by `;`, which the Vicon
+  SDK supports, now connect. Before, the check before connecting refused them.
+- **Save Session Calibration** no longer overwrites a different saved
+  calibration that is only picked in the list. It saves a new entry instead.
+- The built-in stair setup can no longer be applied as if it held a measured
+  gaze calibration, which let the setup check pass without one.
+- Merged CSV playback no longer draws each segment as an extra marker.
+- **Find Next Run** now says when the current run is still unused, instead of
+  saying no unused run was found.
+- The HoloLens stair target stream closes as soon as it stops or fails. Gaze
+  times use UTC, so a time zone or daylight saving change cannot shift them,
+  and a reading made unusable by a clock change is skipped.
+
+### Changed
+
+- If the Vicon subjects or markers change during a recording, the app now shows
+  an error, because LabRecorder cannot follow the new streams. Stop and start a
+  new recording. The file check also warns when a stream stops well before the
+  others.
+- The setup check now warns when a stream's rate differs from the saved one or
+  arrives below 80% of its expected rate.
+
 ## [1.15.0] - 2026-09-23
 
 ### Added

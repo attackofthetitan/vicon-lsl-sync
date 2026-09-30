@@ -3,6 +3,7 @@
 #include "preview/PreviewPlaybackClock.h"
 #include "preview/PreviewXdf.h"
 #include "preview/PreviewXdfMapping.h"
+#include "LocaleTestSupport.h"
 #include "PreviewCoreTestSupport.h"
 #include "TestSupport.h"
 
@@ -18,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+using locale_test_support::CommaDecimalLocale;
 using preview_core_test_support::TemporaryFilePath;
 using preview_core_test_support::calibrationLabels;
 using preview_core_test_support::gazeLabels;
@@ -522,6 +524,55 @@ TEST_CASE("Preview XDF loader rejects impossible implicit timestamps and repairs
                static_cast<std::size_t>(1));
     REQUIRE(repaired.streams.front().timestamps[1] >
             repaired.streams.front().timestamps[0]);
+}
+
+TEST_CASE("Preview XDF loader counts every repaired timestamp when it keeps few samples") {
+    const TemporaryFilePath temporary_path("_many_regressions.xdf");
+    const std::string path = temporary_path.string();
+    const std::uint32_t stream_id = 1;
+    std::vector<double> timestamps;
+    std::vector<std::vector<double>> samples;
+    for (int index = 0; index < 200; ++index) {
+        const bool moves_back = index > 0 && index % 20 == 0;
+        timestamps.push_back(moves_back ? timestamps.back() - 0.001 : 10.0 + index * 0.01);
+        samples.push_back({static_cast<double>(index)});
+    }
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", {"value"}, 100.0);
+        writeSampleChunk(output, stream_id, timestamps, samples);
+    }
+
+    vicon_lsl::PreviewLoadOptions few_samples;
+    few_samples.maximum_stored_values_per_stream = 20000;
+    few_samples.maximum_preview_frames = 1;
+    for (const auto& options : {vicon_lsl::PreviewLoadOptions{}, few_samples}) {
+        const auto loaded = vicon_lsl::loadXdfNumericStreams(path, options);
+        REQUIRE_EQ(loaded.streams.size(), static_cast<std::size_t>(1));
+        const auto& stream = loaded.streams.front();
+        REQUIRE_EQ(stream.sample_count, static_cast<std::size_t>(200));
+        REQUIRE_EQ(stream.repaired_timestamp_count, static_cast<std::size_t>(9));
+        for (std::size_t index = 1; index < stream.timestamps.size(); ++index) {
+            REQUIRE(stream.timestamps[index] > stream.timestamps[index - 1]);
+        }
+    }
+}
+
+TEST_CASE("Preview XDF loader reads the header rate the same in a locale that writes 0,5") {
+    const TemporaryFilePath temporary_path("_locale.xdf");
+    const std::string path = temporary_path.string();
+    const std::uint32_t stream_id = 1;
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "XDF:";
+        writeStreamHeader(output, stream_id, "numeric", "Unknown", {"value"}, 119.88);
+        writeSampleChunk(output, stream_id, {1.0}, {{1.0}});
+    }
+    const CommaDecimalLocale comma_locale;
+    const auto loaded = vicon_lsl::loadXdfNumericStreams(path);
+    REQUIRE_EQ(loaded.streams.size(), static_cast<std::size_t>(1));
+    REQUIRE(near(loaded.streams.front().nominal_srate, 119.88));
 }
 
 TEST_CASE("Preview XDF loader preserves complete chunks before an interrupted tail") {

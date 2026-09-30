@@ -9,6 +9,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,8 @@ struct BridgeStatus {
     size_t marker_count = 0;
     size_t segment_count = 0;
     unsigned int frame_count = 0;
+    // How many times the streams were replaced because the layout changed.
+    unsigned int layout_change_count = 0;
     std::string message;
 };
 
@@ -69,8 +72,12 @@ private:
     StatusCallback status_callback_;
 
     vicon_lsl::ViconLayout known_layout_;
+    // The layout of the last streams opened, kept across reconnects.
+    std::optional<vicon_lsl::ViconLayout> published_layout_;
+    unsigned int layout_change_count_ = 0;
     unsigned int frame_count_ = 0;
     unsigned int frames_since_layout_check_ = 0;
+    unsigned int clean_frames_ = 0;
     vicon_lsl::DiagnosticAggregator diagnostic_aggregator_;
     std::string last_diagnostic_message_;
 };

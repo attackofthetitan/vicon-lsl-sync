@@ -4,6 +4,10 @@
 #include <QFileInfo>
 #include <algorithm>
 
+#if defined(Q_OS_UNIX) && QT_VERSION < QT_VERSION_CHECK(6, 6, 0)
+#include <csignal>
+#endif
+
 namespace vicon_lsl::gui {
 namespace {
 
@@ -78,6 +82,9 @@ void RecorderProcessController::detach() {
     process_ = nullptr;
     terminate_deadline_.stop();
     disconnect(detached_proc, nullptr, this, nullptr);
+    // Its output is no longer shown, so stop keeping it.
+    detached_proc->closeReadChannel(QProcess::StandardOutput);
+    detached_proc->closeReadChannel(QProcess::StandardError);
     detached_proc->setParent(nullptr);
     connect(detached_proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             detached_proc, &QObject::deleteLater);
@@ -241,6 +248,15 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind, const QSt
     }
     process_ = new QProcess(this);
     process_->setProcessChannelMode(QProcess::SeparateChannels);
+#if defined(Q_OS_UNIX)
+    // A recorder left running outlives the app's end of its output pipes, so a
+    // later write must fail instead of ending the recording with SIGPIPE.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    process_->setUnixProcessParameters(QProcess::UnixProcessFlag::IgnoreSigPipe);
+#else
+    process_->setChildProcessModifier([] { std::signal(SIGPIPE, SIG_IGN); });
+#endif
+#endif
     process_->setWorkingDirectory(info.absolutePath());
     connect(process_, &QProcess::readyReadStandardOutput, this, &RecorderProcessController::drainOutput);
     connect(process_, &QProcess::readyReadStandardError, this, &RecorderProcessController::drainOutput);

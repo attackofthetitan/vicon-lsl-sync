@@ -191,6 +191,8 @@ private:
     gui::SessionCalibrationState calibration_state_ =
         gui::SessionCalibrationState::Uncalibrated;
     PreviewTransformProfile automatic_gaze_transform_;
+    // The saved calibration the one in use was applied from or measured with.
+    QString calibration_source_id_;
     std::vector<CalibrationTargetPose> calibration_samples_;
     gui::StreamBinding marker_binding_;
     gui::StreamBinding segment_binding_;

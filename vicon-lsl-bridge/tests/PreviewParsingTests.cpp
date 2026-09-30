@@ -2,13 +2,17 @@
 #include "preview/PreviewCalibration.h"
 #include "preview/PreviewMath.h"
 #include "preview/PreviewParsing.h"
+#include "LocaleTestSupport.h"
 #include "PreviewCoreTestSupport.h"
 #include "TestSupport.h"
 
+#include <cmath>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
+using locale_test_support::CommaDecimalLocale;
 using preview_core_test_support::calibrationLabels;
 using preview_core_test_support::gazeLabels;
 using preview_core_test_support::near;
@@ -142,6 +146,22 @@ TEST_CASE("Preview restores fixed HoloLens labels when live LSL metadata is shor
     REQUIRE(vicon_lsl::canonicalPreviewChannelLabels(
         vicon_lsl::PreviewStreamRole::HoloLensGaze,
         vicon_lsl::kHoloLensGazeChannelCount - 1).empty());
+}
+
+TEST_CASE("C numbers read the same in a locale that writes 0,5") {
+    const CommaDecimalLocale comma_locale;
+    if (!comma_locale.active()) {
+        std::cout << "note: no comma-decimal locale is installed; checking the C locale only"
+                  << std::endl;
+    }
+    std::size_t consumed = 0;
+    REQUIRE(near(vicon_lsl::parseCNumber("0.25", &consumed), 0.25));
+    REQUIRE_EQ(consumed, static_cast<std::size_t>(4));
+    REQUIRE(near(vicon_lsl::parseCNumber("-1.5e3x", &consumed), -1500.0));
+    REQUIRE_EQ(consumed, static_cast<std::size_t>(6));
+    REQUIRE(std::isnan(vicon_lsl::parseCNumber("x1", &consumed)));
+    REQUIRE_EQ(consumed, static_cast<std::size_t>(0));
+    REQUIRE(std::isnan(vicon_lsl::parseCNumber("")));
 }
 
 TEST_CASE("Preview timestamp tolerance accepts only nearby samples") {

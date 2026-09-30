@@ -56,6 +56,7 @@ void testConnectionTimeoutDoesNotShortenCommandTimeout();
 void testCommandTimeoutDisconnectsAndDropsQueuedWork();
 void testMidCommandDisconnectReportsFailure();
 void testConnectionStateTracksIdleDisconnectAndReconnect();
+void testReconnectAfterLossDuringStartCanStop();
 void testNormalizedPathPolicy();
 void testSessionConfiguration();
 void testSessionEventLog();
@@ -64,6 +65,10 @@ void testSelectedStreamRecorderPolicy();
 void testRecorderDuplicateAndShutdownProtocol();
 void testRecordingVerifierOutcomes();
 void testRecorderProcessControllerLifecycle();
+// Starts the given recorder, detaches it and returns, as the app does before it
+// quits; the test runs this in a separate copy of the test program.
+int runAppThatDetachesRecorder(const QString& recorder);
+void testDetachedRecorderOutlivesTheApp();
 void testBundledExecutableResolution();
 void testMacInstallation();
 void testShutdownWaitsForEachComponent();
@@ -77,6 +82,7 @@ void testSelectedStreamsForRecording();
 void testSetupCheckRequiresEachComponent();
 void testSetupCheckReportsPathAndStreamProblems();
 void testSetupCheckRequiredStreamReadiness();
+void testSetupCheckRateWarnings();
 void testSetupCheckCalibration();
 
 } // namespace labrecorder_client_tests

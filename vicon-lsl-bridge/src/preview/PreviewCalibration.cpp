@@ -46,9 +46,9 @@ PreviewQuaternion flipXZ(const PreviewQuaternion& value) {
 } // namespace
 
 const CalibrationProfile& defaultStairCalibrationProfile() {
-    // The bottom front-left stair corner as measured on 2026-09-17 and as found in
-    // the model file, in metres, where facing up the stairs forward is -X, left is
-    // -Y, and the floor is Z=0.
+    // The bottom front-left stair corner as measured on 2026-09-17, and the same
+    // corner in the model file, which is in millimetres, both given in metres.
+    // Facing up the stairs, forward is -X, left is -Y, and the floor is Z=0.
     static const PreviewVec3 measured_corner_m{-1.205, -0.213, 0.0};
     static const PreviewVec3 model_corner_m{1.677676086, -0.523499985, 0.0};
     static const CalibrationProfile profile{

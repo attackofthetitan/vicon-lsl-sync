@@ -1,10 +1,26 @@
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 
 int main(int argc, char* argv[]) {
+    if (const char* survival_file = std::getenv("VICON_LSL_FIXTURE_SURVIVAL_FILE")) {
+        // Writes like a recording LabRecorder until nothing reads its output any
+        // more, then leaves a file to show it survived that.
+        for (int attempt = 0; attempt < 250; ++attempt) {
+            std::cout << "still recording" << std::endl;
+            std::cerr << "still recording" << std::endl;
+            if (!std::cout || !std::cerr) {
+                std::ofstream(survival_file) << "survived\n";
+                return 0;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return 3;
+    }
     if (argc > 1 && std::filesystem::path(argv[1]).filename() == "session-stop.xdf") {
         std::cout << "waiting for Stop" << std::endl;
         std::string command;

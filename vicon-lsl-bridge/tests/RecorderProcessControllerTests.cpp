@@ -5,9 +5,24 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 
 namespace labrecorder_client_tests {
+namespace {
+
+QString recorderFixturePath() {
+    return QDir(QCoreApplication::applicationDirPath()).filePath(
+#ifdef Q_OS_WIN
+        "vicon-lsl-recorder-process-fixture.exe"
+#else
+        "vicon-lsl-recorder-process-fixture"
+#endif
+    );
+}
+
+} // namespace
 
 void testRecorderProcessControllerLifecycle() {
     using namespace vicon_lsl::gui;
@@ -24,13 +39,7 @@ void testRecorderProcessControllerLifecycle() {
                !error.isEmpty(),
            "missing recorder executable produces an explicit launch-failed state");
 
-    const QString fixture = QDir(QCoreApplication::applicationDirPath()).filePath(
-#ifdef Q_OS_WIN
-        "vicon-lsl-recorder-process-fixture.exe"
-#else
-        "vicon-lsl-recorder-process-fixture"
-#endif
-    );
+    const QString fixture = recorderFixturePath();
     expect(QFileInfo::exists(fixture), "recorder process fixture is available");
     if (!QFileInfo::exists(fixture)) return;
 
@@ -91,6 +100,42 @@ void testRecorderProcessControllerLifecycle() {
            "Detach relinquishes ownership without terminating the process");
     expect(!waitUntil([&exited]() { return exited; }, 800),
            "detached process exit is no longer treated as an owned lifecycle event");
+}
+
+int runAppThatDetachesRecorder(const QString& recorder) {
+    using namespace vicon_lsl::gui;
+    RecorderProcessController controller;
+    QString error;
+    if (!controller.launchGraphicalRecorder(recorder, &error)) return 1;
+    if (!waitUntil([&controller]() {
+            return controller.state() == RecorderProcessState::OwnedRunning;
+        })) {
+        return 2;
+    }
+    controller.detach();
+    return 0;
+}
+
+// The fixture keeps writing output as LabRecorder does, so once the app that
+// detached it quits, its writes go to pipes that nothing reads.
+void testDetachedRecorderOutlivesTheApp() {
+    const QString fixture = recorderFixturePath();
+    expect(QFileInfo::exists(fixture), "recorder process fixture is available");
+    if (!QFileInfo::exists(fixture)) return;
+    QTemporaryDir temp_dir;
+    expect(temp_dir.isValid(), "temporary directory created for the detached recorder");
+    const QString survival_file = QDir(temp_dir.path()).filePath("survived.txt");
+
+    QProcess app;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("VICON_LSL_FIXTURE_SURVIVAL_FILE", survival_file);
+    app.setProcessEnvironment(environment);
+    app.start(QCoreApplication::applicationFilePath(), {"--detach-recorder", fixture});
+    expect(app.waitForFinished(10000) && app.exitStatus() == QProcess::NormalExit &&
+               app.exitCode() == 0,
+           "a stand-in app starts a recorder, detaches it and quits");
+    expect(waitUntil([&survival_file]() { return QFileInfo::exists(survival_file); }, 5000),
+           "a detached recorder keeps running after the app quits");
 }
 
 void testBundledExecutableResolution() {

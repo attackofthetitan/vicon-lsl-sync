@@ -25,5 +25,8 @@ std::vector<PreviewGazeRay> parseGazeSample(const std::vector<std::string>& labe
                                             const PreviewTransformProfile& transform);
 
 std::string lowerAscii(std::string value);
+// Reads a number written the C way ("0.5") whatever locale the program runs in,
+// and returns NaN when the text does not start with a number.
+double parseCNumber(const std::string& text, std::size_t* consumed = nullptr);
 
 } // namespace vicon_lsl

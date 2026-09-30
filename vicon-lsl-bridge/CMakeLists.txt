@@ -68,6 +68,7 @@ add_library(vicon-lsl-bridge-logic STATIC
     src/StreamSchema.cpp
     src/CommandLine.cpp
     src/ViconFrameMapper.cpp
+    src/ViconServerAddress.cpp
 )
 
 target_include_directories(vicon-lsl-bridge-logic PUBLIC src)

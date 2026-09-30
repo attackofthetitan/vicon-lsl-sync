@@ -8,12 +8,33 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <unordered_map>
 
+#include <locale.h>
+#include <stdlib.h>
+#if defined(__APPLE__)
+#include <xlocale.h>
+#endif
+
 namespace vicon_lsl {
 namespace {
+
+// A "C" numeric locale made once, so a number reads the same whatever locale
+// the program set (Qt sets the user's own, where "0.5" can be written "0,5").
+#if defined(_WIN32)
+_locale_t numericCLocale() {
+    static const _locale_t locale = _create_locale(LC_NUMERIC, "C");
+    return locale;
+}
+#else
+locale_t numericCLocale() {
+    static const locale_t locale = newlocale(LC_NUMERIC_MASK, "C", static_cast<locale_t>(0));
+    return locale;
+}
+#endif
 
 bool endsWith(const std::string& value, const std::string& suffix) {
     return value.size() >= suffix.size() &&
@@ -186,6 +207,9 @@ std::vector<PreviewMarker> parseMarkerSample(const std::vector<std::string>& lab
         const auto y = channel(":Y");
         const auto z = channel(":Z");
         if (!y || !z) continue;
+        // A root with rotation channels is a segment, which merged CSV files
+        // list beside the markers.
+        if (channel(":QX") && channel(":QY") && channel(":QZ") && channel(":QW")) continue;
         // A missing Valid channel counts as valid.
         const auto valid_index = channel(":Valid").value_or(sample.size());
 
@@ -286,6 +310,23 @@ std::string lowerAscii(std::string value) {
         return static_cast<char>(std::tolower(ch));
     });
     return value;
+}
+
+double parseCNumber(const std::string& text, std::size_t* consumed) {
+    const char* begin = text.c_str();
+    char* end = const_cast<char*>(begin);
+    double value = 0.0;
+    if (const auto locale = numericCLocale()) {
+#if defined(_WIN32)
+        value = _strtod_l(begin, &end, locale);
+#else
+        value = strtod_l(begin, &end, locale);
+#endif
+    } else {
+        value = std::strtod(begin, &end);
+    }
+    if (consumed) *consumed = static_cast<std::size_t>(end - begin);
+    return end == begin ? std::numeric_limits<double>::quiet_NaN() : value;
 }
 
 } // namespace vicon_lsl

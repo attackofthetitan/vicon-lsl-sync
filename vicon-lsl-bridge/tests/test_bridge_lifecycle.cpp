@@ -1,12 +1,14 @@
 #include "ViconLSLBridge.h"
 #include "ViconLSLBridgeInternal.h"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -33,6 +35,9 @@ public:
     bool expose_segment = false;
     std::function<void(int)> on_get_frame;
     std::function<void()> on_connect;
+    // Frame reads that time out, as the SDK does after a second without frames.
+    std::function<bool(int)> frame_times_out;
+    std::function<bool(int)> marker_occluded;
     int connect_calls = 0;
     int disconnect_calls = 0;
     int get_frame_calls = 0;
@@ -61,8 +66,11 @@ public:
         if (on_get_frame) {
             on_get_frame(get_frame_calls);
         }
-        return get_frame_calls <= available_frames;
+        timed_out_ = frame_times_out && frame_times_out(get_frame_calls);
+        return !timed_out_ && get_frame_calls <= available_frames;
     }
+
+    bool frameTimedOut() const override { return timed_out_; }
 
     unsigned int frameNumber() const override {
         return static_cast<unsigned int>(get_frame_calls);
@@ -105,6 +113,11 @@ public:
         const std::string&) override {
         vicon_lsl::MarkerTranslationRead read;
         read.translation = {1.0, 2.0, 3.0};
+        if (marker_occluded && marker_occluded(get_frame_calls)) {
+            read.occluded = true;
+            read.status = vicon_lsl::ViconReadStatus::Occluded;
+            read.message = "Marker is occluded";
+        }
         return read;
     }
 
@@ -138,6 +151,7 @@ public:
 
 private:
     bool connected_ = false;
+    bool timed_out_ = false;
 };
 
 struct OutletState {
@@ -446,15 +460,130 @@ void testLayoutChangeReplacesStreams() {
         if (call == 101) client->expose_segment = true;
         if (call == 102) bridge->stop();
     };
+    unsigned int layout_changes = 0;
+    bridge->setStatusCallback([&layout_changes](const BridgeStatus& status) {
+        layout_changes = status.layout_change_count;
+    });
 
     bridge->run();
 
     expect(outlets->created == 3 && outlets->pushed == 102,
            "layout change replaces the marker stream and adds a working segment stream");
+    expect(layout_changes == 1, "the status counts the layout change");
     expect(client->connect_calls == 1 && client->disconnect_calls == 1,
            "layout replacement keeps the Vicon connection until stop");
     expect(client->discovery_calls == 2,
            "layout replacement uses the discovered layout without reading it again");
+}
+
+// The recorder cannot follow new streams with other channels however they
+// appear, so a layout that differs after a reconnect counts as a change too.
+void testLayoutChangeAcrossReconnectIsCounted() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 3;
+    client->expose_marker = true;
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client, outletFactory(outlets), [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 4) client->expose_segment = true;
+        if (call == 5) client->available_frames = 10;
+        if (call == 8) bridge->stop();
+    };
+    unsigned int layout_changes = 0;
+    bridge->setStatusCallback([&layout_changes](const BridgeStatus& status) {
+        layout_changes = status.layout_change_count;
+    });
+
+    bridge->run();
+
+    expect(client->connect_calls == 2 && outlets->created == 3,
+           "the bridge reconnects and opens streams for the new layout");
+    expect(layout_changes == 1, "a layout that changed across a reconnect is counted");
+}
+
+// The SDK gives up on a frame after a second, which is not a lost connection
+// until it happens several times in a row.
+void testFrameTimeoutsKeepStreamsUntilTheyRepeat() {
+    for (const bool resumes : {true, false}) {
+        auto client = std::make_shared<FakeViconClient>();
+        client->available_frames = 20;
+        client->expose_marker = true;
+        client->frame_times_out = [resumes](int call) {
+            return call >= 5 && call <= (resumes ? 8 : 9);
+        };
+        auto outlets = std::make_shared<OutletState>();
+        auto stop_on_wait = std::make_shared<StopOnWait>();
+        auto bridge = std::make_unique<ViconLSLBridge>(
+            testConfig(),
+            vicon_lsl::bridge_internal::Dependencies{
+                client, outletFactory(outlets), [] { return 200.0; },
+                [stop_on_wait](std::chrono::milliseconds duration) {
+                    (*stop_on_wait)(duration);
+                }});
+        stop_on_wait->bridge = bridge.get();
+        client->on_get_frame = [&](int call) {
+            if (call == 15) bridge->stop();
+        };
+        std::vector<std::string> messages;
+        bridge->setStatusCallback([&messages](const BridgeStatus& status) {
+            messages.push_back(status.message);
+        });
+
+        bridge->run();
+
+        const auto reported = [&messages](const std::string& message) {
+            return std::find(messages.begin(), messages.end(), message) != messages.end();
+        };
+        if (resumes) {
+            expect(client->get_frame_calls == 15 && client->connect_calls == 1 &&
+                       outlets->created == 1 && reported("Waiting for Vicon frames") &&
+                       reported("Vicon frames resumed"),
+                   "four frame timeouts in a row keep the connection and streams");
+        } else {
+            expect(client->get_frame_calls == 9 && outlets->created == 1 &&
+                       reported("Lost connection, will reconnect"),
+                   "a fifth frame timeout in a row reconnects");
+        }
+    }
+}
+
+// A marker hidden every other frame must be reported like any repeated problem,
+// not afresh after each clean frame.
+void testOcclusionFlickerIsReportedLikeARepeat() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 1200;
+    client->expose_marker = true;
+    client->marker_occluded = [](int call) { return call <= 1000 && call % 2 == 0; };
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client, outletFactory(outlets), [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 1200) bridge->stop();
+    };
+    int statuses = 0;
+    int recoveries = 0;
+    bridge->setStatusCallback([&](const BridgeStatus& status) {
+        ++statuses;
+        if (status.message == "Vicon reads recovered") ++recoveries;
+    });
+
+    std::ostringstream log;
+    std::streambuf* previous_log = std::cerr.rdbuf(log.rdbuf());
+    bridge->run();
+    std::cerr.rdbuf(previous_log);
+
+    const std::string text = log.str();
+    const auto lines = std::count(text.begin(), text.end(), '\n');
+    expect(lines <= 10, "a flickering marker is logged on its first and every 100th repeat");
+    expect(statuses <= 40, "a flickering marker does not report status on every frame");
+    expect(recoveries == 1, "reads count as recovered once they stay clean");
 }
 
 void testFailedLayoutCheckKeepsStreaming() {
@@ -539,6 +668,9 @@ int main() {
     testStopDuringSuccessfulConnectionDisconnects();
     testInitializationFailureClosesPartialStreams();
     testLayoutChangeReplacesStreams();
+    testLayoutChangeAcrossReconnectIsCounted();
+    testFrameTimeoutsKeepStreamsUntilTheyRepeat();
+    testOcclusionFlickerIsReportedLikeARepeat();
     testFailedLayoutCheckKeepsStreaming();
     testStopDuringNonCancellableSdkDelayKeepsCallerResponsive();
     if (failures != 0) {

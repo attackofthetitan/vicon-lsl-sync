@@ -2,7 +2,10 @@
 
 #include <cmath>
 #include <exception>
+#include <iomanip>
 #include <iostream>
+#include <locale>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -10,11 +13,19 @@
 namespace vicon_lsl::detail {
 namespace {
 
+// Written the C way ("119.880000") whatever locale the program runs in.
+std::string formatRate(double rate) {
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << std::fixed << std::setprecision(6) << rate;
+    return out.str();
+}
+
 void appendTimingMetadata(lsl::stream_info& info, double stream_rate) {
     lsl::xml_element acquisition = info.desc().append_child("acquisition");
     acquisition.append_child_value("device", "Vicon");
     acquisition.append_child_value("sdk", "ViconDataStreamSDK");
-    acquisition.append_child_value("nominal_srate", std::to_string(stream_rate).c_str());
+    acquisition.append_child_value("nominal_srate", formatRate(stream_rate).c_str());
     acquisition.append_child_value("timestamp", "estimated_acquisition_time");
     acquisition.append_child_value("clock_domain", "lsl_local_clock");
     acquisition.append_child_value(

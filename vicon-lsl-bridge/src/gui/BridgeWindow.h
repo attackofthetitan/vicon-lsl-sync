@@ -44,6 +44,8 @@ public:
 signals:
     void statusUpdate(int state, unsigned long long markers, unsigned long long segments,
                       unsigned int frames, const QString& message);
+    // The Vicon layout changed, so the bridge replaced its streams.
+    void layoutChanged();
     void lifecycleChanged(ComponentLifecycleState state, QString detail);
 
 protected:
@@ -98,6 +100,7 @@ private slots:
     void onHeartbeatTick();
     void onStatusUpdate(int state, unsigned long long markers, unsigned long long segments,
                         unsigned int frames, const QString& message);
+    void onBridgeLayoutChanged();
     void onWorkerFinished();
     void onLabRecorderRetry();
     void onVerificationFilePoll();
@@ -157,6 +160,7 @@ private:
     RecorderRecordingState effectiveRecordingState() const;
     RecorderOperationState effectiveOperationState() const;
     bool recordingActiveOrPending() const;
+    bool recorderCanAcceptStop() const;
     bool verificationActive() const;
     bool bridgeStatusRecent() const;
     void beginClose();
@@ -195,6 +199,9 @@ private:
     bool closing() const { return sequence_ == SessionSequence::Closing; }
 
     SessionSequence sequence_ = SessionSequence::None;
+    bool pumping_session_ = false;
+    bool session_pump_again_ = false;
+    bool guided_stop_wait_reported_ = false;
     bool recording_stop_requested_ = false;
     vicon_lsl::gui::SessionFileState file_state_ =
         vicon_lsl::gui::SessionFileState::None;

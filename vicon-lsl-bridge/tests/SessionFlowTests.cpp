@@ -1,10 +1,12 @@
 #include "gui/BridgeWindow.h"
+#include "gui/LabRecorderClient.h"
 #include "gui/PreviewPanel.h"
 #include "gui/RecorderProcessController.h"
 #include "gui/StreamDiscoveryWorker.h"
 #include "TestSupport.h"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -12,13 +14,17 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMimeData>
 #include <QPlainTextEdit>
 #include <QSettings>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QUrl>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -66,9 +72,94 @@ QString bridgeStateText(const BridgeWindow& window) {
     return {};
 }
 
-bool sessionStopped(const BridgeWindow& window) {
+bool eventLogContains(const BridgeWindow& window, const QString& text) {
     const auto* log = window.findChild<QPlainTextEdit*>();
-    return log && log->toPlainText().contains("Session stopped");
+    return log && log->toPlainText().contains(text);
+}
+
+bool sessionStopped(const BridgeWindow& window) {
+    return eventLogContains(window, "Session stopped");
+}
+
+// Stands in for LabRecorder and answers each command only when told to, so a
+// test can hold a group of commands part way through.
+class FakeLabRecorder {
+public:
+    FakeLabRecorder() { REQUIRE(server_.listen(QHostAddress::LocalHost, 0)); }
+
+    quint16 port() const { return server_.serverPort(); }
+
+    // Takes the next connection the app makes.
+    bool accept() {
+        if (!waitUntil([this] { return server_.hasPendingConnections(); })) return false;
+        socket_.reset(server_.nextPendingConnection());
+        return socket_ != nullptr;
+    }
+
+    QString nextCommand() {
+        if (!hasCommand(3000)) return {};
+        return QString::fromUtf8(socket_->readLine()).trimmed();
+    }
+
+    bool hasCommand(int timeout_ms) {
+        return waitUntil([this] { return socket_ && socket_->canReadLine(); }, timeout_ms);
+    }
+
+    void reply() {
+        socket_->write("OK");
+        socket_->flush();
+    }
+
+    void drop() { socket_->abort(); }
+
+private:
+    QTcpServer server_;
+    std::unique_ptr<QTcpSocket> socket_;
+};
+
+// Records with the LabRecorder window, which the app drives over its remote port.
+std::shared_ptr<QSettings> remoteRecorderSettings(const QTemporaryDir& directory, quint16 port) {
+    auto settings = sessionSettings(directory, true);
+    SessionConfiguration configuration = SessionConfigurationStore::load(*settings);
+    configuration.recorder_port = port;
+    configuration.record_every_visible_stream = true;
+    configuration.recording_template = "run-%r.xdf";
+    SessionConfigurationStore::save(*settings, configuration);
+    return settings;
+}
+
+// The test computer has no lab streams, so the setup check fails and the
+// recording is started with Record Anyway.
+bool startRecordingAnyway(BridgeWindow& window) {
+    QMetaObject::invokeMethod(&window, "onStartRecording", Qt::DirectConnection);
+    QLineEdit* reason = nullptr;
+    for (auto* edit : window.findChildren<QLineEdit*>()) {
+        if (edit->placeholderText().startsWith("Required reason")) reason = edit;
+    }
+    if (!reason || !waitUntil([&] { return !window.findChild<StreamDiscoveryWorker*>(); })) {
+        return false;
+    }
+    reason->setText("No lab streams on the test computer");
+    return QMetaObject::invokeMethod(&window, "onOverrideSetupCheck", Qt::DirectConnection);
+}
+
+// A measured calibration for its own stair setup.
+ManagedCalibrationProfile measuredCalibration(const QString& id, double gaze_x) {
+    ManagedCalibrationProfile profile = CalibrationProfileStore::defaultProfile();
+    profile.id = id;
+    profile.display_name = id;
+    profile.physical_setup_id = id;
+    profile.gaze_transform.translation = {gaze_x, 0.0, 0.0};
+    profile.quality.sample_count = 30;
+    profile.metadata_fallback_confirmed = true;
+    return profile;
+}
+
+QComboBox* calibrationList(PreviewPanel& panel) {
+    for (auto* combo : panel.findChildren<QComboBox*>()) {
+        if (combo->findText("Default stair setup") >= 0) return combo;
+    }
+    return nullptr;
 }
 
 void writeRecording(const QString& path) {
@@ -116,6 +207,174 @@ TEST_CASE("Stop Session stops the selected recorder during startup and while rec
         REQUIRE(stopped);
         REQUIRE(stop_received);
     }
+}
+
+TEST_CASE("Stop Session during a LabRecorder Start waits for it and then sends one Stop") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    REQUIRE(recorder.accept());
+    REQUIRE(startRecordingAnyway(window));
+    // Hold the Start at its first command, as LabRecorder does while it looks
+    // for streams, and ask the session to stop meanwhile.
+    REQUIRE_EQ(recorder.nextCommand(), QString("update"));
+    QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
+    const bool stop_held_back = !recorder.hasCommand(100);
+    recorder.reply();
+    QStringList commands;
+    for (int command = 0; command < 3; ++command) {
+        commands.push_back(recorder.nextCommand());
+        recorder.reply();
+    }
+    const QString stop = recorder.nextCommand();
+    recorder.reply();
+    const bool one_stop = !recorder.hasCommand(200);
+    window.close();
+    REQUIRE(stop_held_back);
+    REQUIRE_EQ(commands.value(2), QString("start"));
+    REQUIRE_EQ(stop, QString("stop"));
+    REQUIRE(one_stop);
+}
+
+TEST_CASE("Stop Session waits for a lost recorder to be reconnected and then stops it") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    auto* client = window.findChild<LabRecorderClient*>();
+    REQUIRE(client);
+    REQUIRE(recorder.accept());
+    REQUIRE(startRecordingAnyway(window));
+    for (int command = 0; command < 4; ++command) {
+        REQUIRE(!recorder.nextCommand().isEmpty());
+        recorder.reply();
+    }
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+    recorder.drop();
+    REQUIRE(waitUntil([&] { return !client->isConnected(); }));
+
+    QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
+    const bool waiting = eventLogContains(window, "Select Connect to reconnect");
+    QMetaObject::invokeMethod(&window, "onConnectLabRecorder", Qt::DirectConnection);
+    const bool reconnected = recorder.accept();
+    const QString stop = reconnected ? recorder.nextCommand() : QString();
+    if (reconnected) recorder.reply();
+    const bool stopped = waitUntil([&] {
+        return client->recordingState() == RecorderRecordingState::Stopped;
+    });
+    window.close();
+    REQUIRE(waiting);
+    REQUIRE(reconnected);
+    REQUIRE_EQ(stop, QString("stop"));
+    REQUIRE(stopped);
+}
+
+TEST_CASE("Closing while recording stops the recorder without waiting to check the file") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    auto* client = window.findChild<LabRecorderClient*>();
+    REQUIRE(client);
+    window.show();
+    REQUIRE(recorder.accept());
+    REQUIRE(startRecordingAnyway(window));
+    for (int command = 0; command < 4; ++command) {
+        REQUIRE(!recorder.nextCommand().isEmpty());
+        recorder.reply();
+    }
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+
+    QElapsedTimer close_timer;
+    close_timer.start();
+    window.close();
+    const QString stop = recorder.nextCommand();
+    recorder.reply();
+    // The recorder here writes no file, which a file check would wait 15 s for.
+    const bool closed = waitUntil([&] { return !window.isVisible(); }, 10000);
+    REQUIRE_EQ(stop, QString("stop"));
+    REQUIRE(closed);
+    REQUIRE(close_timer.elapsed() < 5000);
+    REQUIRE(!eventLogContains(window, "Waiting for the recorder to finish writing"));
+}
+
+TEST_CASE("A Vicon layout change is an error while recording and a warning otherwise") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    auto* client = window.findChild<LabRecorderClient*>();
+    REQUIRE(client);
+    REQUIRE(recorder.accept());
+    REQUIRE(QMetaObject::invokeMethod(&window, "onBridgeLayoutChanged", Qt::DirectConnection));
+    const bool warned = eventLogContains(window, "[warning] [bridge] The Vicon subjects or markers changed");
+
+    REQUIRE(startRecordingAnyway(window));
+    for (int command = 0; command < 4; ++command) {
+        REQUIRE(!recorder.nextCommand().isEmpty());
+        recorder.reply();
+    }
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+    REQUIRE(QMetaObject::invokeMethod(&window, "onBridgeLayoutChanged", Qt::DirectConnection));
+    const bool failed = eventLogContains(window, "[error] [bridge] The Vicon subjects or markers changed");
+    window.close();
+    REQUIRE(warned);
+    REQUIRE(failed);
+}
+
+TEST_CASE("Find Next Run says when the current run is still unused") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, 1));
+    REQUIRE(QMetaObject::invokeMethod(&window, "onFindNextRun", Qt::DirectConnection));
+    const bool unused = eventLogContains(window, "Run 1 is not used yet");
+    const bool no_false_warning = !eventLogContains(window, "No unused run was found");
+    window.close();
+    REQUIRE(unused);
+    REQUIRE(no_false_warning);
+}
+
+TEST_CASE("Only measured calibrations apply, and saving never overwrites another setup") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto settings = sessionSettings(directory);
+    SessionConfiguration configuration = SessionConfigurationStore::load(*settings);
+    configuration.stair_model_path = directory.filePath("stair.obj");
+    SessionConfigurationStore::save(*settings, configuration);
+    {
+        QFile model(configuration.stair_model_path);
+        REQUIRE(model.open(QIODevice::WriteOnly));
+        REQUIRE(model.write("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n") > 0);
+    }
+    const ManagedCalibrationProfile built_in = CalibrationProfileStore::defaultProfile();
+    REQUIRE(CalibrationProfileStore::save(
+        *settings, {built_in, measuredCalibration("setup-a", 1.0), measuredCalibration("setup-b", 2.0)}));
+
+    PreviewPanel panel(nullptr, settings);
+    QComboBox* list = calibrationList(panel);
+    REQUIRE(list);
+    list->setCurrentIndex(list->findData(built_in.id));
+    REQUIRE(QMetaObject::invokeMethod(&panel, "applySelectedCalibrationProfile", Qt::DirectConnection));
+    const bool built_in_refused =
+        panel.sessionCalibrationState() == SessionCalibrationState::Uncalibrated;
+
+    list->setCurrentIndex(list->findData("setup-a"));
+    REQUIRE(QMetaObject::invokeMethod(&panel, "applySelectedCalibrationProfile", Qt::DirectConnection));
+    const bool applied = panel.sessionCalibrationState() == SessionCalibrationState::SavedProfile;
+
+    // Setup B is only being looked at, so saving setup A's calibration adds an entry.
+    list->setCurrentIndex(list->findData("setup-b"));
+    REQUIRE(QMetaObject::invokeMethod(&panel, "saveSessionCalibrationProfile", Qt::DirectConnection));
+    const auto saved = CalibrationProfileStore::load(*settings);
+    const auto setup_b = std::find_if(saved.begin(), saved.end(),
+                                      [](const auto& profile) { return profile.id == "setup-b"; });
+    REQUIRE(built_in_refused);
+    REQUIRE(applied);
+    REQUIRE_EQ(saved.size(), 4);
+    REQUIRE(setup_b != saved.end());
+    REQUIRE(setup_b->gaze_transform.translation.x == 2.0);
+    REQUIRE(saved.back().gaze_transform.translation.x == 1.0);
 }
 
 TEST_CASE("Session starts preview before recording and Stop Session shuts it down") {

@@ -4,6 +4,9 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
 
     using namespace labrecorder_client_tests;
+    if (argc == 3 && std::string(argv[1]) == "--detach-recorder") {
+        return runAppThatDetachesRecorder(QString::fromLocal8Bit(argv[2]));
+    }
     const auto run = [](const char* name, auto function) {
         std::cout << "[run] " << name << std::endl;
         function();
@@ -20,6 +23,7 @@ int main(int argc, char** argv) {
     run("command timeout", testCommandTimeoutDisconnectsAndDropsQueuedWork);
     run("mid-command disconnect", testMidCommandDisconnectReportsFailure);
     run("reconnect", testConnectionStateTracksIdleDisconnectAndReconnect);
+    run("reconnect after lost Start", testReconnectAfterLossDuringStartCanStop);
     run("normalized path policy", testNormalizedPathPolicy);
     run("session configuration", testSessionConfiguration);
     run("session event log", testSessionEventLog);
@@ -28,6 +32,10 @@ int main(int argc, char** argv) {
     run("duplicate and shutdown protocol", testRecorderDuplicateAndShutdownProtocol);
     run("recording verifier", testRecordingVerifierOutcomes);
     run("recorder process lifecycle", testRecorderProcessControllerLifecycle);
+#ifndef Q_OS_WIN
+    // SIGPIPE, which ended such a recorder, exists only on Linux and macOS.
+    run("detached recorder outlives the app", testDetachedRecorderOutlivesTheApp);
+#endif
     run("bundled executable resolution", testBundledExecutableResolution);
 #ifdef Q_OS_MACOS
     run("macOS installation", testMacInstallation);
@@ -43,6 +51,7 @@ int main(int argc, char** argv) {
     run("setup check components", testSetupCheckRequiresEachComponent);
     run("setup check path and streams", testSetupCheckReportsPathAndStreamProblems);
     run("setup check required streams", testSetupCheckRequiredStreamReadiness);
+    run("setup check rates", testSetupCheckRateWarnings);
     run("setup check calibration", testSetupCheckCalibration);
 
     if (g_failures > 0) {
