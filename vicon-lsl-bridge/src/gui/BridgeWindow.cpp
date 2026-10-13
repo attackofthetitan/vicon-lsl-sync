@@ -21,12 +21,15 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHostAddress>
+#include <QHostInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QNetworkInterface>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -116,6 +119,14 @@ bool recorderCanStart(const LabRecorderClient& recorder) {
            recorder.recordingState() != RecorderRecordingState::Recording &&
            recorder.operationState() == RecorderOperationState::Idle &&
            !recorder.shutdownRequested();
+}
+
+bool recorderHostIsLocal(const QString& host) {
+    const QString name = host.trimmed();
+    if (name.compare("localhost", Qt::CaseInsensitive) == 0 ||
+        (!name.isEmpty() && name.compare(QHostInfo::localHostName(), Qt::CaseInsensitive) == 0)) return true;
+    const QHostAddress address(name);
+    return !address.isNull() && (address.isLoopback() || QNetworkInterface::allAddresses().contains(address));
 }
 
 QString setupCheckLevelDisplayText(SetupCheckLevel level) {
@@ -317,7 +328,9 @@ void BridgeWindow::connectSignals() {
 
     onEdited({ui_->labrecorder_host_edit, ui_->labrecorder_executable_edit, ui_->labrecorder_port_spin,
               ui_->automatic_launch_check, ui_->record_every_visible_check, ui_->recorder_only_check}, [this]() {
+        const bool mode_changed = configuration_.record_every_visible_stream != ui_->record_every_visible_check->isChecked();
         updateConfigurationFromUi();
+        if (mode_changed) beginLabRecorderStartup();
         refreshUi();
     });
 
@@ -384,7 +397,8 @@ void BridgeWindow::connectSignals() {
 
     connect(recorder_process_, &RecorderProcessController::stateChanged, this, [this](RecorderProcessState s, const QString& d) {
         appendEvent(SessionComponent::Recorder, errorIf(s == RecorderProcessState::LaunchFailed), d);
-        if (s == RecorderProcessState::OwnedRunning && recorder_process_->kind() == RecorderProcessKind::GraphicalRecorder) {
+        if (!closing() && !stoppingSession() && s == RecorderProcessState::OwnedRunning &&
+            recorder_process_->kind() == RecorderProcessKind::GraphicalRecorder) {
             labrecorder_retry_elapsed_.restart();
             labrecorder_retry_timer_->start();
             onLabRecorderRetry();
@@ -420,7 +434,7 @@ void BridgeWindow::connectSignals() {
             pumpSession();
         });
         connect(ui_->preview_panel, &vicon_lsl::PreviewPanel::streamInventoryChanged, this, [this](const QVector<StreamIdentity>& s) {
-            mergeStreamInventory(stream_inventory_, s);
+            mergeStreamInventory(stream_inventory_, s, configuration_);
             populateStreamTable();
         });
         connect(ui_->preview_panel, &vicon_lsl::PreviewPanel::calibrationStateChanged, this, [this](SessionCalibrationState, const QString& q, bool) {
@@ -486,10 +500,18 @@ void BridgeWindow::applyConfigurationToUi() {
 
 // Loads new settings into the window and drops the streams found for the old ones.
 void BridgeWindow::replaceConfiguration(SessionConfiguration configuration) {
+    const bool recorder_changed = configuration_.record_every_visible_stream != configuration.record_every_visible_stream ||
+                                  configuration_.recorder_host != configuration.recorder_host ||
+                                  configuration_.recorder_port != configuration.recorder_port;
     configuration_ = std::move(configuration);
     stream_inventory_.clear();
     applyConfigurationToUi();
     populateStreamTable();
+    if (recorder_changed) {
+        onDetachLabRecorder();
+        beginLabRecorderStartup();
+    }
+    refreshUi();
 }
 
 void BridgeWindow::updateConfigurationFromUi() {
@@ -504,16 +526,8 @@ void BridgeWindow::updateConfigurationFromUi() {
     configuration_.storage_warning_gib = ui_->storage_warning_spin->value();
 
     if (!stream_inventory_.isEmpty()) {
-        QVector<StreamBinding> bindings;
-        for (const StreamIdentity& id : stream_inventory_) {
-            if (!id.selected && !id.required) continue;
-            bindings.push_back({
-                id.role, id.name, id.source_id,
-                id.source_id.isEmpty() ? StreamReconnectionMode::FollowName : StreamReconnectionMode::SourceIdentity,
-                id.required, id.channel_count, id.nominal_rate, id.coordinate_frame
-            });
-        }
-        configuration_.recording_streams = std::move(bindings);
+        configuration_.recording_streams = recordingBindingsForInventory(
+            configuration_.recording_streams, stream_inventory_);
     }
 }
 
@@ -720,13 +734,17 @@ void BridgeWindow::updateDashboard() {
     // The dashboard supplies the caption, so the value is just the number.
     ui_->run_identifier_label->setText(QString::number(ui_->run_spin->value()));
     ui_->bridge_state_label->setText(componentLifecycleStateText(bridge_lifecycle_));
-    ui_->recorder_state_label->setText(stateDetail(labrecorder_client_->connectionState(), rec, op));
+    ui_->recorder_state_label->setText(configuration_.record_every_visible_stream
+        ? stateDetail(labrecorder_client_->connectionState(), rec, op)
+        : "Selected streams / " + recorderRecordingStateText(rec) + " / " + recorderOperationStateText(op));
     ui_->preview_state_label->setText(componentLifecycleStateText(prev));
     ui_->calibration_state_label->setText(calibrationStateText(cal));
     ui_->file_state_dashboard_label->setText(fileStateText(file_state_));
     ui_->verification_state_label->setText(verificationStateText(verification_report_.state));
     ui_->recorder_owner_label->setText(recorderProcessStateText(recorder_process_->state()));
-    ui_->recorder_endpoint_label->setText(configuration_.recorder_host + ":" + QString::number(configuration_.recorder_port));
+    ui_->recorder_endpoint_label->setText(configuration_.record_every_visible_stream
+        ? configuration_.recorder_host + ":" + QString::number(configuration_.recorder_port)
+        : "Local recorder");
     ui_->storage_label->setText(gibText(path_result_.available_storage_bytes));
     ui_->drop_label->setText(QString::number(preview_replaced_frames_) + " frame(s) skipped, " +
                              QString::number(preview_coalesced_samples_) + " update(s) combined, " +
@@ -764,8 +782,28 @@ QString BridgeWindow::resolveSelectedStreamExecutable() const {
 }
 
 void BridgeWindow::beginLabRecorderStartup() {
-    if (closing() || labrecorder_client_->connectionState() == RecorderConnectionState::Connecting) return;
+    if (closing() || stoppingSession()) return;
     updateConfigurationFromUi();
+    if (!configuration_.record_every_visible_stream) {
+        // The selected-stream recorder takes its destination and streams when
+        // recording starts. It has no remote-control connection to establish.
+        startup_endpoint_probe_ = false;
+        labrecorder_retry_timer_->stop();
+        filename_sync_timer_->stop();
+        if (labrecorder_client_->connectionState() != RecorderConnectionState::Disconnected ||
+            recorder_process_->kind() == RecorderProcessKind::GraphicalRecorder) {
+            onDetachLabRecorder();
+        }
+        setLabRecorderStatus("The selected-stream recorder starts with Start Recording; no connection is needed");
+        return;
+    }
+    if (labrecorder_client_->connectionState() == RecorderConnectionState::Connecting ||
+        labrecorder_client_->isConnected()) return;
+    if (recorder_process_->ownsRunningProcess() &&
+        recorder_process_->kind() == RecorderProcessKind::GraphicalRecorder) {
+        onConnectLabRecorder();
+        return;
+    }
     startup_endpoint_probe_ = true;
     startup_launch_attempted_ = false;
     setLabRecorderStatus("Looking for the recorder at the configured address");
@@ -773,8 +811,13 @@ void BridgeWindow::beginLabRecorderStartup() {
 }
 
 void BridgeWindow::launchConfiguredRecorder() {
-    if (startup_launch_attempted_) return;
+    if (closing() || stoppingSession() || !configuration_.record_every_visible_stream || startup_launch_attempted_ ||
+        recorder_process_->ownsRunningProcess()) return;
     startup_launch_attempted_ = true;
+    if (!recorderHostIsLocal(configuration_.recorder_host)) {
+        setLabRecorderStatus("The recorder address is on another computer. Start LabRecorder there, then select Connect.", EventSeverity::Warning);
+        return;
+    }
     const QString exe = resolveLabRecorderExecutable();
     if (exe.isEmpty()) {
         setLabRecorderStatus("The recorder could not be reached or found on this computer", EventSeverity::Warning);
@@ -790,6 +833,7 @@ void BridgeWindow::launchConfiguredRecorder() {
 }
 
 void BridgeWindow::onLaunchLabRecorder() {
+    if (!configuration_.record_every_visible_stream) return;
     if (recordingActiveOrPending() || labrecorder_client_->connectionState() == RecorderConnectionState::Connected ||
         labrecorder_client_->connectionState() == RecorderConnectionState::Connecting) {
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning, "The recorder cannot be started while it is connected or recording");
@@ -801,15 +845,23 @@ void BridgeWindow::onLaunchLabRecorder() {
 }
 
 void BridgeWindow::onConnectLabRecorder() {
+    if (!configuration_.record_every_visible_stream) return;
     const RecorderConnectionState state = labrecorder_client_->connectionState();
     if (recordingActiveOrPending() && (state == RecorderConnectionState::Connected || state == RecorderConnectionState::Connecting)) {
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning, "Recorder connection replacement rejected while recording work is active");
         return;
     }
-    labrecorder_retry_timer_->stop();
     startup_endpoint_probe_ = false;
     updateConfigurationFromUi();
     saveSettings();
+    // A graphical recorder already launched here may still be starting up.
+    // Keep retrying its port without starting a second recorder.
+    labrecorder_retry_timer_->stop();
+    if (recorder_process_->ownsRunningProcess() &&
+        recorder_process_->kind() == RecorderProcessKind::GraphicalRecorder) {
+        labrecorder_retry_elapsed_.restart();
+        labrecorder_retry_timer_->start();
+    }
     labrecorder_client_->connectToServer(configuration_.recorder_host, static_cast<quint16>(configuration_.recorder_port));
 }
 
@@ -818,6 +870,7 @@ void BridgeWindow::onDetachLabRecorder() {
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning, "Disconnect or detach rejected while recording work is active");
         return;
     }
+    startup_endpoint_probe_ = false;
     labrecorder_retry_timer_->stop();
     labrecorder_client_->disconnectFromServer();
     if (recorder_process_->ownsRunningProcess()) {
@@ -830,6 +883,10 @@ void BridgeWindow::onDetachLabRecorder() {
 }
 
 void BridgeWindow::onLabRecorderRetry() {
+    if (closing() || stoppingSession() || !configuration_.record_every_visible_stream) {
+        labrecorder_retry_timer_->stop();
+        return;
+    }
     const RecorderConnectionState state = labrecorder_client_->connectionState();
     if (state == RecorderConnectionState::Connected) {
         labrecorder_retry_timer_->stop();
@@ -838,7 +895,7 @@ void BridgeWindow::onLabRecorderRetry() {
     const qint64 el = labrecorder_retry_elapsed_.isValid() ? labrecorder_retry_elapsed_.elapsed() : kRecorderRetryTimeoutMs;
     if (el >= kRecorderRetryTimeoutMs) {
         labrecorder_retry_timer_->stop();
-        setLabRecorderStatus("The recorder was not ready within 15 seconds", EventSeverity::Error);
+        setLabRecorderStatus("The graphical recorder was not ready within 15 seconds. Enable its remote control and check that its host and port match.", EventSeverity::Error);
         return;
     }
     if (state == RecorderConnectionState::Connecting) return;
@@ -866,6 +923,7 @@ RecorderRecordingState BridgeWindow::effectiveRecordingState() const {
     if (recorder_process_ && recorder_process_->kind() == RecorderProcessKind::SelectedStreamRecorder) {
         return recorder_process_->selectedStreamRecording() ? RecorderRecordingState::Recording : RecorderRecordingState::Stopped;
     }
+    if (!configuration_.record_every_visible_stream) return RecorderRecordingState::Stopped;
     return labrecorder_client_ ? labrecorder_client_->recordingState() : RecorderRecordingState::Unknown;
 }
 
@@ -907,19 +965,24 @@ bool BridgeWindow::verificationActive() const {
 void BridgeWindow::updateRecordingButtons() {
     if (!ui_ || !labrecorder_client_) return;
     const bool remote = configuration_.record_every_visible_stream;
+    ui_->record_every_visible_check->setEnabled(!closing() && !recordingActiveOrPending());
+    ui_->labrecorder_host_edit->setEnabled(!closing() && remote);
+    ui_->labrecorder_port_spin->setEnabled(!closing() && remote);
+    ui_->automatic_launch_check->setEnabled(!closing() && remote);
     ui_->refresh_streams_button->setEnabled(!closing() && remote && recorderCanStart(*labrecorder_client_));
     ui_->start_recording_button->setEnabled(!closing() && !stoppingSession() &&
                                            !recordingActiveOrPending() && !verificationActive());
     ui_->stop_recording_button->setEnabled(!closing() && recordingActiveOrPending());
     ui_->connect_labrecorder_button->setEnabled(
-        !closing() && labrecorder_client_->connectionState() != RecorderConnectionState::Connecting &&
+        !closing() && remote && labrecorder_client_->connectionState() != RecorderConnectionState::Connecting &&
         (!recordingActiveOrPending() || labrecorder_client_->connectionState() == RecorderConnectionState::Disconnected ||
          labrecorder_client_->connectionState() == RecorderConnectionState::Error));
     ui_->detach_labrecorder_button->setEnabled(
         !closing() && !recordingActiveOrPending() &&
         (labrecorder_client_->connectionState() != RecorderConnectionState::Disconnected || recorder_process_->ownsRunningProcess()));
     ui_->launch_labrecorder_button->setEnabled(
-        !closing() && !recordingActiveOrPending() && !recorder_process_->ownsRunningProcess() &&
+        !closing() && remote && recorderHostIsLocal(configuration_.recorder_host) &&
+        !recordingActiveOrPending() && !recorder_process_->ownsRunningProcess() &&
         labrecorder_client_->connectionState() != RecorderConnectionState::Connected &&
         labrecorder_client_->connectionState() != RecorderConnectionState::Connecting);
 }
@@ -1091,7 +1154,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
         return;
     }
     updateConfigurationFromUi();
-    if (ui_->preview_panel) mergeStreamInventory(stream_inventory_, ui_->preview_panel->streamInventory());
+    if (ui_->preview_panel) mergeStreamInventory(stream_inventory_, ui_->preview_panel->streamInventory(), configuration_);
     pending_recording_start_ = pending_recording_start_ || continue_recording_start;
     ui_->discover_streams_button->setEnabled(false);
     ui_->stream_discovery_status_label->setText("Discovering...");
@@ -1364,10 +1427,11 @@ void BridgeWindow::onStartSession() {
     if (startingSession() || stoppingSession() || recordingActiveOrPending() || verificationActive() || closing()) return;
     saveSettings();
     sequence_ = SessionSequence::StartingSession;
+    guided_recorder_connect_requested_ = false;
     recording_stop_requested_ = false;
     appendEvent(SessionComponent::Application, EventSeverity::Information,
                 configuration_.recorder_only_mode ? "Starting a recorder-only session" : "Starting the bridge, preview, and recorder");
-    advanceGuidedStart();
+    pumpSession();
 }
 
 void BridgeWindow::advanceGuidedStart() {
@@ -1395,6 +1459,23 @@ void BridgeWindow::advanceGuidedStart() {
             return;
         }
     }
+    if (configuration_.record_every_visible_stream) {
+        if (!labrecorder_client_->isConnected()) {
+            if (!guided_recorder_connect_requested_) {
+                guided_recorder_connect_requested_ = true;
+                if (!startup_endpoint_probe_ && !labrecorder_retry_timer_->isActive()) beginLabRecorderStartup();
+            }
+            if (startup_endpoint_probe_ || labrecorder_retry_timer_->isActive() ||
+                labrecorder_client_->connectionState() == RecorderConnectionState::Connecting ||
+                recorder_process_->state() == RecorderProcessState::Launching) return;
+            sequence_ = SessionSequence::None;
+            appendEvent(SessionComponent::Recorder, EventSeverity::Error,
+                        "Session could not start because the graphical recorder is not connected. Check its address and select Connect.");
+            refreshUi();
+            return;
+        }
+        if (labrecorder_client_->operationState() != RecorderOperationState::Idle) return;
+    }
     sequence_ = SessionSequence::None;
     onStartRecording();
 }
@@ -1405,7 +1486,11 @@ void BridgeWindow::onStopSession() {
     guided_stop_wait_reported_ = false;
     setup_check_start_waiting_ = false;
     appendEvent(SessionComponent::Application, EventSeverity::Information, "Stopping the recorder, preview, and bridge");
-    advanceGuidedStop();
+    startup_endpoint_probe_ = false;
+    labrecorder_retry_timer_->stop();
+    if (!recordingActiveOrPending() && labrecorder_client_->connectionState() == RecorderConnectionState::Connecting)
+        labrecorder_client_->disconnectFromServer();
+    pumpSession();
 }
 
 void BridgeWindow::advanceGuidedStop() {

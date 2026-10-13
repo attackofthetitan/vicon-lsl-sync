@@ -202,6 +202,7 @@ private:
     bool pumping_session_ = false;
     bool session_pump_again_ = false;
     bool guided_stop_wait_reported_ = false;
+    bool guided_recorder_connect_requested_ = false;
     bool recording_stop_requested_ = false;
     vicon_lsl::gui::SessionFileState file_state_ =
         vicon_lsl::gui::SessionFileState::None;

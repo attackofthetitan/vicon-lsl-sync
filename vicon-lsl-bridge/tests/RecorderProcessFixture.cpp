@@ -7,6 +7,12 @@
 #include <thread>
 
 int main(int argc, char* argv[]) {
+    if (argc == 1 && std::filesystem::path(argv[0]).stem() == "LabRecorder") {
+        // A graphical recorder stays open until the test closes it.
+        std::string command;
+        std::getline(std::cin, command);
+        return 0;
+    }
     if (const char* survival_file = std::getenv("VICON_LSL_FIXTURE_SURVIVAL_FILE")) {
         // Writes like a recording LabRecorder until nothing reads its output any
         // more, then leaves a file to show it survived that.

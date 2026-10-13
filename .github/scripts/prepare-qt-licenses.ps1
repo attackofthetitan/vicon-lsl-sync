@@ -19,12 +19,12 @@ New-Item -ItemType Directory -Path $licenseRoot -Force -ErrorAction Stop | Out-N
 $archives = @(
     @{
         Name = "qtbase"
-        Url = "https://download.qt.io/official_releases/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.zip"
+        Url = "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.zip"
         Sha256 = "992bf7766e214a341ef793eb3665fb784787d2fd666955f5f507f4c6f1f770dd"
     },
     @{
         Name = "qtsvg"
-        Url = "https://download.qt.io/official_releases/qt/6.8/6.8.3/submodules/qtsvg-everywhere-src-6.8.3.zip"
+        Url = "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtsvg-everywhere-src-6.8.3.zip"
         Sha256 = "90643c1ba05245abedc2bcd9d4f745568dc27a1b37dd3ba861fd19d8ac6a7c46"
     })
 

@@ -44,8 +44,9 @@ const StreamIdentity* findStream(const QVector<StreamIdentity>& inventory, const
 } // namespace
 
 void testStreamInventoryMerge() {
+    const SessionConfiguration configuration = configurationWithoutBindings();
     QVector<StreamIdentity> inventory;
-    mergeStreamInventory(inventory, {stream("Markers", "a"), stream("Gaze", "b")});
+    mergeStreamInventory(inventory, {stream("Markers", "a"), stream("Gaze", "b")}, configuration);
     expect(inventory.size() == 2, "unseen streams are added to the inventory");
 
     inventory[0].selected = true;
@@ -55,7 +56,7 @@ void testStreamInventoryMerge() {
     // and Required choices must be kept.
     StreamIdentity refreshed = stream("Markers", "a");
     refreshed.channel_count = 12;
-    mergeStreamInventory(inventory, {refreshed});
+    mergeStreamInventory(inventory, {refreshed}, configuration);
     expect(inventory.size() == 2, "a stream already listed is not duplicated");
     const StreamIdentity* markers = findStream(inventory, "Markers");
     expect(markers != nullptr && markers->channel_count == 12,
@@ -125,6 +126,32 @@ void testReconcileHonoursConfiguredAndEveryVisibleStreams() {
     other = findStream(reconciled, "Other");
     expect(other != nullptr && other->selected,
            "recording every visible stream selects streams nothing asked for");
+
+    configuration.record_every_visible_stream = false;
+    configuration.recording_streams[0].source_id.clear();
+    const auto missing = reconcileDiscoveredStreams({}, {}, configuration);
+    expect(missing.size() == 1 && !missing[0].present && missing[0].selected && missing[0].required,
+           "an unseen saved requirement appears as a missing stream on the first search");
+    reconciled = reconcileDiscoveredStreams(missing, {stream("Gaze", "g")}, configuration);
+    expect(reconciled.size() == 1 && reconciled[0].present && reconciled[0].required,
+           "a real source replaces its saved name-only placeholder without a duplicate");
+    auto merged = missing;
+    mergeStreamInventory(merged, {stream("Gaze", "g")}, configuration);
+    expect(merged.size() == 1 && merged[0].present && merged[0].required,
+           "preview updates also replace missing placeholders and keep saved requirements");
+
+    const auto saved = vicon_lsl::gui::recordingBindingsForInventory(configuration.recording_streams, missing);
+    expect(saved.size() == 1 && saved[0].required,
+           "a missing saved stream remains required after saving the inventory");
+    auto deselected = missing;
+    deselected[0].selected = deselected[0].required = false;
+    expect(vicon_lsl::gui::recordingBindingsForInventory(saved, deselected).isEmpty(),
+           "explicitly clearing Record and Required removes a saved missing stream");
+
+    reconciled = reconcileDiscoveredStreams({}, {stream("Gaze", "g1"), stream("Gaze", "g2")}, configuration);
+    const auto separate = vicon_lsl::gui::recordingBindingsForInventory(configuration.recording_streams, reconciled);
+    expect(separate.size() == 2 && separate[0].source_id != separate[1].source_id,
+           "each selected source is saved when several sources match an initially name-only binding");
 }
 
 void testReconcileRetainsSelectedStreamThatVanished() {

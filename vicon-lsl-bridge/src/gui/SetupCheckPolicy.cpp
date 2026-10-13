@@ -60,7 +60,9 @@ SetupCheckResult runSetupCheck(const SetupCheckInputs& inputs,
     const bool recorder_ok = recorder_ready && inputs.recorder_idle;
     add(SessionComponent::Recorder, SetupCheckLevel::Required, recorder_ok,
         recorder_ok ? "Recorder is ready" : "Recorder is not ready",
-        "Connect the recorder and stop any current recording.");
+        inputs.record_every_visible_stream
+            ? "Connect the graphical recorder and stop any current recording."
+            : "Make sure LabRecorderCLI is installed beside the recorder program and stop any current recording.");
 
     add(SessionComponent::Path, SetupCheckLevel::Required, path.valid(),
         path.valid() ? "Recording folder is ready" : path.firstError(),
