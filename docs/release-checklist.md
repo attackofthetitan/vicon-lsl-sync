@@ -5,7 +5,10 @@
 - Version: `1.15.2`
 - Previous release: `v1.15.1`
 - Target date: 2026-10-13
-- Status: local checks passed; awaiting the pull request and tagged builds
+- Status: published and verified
+- Pull request: [#43](https://github.com/attackofthetitan/vicon-lsl-sync/pull/43)
+- Release: [v1.15.2](https://github.com/attackofthetitan/vicon-lsl-sync/releases/tag/v1.15.2)
+- Tagged build: [all checks passed](https://github.com/attackofthetitan/vicon-lsl-sync/actions/runs/38340894349)
 - Scope: LabRecorder startup and connection fixes, session cancellation, and
   preserving saved stream requirements
 
@@ -21,12 +24,13 @@
 
 ## Publishing
 
-- [ ] The pull request build passes and the patch is merged into `main`.
-- [ ] Tag `v1.15.2` points at the released commit on `main`.
-- [ ] The tagged build passes the logic tests, HoloLens tests, and desktop
+- [x] The pull request build passes and the patch is merged into `main`.
+- [x] Tag `v1.15.2` points at the released commit on `main`.
+- [x] The tagged build passes the logic tests, HoloLens tests, and desktop
   build, tests, and packaging on Linux x64, Windows x64, and Apple Silicon Mac.
-- [ ] Five platform downloads and `SHA256SUMS.txt` are published and checked.
-- [ ] The release notes contain the two brief changelog bullets.
+- [x] Five platform downloads and `SHA256SUMS.txt` are published; the downloaded
+  manifest and all five payload hashes match GitHub's published asset digests.
+- [x] The release notes contain the two brief changelog bullets.
 
 ## Not tested locally
 
