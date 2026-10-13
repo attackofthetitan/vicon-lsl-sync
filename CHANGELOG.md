@@ -2,6 +2,13 @@
 
 This file lists what changed in each release.
 
+## [1.15.2] - 2026-10-13
+
+### Fixed
+
+- Fix LabRecorder startup, connection retries, and session cancellation.
+- Preserve saved required streams and recording layout checks.
+
 ## [1.15.1] - 2026-10-01
 
 ### Fixed

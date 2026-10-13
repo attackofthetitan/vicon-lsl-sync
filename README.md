@@ -153,9 +153,21 @@ work](docs/time-and-coordinate-semantics.md) for the details.
 
 ## Record with LabRecorder
 
-The app talks to LabRecorder at `localhost:22345` unless you change it. Before
-starting its own LabRecorder, the app checks that address so it does not start
-a second one. A recorder the app started shows as **Started here**. One that was
+By default, **Start Recording** launches LabRecorderCLI with the streams you
+selected. This mode does not open the graphical recorder on startup and does
+not need **Connect**.
+
+Both programs use the same recording library and save XDF files. The graphical
+recorder is optional: use it when you want a separate recorder window or a
+recorder on another computer. Its remote-control interface cannot select
+individual streams, so use the default mode to record only the streams chosen
+in this app.
+
+In separate-window mode, the app talks to the graphical LabRecorder at
+`localhost:22345` unless you change it. Enable remote control in that recorder
+and use the same port in both windows. Before starting its own graphical
+LabRecorder, the app checks that address so it does not start a second one.
+A recorder the app started shows as **Started here**. One that was
 already running shows as **External**, and the app never closes it.
 **Disconnect / Detach** lets go of the recorder without closing it.
 
@@ -168,8 +180,9 @@ already running shows as **External**, and the app never closes it.
 
    - By default, the app uses its own copy of LabRecorder and saves only the
      streams you picked.
-   - **Use external graphical recorder** uses the LabRecorder window you already
-     have open. It refreshes the stream list right before starting and records
+   - **Record every visible stream in a separate recorder window** connects to
+     a running graphical LabRecorder, or launches it if automatic launch is
+     enabled. It refreshes the stream list right before starting and records
      every stream it can see.
 
 6. Select **Check Setup** and read every required item, warning, and note.

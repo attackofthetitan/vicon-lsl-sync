@@ -317,14 +317,15 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     labrecorder_form->addRow("Address:", endpoint);
     recorder_layout->addLayout(labrecorder_form);
 
-    ui->automatic_launch_check = makeCheck("Start the recorder when it is not already running", "Try to connect first, then start the bundled or chosen recorder in the background.");
-    ui->record_every_visible_check = makeCheck("Record every visible stream in a separate recorder window", "Control another recorder and save every stream it can see. Turn this off to choose streams here.");
+    ui->automatic_launch_check = makeCheck("Start the graphical recorder when it is not already running", "In separate-window mode, try to connect first, then start the bundled or chosen graphical recorder.");
+    ui->record_every_visible_check = makeCheck("Record every visible stream in a separate recorder window", "Control a graphical recorder and save every stream it can see. Turn this off to choose streams here and start the local recorder with Start Recording; no connection is needed.");
+    ui->record_every_visible_check->setObjectName("recordEveryVisibleStream");
     recorder_layout->addWidget(ui->automatic_launch_check);
     recorder_layout->addWidget(ui->record_every_visible_check);
 
     auto* recorder_buttons = new QGridLayout();
     ui->launch_labrecorder_button = makeButton("Launch Recorder", "Start the graphical recorder in the background.");
-    ui->connect_labrecorder_button = makeButton("Connect", "Connect to the recorder at the host and port above.");
+    ui->connect_labrecorder_button = makeButton("Connect", "Connect to the graphical recorder at the host and port above. Enable remote control in its window. Selected-stream recording needs no connection.");
     ui->detach_labrecorder_button = makeButton("Disconnect / Detach", "Disconnect from the recorder without closing it.");
     ui->refresh_streams_button = makeButton("Refresh Recorder Streams", "Ask the graphical recorder to refresh its visible stream list.");
     ui->start_recording_button = makeButton("Start Recording", "Check the setup, then start recording.", "Start recording", QKeySequence("Ctrl+R"));
