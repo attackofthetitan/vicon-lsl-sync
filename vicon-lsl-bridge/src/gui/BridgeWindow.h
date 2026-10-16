@@ -68,6 +68,7 @@ public:
     // Adds a message from outside the window, such as the installer's, to the
     // event log.
     void reportApplicationEvent(EventSeverity severity, const QString& message);
+    void requestStartupPermissions();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -156,6 +157,7 @@ private:
     void finishVerification(const vicon_lsl::gui::RecordingVerificationReport& report);
     void advanceGuidedStart();
     void advanceGuidedStop();
+    void advanceRecordingStop();
     vicon_lsl::gui::ShutdownInputs shutdownInputs() const;
     RecorderRecordingState effectiveRecordingState() const;
     RecorderOperationState effectiveOperationState() const;
@@ -204,6 +206,7 @@ private:
     bool guided_stop_wait_reported_ = false;
     bool guided_recorder_connect_requested_ = false;
     bool recording_stop_requested_ = false;
+    bool pending_recording_stop_ = false;
     vicon_lsl::gui::SessionFileState file_state_ =
         vicon_lsl::gui::SessionFileState::None;
     ComponentLifecycleState bridge_lifecycle_ = ComponentLifecycleState::Idle;

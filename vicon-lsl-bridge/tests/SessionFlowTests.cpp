@@ -3,7 +3,10 @@
 #include "gui/PreviewPanel.h"
 #include "gui/RecorderProcessController.h"
 #include "gui/StreamDiscoveryWorker.h"
+#include "gui/StartupPermissions.h"
 #include "TestSupport.h"
+
+#include <lsl_cpp.h>
 
 #include <QApplication>
 #include <QCheckBox>
@@ -240,6 +243,22 @@ TEST_CASE("Selected-stream startup neither connects nor launches the graphical r
     }
 }
 
+TEST_CASE("Startup recorder access check cannot select a stream or create a recording") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const QString output = directory.filePath("unused.xdf");
+    const QStringList arguments = StartupPermissions::recorderProbeArguments(output);
+    REQUIRE_EQ(arguments.size(), 2);
+    for (const std::string name : {"ViconMarkers", "HoloLensGaze", "vicon-permission-probe", "Other stream"}) {
+        lsl::stream_info info(name, "test", 1, 100.0, lsl::cf_double64, "startup-test");
+        REQUIRE(!info.matches_query(arguments[1].toUtf8().constData()));
+    }
+    REQUIRE(!QFileInfo::exists(output));
+    const QStringList folders = StartupPermissions::foldersToCheck(directory.filePath("new-study/nested"));
+    REQUIRE(folders.contains(directory.path()));
+    REQUIRE(!QFileInfo::exists(directory.filePath("new-study")));
+}
+
 TEST_CASE("Graphical startup reuses an existing recorder before considering a launch") {
     QTemporaryDir directory;
     REQUIRE(directory.isValid());
@@ -325,35 +344,37 @@ TEST_CASE("Connect reuses the launched GUI and switching to selected streams rel
     REQUIRE(stopped);
 }
 
-TEST_CASE("Stop Session stops the selected recorder during startup and while recording") {
-    for (const bool during_startup : {false, true}) {
-        QTemporaryDir directory;
-        REQUIRE(directory.isValid());
-        BridgeWindow window(nullptr, false, sessionSettings(directory));
-        auto* recorder = window.findChild<RecorderProcessController*>();
-        REQUIRE(recorder);
-        const QString fixture = recorderFixturePath();
-        StreamIdentity stream;
-        stream.name = "SessionTest";
-        stream.source_id = "session-flow-test";
-        REQUIRE(recorder->launchSelectedStreamRecorder(
-            fixture, directory.filePath("session-stop.xdf"), {stream}));
-        const bool ready = during_startup || waitUntil([&] {
-            return recorder->state() == RecorderProcessState::OwnedRunning;
-        });
-        QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
-        QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection);
-        const bool stopped = waitUntil([&] {
-            return !recorder->ownsRunningProcess() && sessionStopped(window);
-        });
-        const bool stop_received = recorder->boundedOutput().contains("Stop received");
-        // Clean up the child process even if the behavior under test failed.
-        recorder->endOwnedProcess();
-        waitUntil([&] { return !recorder->ownsRunningProcess(); });
-        window.close();
-        REQUIRE(ready);
-        REQUIRE(stopped);
-        REQUIRE(stop_received);
+TEST_CASE("A single Stop stops the selected recorder during startup and while recording") {
+    for (const QString action : {QString("onStopRecording"), QString("onStopSession")}) {
+        for (const bool during_startup : {false, true}) {
+            QTemporaryDir directory;
+            REQUIRE(directory.isValid());
+            BridgeWindow window(nullptr, false, sessionSettings(directory));
+            auto* recorder = window.findChild<RecorderProcessController*>();
+            REQUIRE(recorder);
+            const QString fixture = recorderFixturePath();
+            StreamIdentity stream;
+            stream.name = "SessionTest";
+            stream.source_id = "session-flow-test";
+            REQUIRE(recorder->launchSelectedStreamRecorder(
+                fixture, directory.filePath("session-stop.xdf"), {stream}));
+            const bool ready = during_startup || waitUntil([&] {
+                return recorder->state() == RecorderProcessState::OwnedRunning;
+            });
+            QMetaObject::invokeMethod(&window, action.toUtf8().constData(), Qt::DirectConnection);
+            const bool stopped = waitUntil([&] {
+                return !recorder->ownsRunningProcess() &&
+                       (action == "onStopRecording" || sessionStopped(window));
+            });
+            const bool stop_received = recorder->boundedOutput().contains("Stop received");
+            // Clean up the child process even if the behavior under test failed.
+            recorder->endOwnedProcess();
+            waitUntil([&] { return !recorder->ownsRunningProcess(); });
+            window.close();
+            REQUIRE(ready);
+            REQUIRE(stopped);
+            REQUIRE(stop_received);
+        }
     }
 }
 
@@ -488,6 +509,88 @@ TEST_CASE("Stop Session cancels graphical startup without reconnecting afterward
     REQUIRE(stopped);
     REQUIRE(!reconnected);
     REQUIRE(no_discovery);
+}
+
+TEST_CASE("One Stop Recording click waits for Start and sends exactly one Stop") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    REQUIRE(recorder.accept());
+    REQUIRE(startRecordingAnyway(window));
+    REQUIRE_EQ(recorder.nextCommand(), QString("update"));
+    QMetaObject::invokeMethod(&window, "onStopRecording", Qt::DirectConnection);
+    QMetaObject::invokeMethod(&window, "onStopRecording", Qt::DirectConnection);
+    const bool held = !recorder.hasCommand(100);
+    const bool disabled = !recorderButton(window, "Stop Recording")->isEnabled();
+    recorder.reply();
+    for (int command = 0; command < 3; ++command) {
+        REQUIRE(!recorder.nextCommand().isEmpty());
+        recorder.reply();
+    }
+    const QString stop = recorder.nextCommand();
+    recorder.reply();
+    const bool once = !recorder.hasCommand(200);
+    window.close();
+    REQUIRE(held);
+    REQUIRE(disabled);
+    REQUIRE_EQ(stop, QString("stop"));
+    REQUIRE(once);
+}
+
+TEST_CASE("One Stop Recording click survives a disconnected recorder") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    auto* client = window.findChild<LabRecorderClient*>();
+    REQUIRE(recorder.accept());
+    REQUIRE(startRecordingAnyway(window));
+    for (int command = 0; command < 4; ++command) {
+        REQUIRE(!recorder.nextCommand().isEmpty());
+        recorder.reply();
+    }
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+    recorder.drop();
+    REQUIRE(waitUntil([&] { return !client->isConnected(); }));
+    QMetaObject::invokeMethod(&window, "onStopRecording", Qt::DirectConnection);
+    QMetaObject::invokeMethod(&window, "onConnectLabRecorder", Qt::DirectConnection);
+    REQUIRE(recorder.accept());
+    const QString stop = recorder.nextCommand();
+    recorder.reply();
+    const bool once = !recorder.hasCommand(200);
+    window.close();
+    REQUIRE_EQ(stop, QString("stop"));
+    REQUIRE(once);
+}
+
+TEST_CASE("Stop Recording is retried after its acknowledgement is lost") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    auto* client = window.findChild<LabRecorderClient*>();
+    REQUIRE(recorder.accept());
+    REQUIRE(startRecordingAnyway(window));
+    for (int command = 0; command < 4; ++command) {
+        REQUIRE(!recorder.nextCommand().isEmpty());
+        recorder.reply();
+    }
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+    QMetaObject::invokeMethod(&window, "onStopRecording", Qt::DirectConnection);
+    REQUIRE_EQ(recorder.nextCommand(), QString("stop"));
+    recorder.drop();
+    REQUIRE(waitUntil([&] { return !client->isConnected(); }));
+    QMetaObject::invokeMethod(&window, "onConnectLabRecorder", Qt::DirectConnection);
+    REQUIRE(recorder.accept());
+    const QString retried_stop = recorder.nextCommand();
+    recorder.reply();
+    const bool stopped = waitUntil([&] { return client->recordingState() == RecorderRecordingState::Stopped; });
+    const bool once = !recorder.hasCommand(200);
+    window.close();
+    REQUIRE_EQ(retried_stop, QString("stop"));
+    REQUIRE(stopped);
+    REQUIRE(once);
 }
 
 TEST_CASE("Stop Session during a LabRecorder Start waits for it and then sends one Stop") {

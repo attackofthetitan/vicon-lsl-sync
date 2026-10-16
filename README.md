@@ -9,6 +9,8 @@ The project also has Unity scripts that send HoloLens 2 eye-gaze data straight t
 1. Download the latest package from the [Releases page](https://github.com/attackofthetitan/vicon-lsl-sync/releases/latest).
 2. Start your Vicon DataStream server.
 3. Run `vicon-lsl-bridge-gui`.
+   Allow the network and folder access requested during startup. The app checks
+   access for the bridge, preview, and recorder before you begin a session.
 4. Choose the study folder and fill in the session details, then select **Start Session**.
 5. Look over the setup check. Fix anything marked as required. If you want to
    record anyway, type a reason and choose **Record Anyway**.
@@ -43,6 +45,12 @@ Unpack the archive and run `./vicon-lsl-bridge-gui` from its folder. The archive
 carries its own Qt, liblsl, and LabRecorder, so nothing else needs installing on
 most desktops. If the app says Qt could not load the `xcb` platform plugin,
 install the X11 library it names, usually with `sudo apt install libxcb-cursor0`.
+
+Startup checks exercise local network access for both the app and its recorder.
+On macOS they also check Documents, Desktop, Downloads, and the saved study
+folder. Denied access appears in the event log. A folder or drive chosen later
+may still need its own system permission; previously denied access must be
+enabled in system settings.
 
 ## Streams
 
@@ -85,6 +93,11 @@ quietly pick one.
 Presets save your recording setup. They do not save the window size, layout, the
 open tab, or recent files. Settings from older versions of the app are not
 brought over.
+
+The preview combines updates to match the display rate. Its **preview updates
+replaced** and **combined updates** counters can rise during a healthy recording;
+they count display updates, not lost recording samples. The bridge buffers
+Vicon frames through brief processing delays and sends every frame it receives.
 
 The built-in XDF reader is for a quick visual check. Use [pyxdf](https://github.com/xdf-modules/pyxdf) or [xdf-Matlab](https://github.com/xdf-modules/xdf-Matlab) for real analysis.
 
@@ -216,7 +229,10 @@ Before you record, check that:
 
 If a folder, value, file name pattern, or choice is wrong, the app says what is
 wrong and how to fix it. A recorder error does not stop the Vicon bridge.
-Pressing Start or Stop again while one is already running does nothing. If you
+One Stop click queues the request if the recorder is still starting or busy.
+The display switches to **STOPPING** while the recorder finishes the file. If
+its connection was lost, select **Connect** and the queued Stop is sent when
+the connection returns. Pressing Start or Stop again while one is already running does nothing. If you
 close the app while Start is in progress, it either cancels Start before it is
 sent or sends one last Stop.
 

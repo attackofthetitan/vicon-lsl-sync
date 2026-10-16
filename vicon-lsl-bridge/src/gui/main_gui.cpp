@@ -44,6 +44,9 @@ int main(int argc, char* argv[]) {
         window.resize(QSize(1440, 900).boundedTo(usable));
     }
     window.show();
+    if (!verification_requested) {
+        QTimer::singleShot(0, &window, &BridgeWindow::requestStartupPermissions);
+    }
 #ifdef Q_OS_MACOS
     if (!verification_requested) {
         vicon_lsl::gui::ejectImages(

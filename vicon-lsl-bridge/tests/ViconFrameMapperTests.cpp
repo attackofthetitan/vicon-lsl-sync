@@ -1,4 +1,5 @@
 #include "ViconFrameMapper.h"
+#include "ViconFrameClock.h"
 #include "TestSupport.h"
 
 #include <cmath>
@@ -154,6 +155,45 @@ bool differs(const vicon_lsl::ViconLayout& left, const vicon_lsl::ViconLayout& r
 }
 
 } // namespace
+
+TEST_CASE("Buffered Vicon frames retain camera spacing after a receipt stall") {
+    vicon_lsl::ViconFrameClock clock;
+    REQUIRE(clock.timestamp(1000, 100.0, 10.0) == 10.0);
+    double previous = 10.0;
+    for (unsigned int frame = 1001; frame <= 1020; ++frame) {
+        // Twenty frames arrive together after a 200 ms scheduling delay.
+        const double timestamp = clock.timestamp(frame, 100.0, 10.2);
+        REQUIRE(std::abs(timestamp - previous - 0.01) < 0.000011);
+        previous = timestamp;
+    }
+    REQUIRE(std::abs(previous - 10.2) < 0.00021);
+}
+
+TEST_CASE("Vicon frame clock preserves losses and follows slow clock drift") {
+    vicon_lsl::ViconFrameClock clock;
+    clock.timestamp(100, 100.0, 1.0);
+    REQUIRE(std::abs(clock.timestamp(105, 100.0, 1.05) - 1.05) < 1e-12);
+    double timestamp = 1.05;
+    for (unsigned int frame = 106; frame <= 10105; ++frame) {
+        const double estimate = 1.05 + (frame - 105) * 0.010001;
+        timestamp = clock.timestamp(frame, 100.0, estimate);
+        REQUIRE(std::abs(timestamp - estimate) < 1e-9);
+    }
+}
+
+TEST_CASE("Vicon frame clock reanchors on reconnect rate changes and counter resets") {
+    vicon_lsl::ViconFrameClock clock;
+    clock.timestamp(100, 100.0, 1.0);
+    REQUIRE(clock.timestamp(1, 100.0, 2.0) == 2.0);
+    REQUIRE(clock.timestamp(2, 200.0, 3.0) == 3.0);
+    clock.reset();
+    REQUIRE(clock.timestamp(300, 200.0, 8.0) == 8.0);
+    REQUIRE(clock.timestamp(301, 0.0, 9.0) == 9.0);
+    REQUIRE(clock.timestamp(302, 100.0, 10.0) == 10.0);
+    clock.reset();
+    clock.timestamp(0xffffffffU, 100.0, 20.0);
+    REQUIRE(std::abs(clock.timestamp(0, 100.0, 20.01) - 20.01) < 1e-12);
+}
 
 TEST_CASE("Vicon frame timestamp applies valid latency") {
     REQUIRE(std::abs(vicon_lsl::viconFrameTimestamp(100.0, 2.5, true) - 97.5) < 1e-12);

@@ -244,10 +244,10 @@ PreviewPanel::PreviewPanel(QWidget* parent, std::shared_ptr<QSettings> settings)
     play_recording_button_ = new QPushButton("Play Recording");
     play_recording_button_->setEnabled(false);
     status_label_ = new ElidingLabel("Preview stopped");
-    auto* delivery_metrics = new ElidingLabel("skipped preview frames 0 | combined updates 0 | delay 0 ms");
+    auto* delivery_metrics = new ElidingLabel("preview updates replaced 0 | combined updates 0 | delay 0 ms");
     // Explain the numbers rather than repeat them in the tooltip.
     delivery_metrics->setAutomaticToolTip(false);
-    delivery_metrics->setToolTip("Older preview updates are skipped so the display stays current.");
+    delivery_metrics->setToolTip("The preview combines updates to match the display rate. These counters do not count lost recording samples.");
     delivery_metrics_label_ = delivery_metrics;
     auto* fit_view_button = makeButton("Fit View", "Fit the camera to all currently visible data.");
     auto* reset_camera_button = makeButton("Reset Camera", "Restore the default camera angle, zoom, and fit.");
@@ -642,12 +642,12 @@ void PreviewPanel::displayLatestLiveFrame() {
     if (worker_->takeLatestFrame(frame, metrics)) widget_->setFrame(std::move(frame));
     const bool late = metrics.display_latency_ms > kMaximumLivePreviewDelayMs;
     delivery_metrics_label_->setText(
-        QString(late ? "PREVIEW DELAYED | skipped preview frames " : "skipped preview frames ") +
+        QString(late ? "PREVIEW DELAYED | preview updates replaced " : "preview updates replaced ") +
         QString::number(metrics.replaced_before_display) + " | combined updates " +
         QString::number(metrics.coalesced_input_samples) + " | delay " + QString::number(metrics.display_latency_ms) + " ms");
     delivery_metrics_label_->setToolTip(late
         ? "Preview delay is above the " + QString::number(kMaximumLivePreviewDelayMs) + " ms target; source-rate measurements are unaffected."
-        : "Preview updates are arriving within the delay target.");
+        : "The preview combines updates to match the display rate. These counters do not count lost recording samples.");
     emit deliveryMetricsChanged(metrics);
 }
 

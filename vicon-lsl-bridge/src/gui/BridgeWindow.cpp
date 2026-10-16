@@ -7,6 +7,7 @@
 #include "gui/StreamDiscoveryWorker.h"
 #include "gui/SetupCheckPolicy.h"
 #include "gui/StreamInventory.h"
+#include "gui/StartupPermissions.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -32,6 +33,7 @@
 #include <QNetworkInterface>
 #include <QPlainTextEdit>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QScrollBar>
@@ -241,6 +243,28 @@ void BridgeWindow::reportApplicationEvent(EventSeverity severity, const QString&
     appendEvent(SessionComponent::Application, severity, message);
 }
 
+void BridgeWindow::requestStartupPermissions() {
+    auto* checks = new StartupPermissions(configuration_.recording_root, resolveSelectedStreamExecutable(), this);
+    auto* progress = new QProgressDialog("Preparing network and folder access...", "Cancel", 0, 0, this);
+    progress->setWindowTitle("Startup permissions");
+    progress->setWindowModality(Qt::ApplicationModal);
+    progress->setMinimumDuration(0);
+    connect(checks, &StartupPermissions::progress, progress, &QProgressDialog::setLabelText);
+    connect(checks, &StartupPermissions::warning, this, [this](const QString& message) {
+        appendEvent(SessionComponent::Application, EventSeverity::Warning, message);
+    });
+    connect(progress, &QProgressDialog::canceled, checks, &QThread::requestInterruption);
+    connect(checks, &QThread::finished, this, [this, checks, progress]() {
+        progress->close();
+        progress->deleteLater();
+        checks->deleteLater();
+        validateRecordingPath();
+        appendEvent(SessionComponent::Application, EventSeverity::Information, "Startup permission checks finished");
+    });
+    progress->show();
+    checks->start();
+}
+
 template <typename Handler>
 void BridgeWindow::onEdited(std::initializer_list<QWidget*> widgets, Handler handler) {
     for (QWidget* widget : widgets) {
@@ -367,7 +391,6 @@ void BridgeWindow::connectSignals() {
     });
     connect(labrecorder_client_, &LabRecorderClient::recordingStateChanged, this, [this](RecorderRecordingState state) {
         if (state == RecorderRecordingState::Recording) {
-            recording_stop_requested_ = false;
             recording_elapsed_.restart();
             appendEvent(SessionComponent::Recorder, EventSeverity::Information, "Recorder confirmed that recording started");
         } else if (state == RecorderRecordingState::Stopped && recording_stop_requested_) {
@@ -390,7 +413,17 @@ void BridgeWindow::connectSignals() {
     connect(labrecorder_client_, &LabRecorderClient::commandFinished, this, [this](const QString& op, bool ok, const QString& msg) {
         ui_->labrecorder_operation_progress->setValue(ui_->labrecorder_operation_progress->maximum());
         setLabRecorderStatus(ok ? op + " completed" : op + " failed: " + msg, ok ? EventSeverity::Information : EventSeverity::Error);
-        if (op.contains("stop recording", Qt::CaseInsensitive) && ok) requestVerification();
+        if (op.contains("stop recording", Qt::CaseInsensitive)) {
+            if (ok) {
+                requestVerification();
+            } else if (recording_stop_requested_ && !closing()) {
+                // A write or acknowledgement may be lost. Retain the user's
+                // request so reconnecting sends Stop again instead of leaving
+                // the button disabled with no command left to finish.
+                recording_stop_requested_ = false;
+                pending_recording_stop_ = true;
+            }
+        }
         refreshUi();
         pumpSession();
     });
@@ -408,7 +441,6 @@ void BridgeWindow::connectSignals() {
     });
     connect(recorder_process_, &RecorderProcessController::recordingStateChanged, this, [this](RecorderRecordingState s) {
         if (s == RecorderRecordingState::Recording) {
-            recording_stop_requested_ = false;
             recording_elapsed_.restart();
             appendEvent(SessionComponent::Recorder, EventSeverity::Information, "Selected-stream recorder is recording");
         } else if (s == RecorderRecordingState::Stopped) {
@@ -718,9 +750,10 @@ void BridgeWindow::updateDashboard() {
     const ComponentLifecycleState prev = ui_->preview_panel ? ui_->preview_panel->lifecycleState() : ComponentLifecycleState::Idle;
     const SessionCalibrationState cal = ui_->preview_panel ? ui_->preview_panel->sessionCalibrationState() : SessionCalibrationState::Uncalibrated;
 
-    if (rec == RecorderRecordingState::Recording) ui_->recording_indicator_label->setText("RECORDING");
+    if (pending_recording_stop_ || recording_stop_requested_ || op == RecorderOperationState::Stopping)
+        ui_->recording_indicator_label->setText("STOPPING");
+    else if (rec == RecorderRecordingState::Recording) ui_->recording_indicator_label->setText("RECORDING");
     else if (op == RecorderOperationState::Starting) ui_->recording_indicator_label->setText("STARTING");
-    else if (op == RecorderOperationState::Stopping || recording_stop_requested_) ui_->recording_indicator_label->setText("STOPPING");
     else ui_->recording_indicator_label->setText("NOT RECORDING");
 
     ui_->recording_elapsed_label->setText(
@@ -746,7 +779,7 @@ void BridgeWindow::updateDashboard() {
         ? configuration_.recorder_host + ":" + QString::number(configuration_.recorder_port)
         : "Local recorder");
     ui_->storage_label->setText(gibText(path_result_.available_storage_bytes));
-    ui_->drop_label->setText(QString::number(preview_replaced_frames_) + " frame(s) skipped, " +
+    ui_->drop_label->setText(QString::number(preview_replaced_frames_) + " preview update(s) replaced, " +
                              QString::number(preview_coalesced_samples_) + " update(s) combined, " +
                              QString::number(preview_latency_ms_) + " ms behind");
 
@@ -908,7 +941,7 @@ void BridgeWindow::onRefreshLabRecorder() {
 }
 
 void BridgeWindow::scheduleFilenameSync() {
-    if (!filename_sync_timer_ || closing()) return;
+    if (!filename_sync_timer_ || closing() || pending_recording_stop_ || recording_stop_requested_) return;
     if (configuration_.record_every_visible_stream && path_result_.valid() && recorderCanStart(*labrecorder_client_)) filename_sync_timer_->start();
     else filename_sync_timer_->stop();
 }
@@ -941,7 +974,7 @@ RecorderOperationState BridgeWindow::effectiveOperationState() const {
 bool BridgeWindow::recordingActiveOrPending() const {
     const RecorderRecordingState rec = effectiveRecordingState();
     const RecorderOperationState op = effectiveOperationState();
-    return pending_recording_start_ || rec == RecorderRecordingState::Recording || op == RecorderOperationState::Starting ||
+    return pending_recording_start_ || pending_recording_stop_ || rec == RecorderRecordingState::Recording || op == RecorderOperationState::Starting ||
            op == RecorderOperationState::Stopping || labrecorder_client_->startMayHaveReachedServer() ||
            labrecorder_client_->desiredRecordingState() == RecorderRecordingState::Recording;
 }
@@ -972,7 +1005,8 @@ void BridgeWindow::updateRecordingButtons() {
     ui_->refresh_streams_button->setEnabled(!closing() && remote && recorderCanStart(*labrecorder_client_));
     ui_->start_recording_button->setEnabled(!closing() && !stoppingSession() &&
                                            !recordingActiveOrPending() && !verificationActive());
-    ui_->stop_recording_button->setEnabled(!closing() && recordingActiveOrPending());
+    ui_->stop_recording_button->setEnabled(!closing() && recordingActiveOrPending() &&
+                                          !pending_recording_stop_ && !recording_stop_requested_);
     ui_->connect_labrecorder_button->setEnabled(
         !closing() && remote && labrecorder_client_->connectionState() != RecorderConnectionState::Connecting &&
         (!recordingActiveOrPending() || labrecorder_client_->connectionState() == RecorderConnectionState::Disconnected ||
@@ -1007,6 +1041,7 @@ void BridgeWindow::pumpSession() {
     pumping_session_ = true;
     for (int pass = 0; pass < 4; ++pass) {
         session_pump_again_ = false;
+        if (!closing()) advanceRecordingStop();
         if (startingSession()) advanceGuidedStart();
         if (stoppingSession()) advanceGuidedStop();
         if (closing()) updateShutdownStatus();
@@ -1401,6 +1436,7 @@ void BridgeWindow::beginRecordingAfterSetupCheck() {
 }
 
 void BridgeWindow::onStopRecording() {
+    if (pending_recording_stop_ || recording_stop_requested_) return;
     if (!recordingActiveOrPending()) {
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning, "Stop ignored because nothing is recording");
         return;
@@ -1415,11 +1451,29 @@ void BridgeWindow::onStopRecording() {
         pumpSession();
         return;
     }
+    pending_recording_stop_ = true;
+    filename_sync_timer_->stop();
+    appendEvent(SessionComponent::Recorder, EventSeverity::Information,
+                "Stop requested; waiting for the recorder to finish its current command");
+    if (!recorder_process_->ownsRunningProcess() && !labrecorder_client_->isConnected()) {
+        appendEvent(SessionComponent::Recorder, EventSeverity::Warning,
+                    "Stop is queued. Select Connect to reconnect to the recorder; it will then stop automatically.");
+    }
+    pumpSession();
+    refreshUi();
+}
+
+void BridgeWindow::advanceRecordingStop() {
+    if (!pending_recording_stop_ || !recorderCanAcceptStop()) return;
+    // Set these before calling the recorder: it can emit state changes inside
+    // the call, which immediately run the session pump again.
+    pending_recording_stop_ = false;
+    recording_stop_requested_ = true;
     const bool accepted = (recorder_process_->kind() == RecorderProcessKind::SelectedStreamRecorder && recorder_process_->ownsRunningProcess())
         ? recorder_process_->stopSelectedStreamRecording() : labrecorder_client_->stopRecording();
-    if (accepted) recording_stop_requested_ = true;
-    appendEvent(SessionComponent::Recorder, accepted ? EventSeverity::Information : EventSeverity::Warning,
-                accepted ? "The recorder was asked to stop" : "The recorder is already stopping or could not stop");
+    if (!accepted) recording_stop_requested_ = false;
+    appendEvent(SessionComponent::Recorder, accepted ? EventSeverity::Information : EventSeverity::Error,
+                accepted ? "The recorder was asked to stop; finishing the recording file" : "The recorder could not accept Stop");
     refreshUi();
 }
 

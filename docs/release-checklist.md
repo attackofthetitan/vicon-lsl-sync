@@ -1,39 +1,35 @@
-# v1.15.2 release checklist
+# v1.15.3 release checklist
 
 ## Release details
 
-- Version: `1.15.2`
-- Previous release: `v1.15.1`
-- Target date: 2026-10-13
-- Status: published and verified
-- Pull request: [#43](https://github.com/attackofthetitan/vicon-lsl-sync/pull/43)
-- Release: [v1.15.2](https://github.com/attackofthetitan/vicon-lsl-sync/releases/tag/v1.15.2)
-- Tagged build: [all checks passed](https://github.com/attackofthetitan/vicon-lsl-sync/actions/runs/38340894349)
-- Scope: LabRecorder startup and connection fixes, session cancellation, and
-  preserving saved stream requirements
+- Version: `1.15.3`
+- Previous release: `v1.15.2`
+- Target date: 2026-10-17
+- Status: local checks passed; publishing starts when the release tag is pushed
+- Release body: empty, as requested
+- The tagged build and publication will not be monitored for this release.
 
 ## Before publishing
 
-- [x] The CMake version and dated changelog section both say `1.15.2`.
-- [x] The recorder and GUI regression suites pass on Linux with Qt 6.4.2,
+- [x] The CMake version and dated changelog section both say `1.15.3`.
+- [x] The recorder and GUI regression suites pass on Windows with Qt 6.8.3,
   including the scaled GUI run.
-- [x] The full desktop build and all six test suites pass locally on Linux.
+- [x] The full desktop build and all six test suites pass locally on Windows.
 - [x] Generated stream files pass `tools/generate_stream_contracts.py --check`.
 - [x] The release version passes `.github/scripts/verify-release-version.sh`.
 - [x] `git diff --check` finds nothing.
 
 ## Publishing
 
-- [x] The pull request build passes and the patch is merged into `main`.
-- [x] Tag `v1.15.2` points at the released commit on `main`.
-- [x] The tagged build passes the logic tests, HoloLens tests, and desktop
+- [ ] The patch is merged into `main` through a pull request.
+- [ ] Tag `v1.15.3` points at the released commit on `main`.
+- [ ] The tagged build passes the logic tests, HoloLens tests, and desktop
   build, tests, and packaging on Linux x64, Windows x64, and Apple Silicon Mac.
-- [x] Five platform downloads and `SHA256SUMS.txt` are published; the downloaded
-  manifest and all five payload hashes match GitHub's published asset digests.
-- [x] The release notes contain the two brief changelog bullets.
+- [ ] Five platform downloads and `SHA256SUMS.txt` are published.
+- [x] The release workflow creates the release with an empty notes body.
 
 ## Not tested locally
 
-- Windows and Mac builds and packaging run on the build server.
+- Linux and Mac builds, and all platform packaging, run on the build server.
 - Real Vicon hardware, a HoloLens headset, and a physical recording session
   were not tested.

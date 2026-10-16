@@ -29,7 +29,9 @@ void appendTimingMetadata(lsl::stream_info& info, double stream_rate) {
     acquisition.append_child_value("timestamp", "estimated_acquisition_time");
     acquisition.append_child_value("clock_domain", "lsl_local_clock");
     acquisition.append_child_value(
-        "timestamp_estimator", "immediate_receipt_minus_valid_pipeline_latency");
+        "timestamp_estimator", "frame_number_cadence_anchored_to_receipt_minus_pipeline_latency");
+    acquisition.append_child_value("client_buffer_frames", "256");
+    acquisition.append_child_value("clock_drift_slew_limit_ppm", "1000");
     acquisition.append_child_value("timestamp_fallback", "immediate_receipt_time");
     acquisition.append_child_value("latency_correction", "GetLatencyTotal_pipeline_estimate");
     acquisition.append_child_value(

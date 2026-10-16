@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(vicon-lsl-bridge VERSION 1.15.2 LANGUAGES CXX)
+project(vicon-lsl-bridge VERSION 1.15.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -184,6 +184,7 @@ if(VICON_LSL_BRIDGE_BUILD_RUNTIME)
                 src/gui/SetupCheckPolicy.cpp
                 src/gui/StreamDiscoveryWorker.cpp
                 src/gui/StreamInventory.cpp
+                src/gui/StartupPermissions.cpp
                 src/gui/PreviewPanel.cpp
                 src/gui/PreviewFileLoader.cpp
                 src/gui/PreviewStreamWorker.cpp
