@@ -255,6 +255,10 @@ bool ViconClient::connect() {
         return false;
     }
 
+    // The SDK defaults to one frame and discards older frames whenever the
+    // bridge is briefly busy (for example, creating LSL outlets). Keep a bounded
+    // FIFO and drain every frame; only the preview may coalesce updates.
+    client_.SetBufferSize(256);
     if (!checkSetupResult("SetStreamMode(ServerPush)",
                           client_.SetStreamMode(SDK::StreamMode::ServerPush),
                           client_) ||
@@ -267,6 +271,7 @@ bool ViconClient::connect() {
     frame_number_ = 0;
     frame_timestamp_ = 0.0;
     frame_rate_ = 0.0;
+    frame_clock_.reset();
     std::cout << "Connected to " << server_address_ << std::endl;
     return true;
 }
@@ -306,7 +311,7 @@ bool ViconClient::getFrame() {
 
     const double receipt_timestamp = lsl::local_clock();
     const auto latency = client_.GetLatencyTotal();
-    frame_timestamp_ = vicon_lsl::viconFrameTimestamp(
+    const double acquisition_estimate = vicon_lsl::viconFrameTimestamp(
         receipt_timestamp,
         latency.Total,
         latency.Result == SDK::Result::Success);
@@ -324,6 +329,7 @@ bool ViconClient::getFrame() {
         std::isfinite(rate.FrameRateHz) && rate.FrameRateHz > 0.0) {
         frame_rate_ = rate.FrameRateHz;
     }
+    frame_timestamp_ = frame_clock_.timestamp(frame_number_, frame_rate_, acquisition_estimate);
     return true;
 }
 

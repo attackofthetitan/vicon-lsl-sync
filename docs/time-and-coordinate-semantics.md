@@ -38,7 +38,18 @@ After Vicon's `GetFrame()` succeeds:
 
 5. If `receipt` itself is not finite, the candidate is `NaN`. The next step then falls back to a clock reading of its own, which only helps if that one is finite.
 
-This is only a best guess at when Vicon captured the frame. It leaves out the time the data spent on the network. Do not call it an exact capture time.
+The SDK keeps up to 256 frames instead of its default single frame. This lets
+the bridge catch up after a brief delay without discarding the frames that
+arrived meanwhile. Its reported latency does not include time in that queue.
+`ViconFrameClock` anchors the first frame to the candidate above, then advances
+by the frame-number difference divided by the camera rate. It follows changes
+in the receipt estimate at at most 1,000 ppm, so draining a queue does not give
+old frames nearly identical timestamps. Missing frame numbers remain time gaps;
+no samples are synthesized. Reconnection, a counter reset, or a rate change
+starts a new anchor. The monotonic rule below still covers reconnections.
+
+This remains an acquisition-time estimate, subject to pipeline estimates,
+network delay, and camera clock drift. It is not an exact capture time.
 
 ### Keep time moving forward
 
@@ -65,7 +76,9 @@ Both Vicon streams use these exact values:
 
 - `timestamp = estimated_acquisition_time`
 - `clock_domain = lsl_local_clock`
-- `timestamp_estimator = immediate_receipt_minus_valid_pipeline_latency`
+- `timestamp_estimator = frame_number_cadence_anchored_to_receipt_minus_pipeline_latency`
+- `client_buffer_frames = 256`
+- `clock_drift_slew_limit_ppm = 1000`
 - `timestamp_fallback = immediate_receipt_time`
 - `latency_correction = GetLatencyTotal_pipeline_estimate`
 - `timestamp_accuracy = acquisition_estimate_not_capture_accurate`

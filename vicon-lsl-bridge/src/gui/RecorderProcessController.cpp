@@ -56,10 +56,21 @@ bool RecorderProcessController::stopSelectedStreamRecording() {
     if (!process_ || process_->state() == QProcess::NotRunning ||
         kind_ != RecorderProcessKind::SelectedStreamRecorder || stop_requested_) return false;
     stop_requested_ = true;
-    process_->write("\n");
-    process_->closeWriteChannel();
+    // QProcess may still be creating its pipes. Keep Stop pending until
+    // started() instead of losing the newline during process startup.
+    sendStopInput();
     emit recordingStateChanged(RecorderRecordingState::Unknown);
     return true;
+}
+
+void RecorderProcessController::sendStopInput() {
+    if (!process_ || process_->state() != QProcess::Running || stop_input_sent_) return;
+    if (process_->write("\n") != 1) {
+        emit outputLine(EventSeverity::Error, "Could not send Stop to the recorder");
+        return;
+    }
+    stop_input_sent_ = true;
+    process_->closeWriteChannel();
 }
 
 void RecorderProcessController::endOwnedProcess() {
@@ -192,7 +203,13 @@ void RecorderProcessController::drainOutput() {
 void RecorderProcessController::onStarted() {
     setState(RecorderProcessState::OwnedRunning,
              kind_ == RecorderProcessKind::SelectedStreamRecorder ? "Selected-stream recorder started" : "Recorder started");
-    if (kind_ == RecorderProcessKind::SelectedStreamRecorder) emit recordingStateChanged(RecorderRecordingState::Recording);
+    if (kind_ == RecorderProcessKind::SelectedStreamRecorder) {
+        if (stop_requested_) {
+            sendStopInput();
+        } else {
+            emit recordingStateChanged(RecorderRecordingState::Recording);
+        }
+    }
 }
 
 void RecorderProcessController::onError(QProcess::ProcessError) {
@@ -220,7 +237,7 @@ void RecorderProcessController::onFinished(int exit_code, QProcess::ExitStatus s
         process_ = nullptr;
     }
     kind_ = RecorderProcessKind::None;
-    stop_requested_ = ending_owned_process_ = false;
+    stop_requested_ = stop_input_sent_ = ending_owned_process_ = false;
 }
 
 void RecorderProcessController::onTerminateDeadline() {
@@ -265,7 +282,7 @@ bool RecorderProcessController::startProcess(RecorderProcessKind kind, const QSt
     connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &RecorderProcessController::onFinished);
     kind_ = kind;
-    stop_requested_ = ending_owned_process_ = false;
+    stop_requested_ = stop_input_sent_ = ending_owned_process_ = false;
     output_buffer_.clear();
     partial_stdout_line_.clear();
     partial_stderr_line_.clear();

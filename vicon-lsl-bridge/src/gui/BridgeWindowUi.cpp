@@ -88,8 +88,11 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     ui->recorder_owner_label = makeStateValue("Started elsewhere or unavailable", "Who started the recorder");
     ui->recorder_endpoint_label = makeStateValue("localhost:22345", "Recorder address");
     ui->storage_label = makeStateValue("unknown", "Available recording storage");
-    ui->drop_label = makeStateValue("0 frame(s) skipped, 0 update(s) combined, 0 ms behind",
-                                    "Preview update status");
+    auto* delivery_status = makeStateValue("0 preview update(s) replaced, 0 update(s) combined, 0 ms behind",
+                                           "Preview update status");
+    delivery_status->setAutomaticToolTip(false);
+    ui->drop_label = delivery_status;
+    ui->drop_label->setToolTip("The preview combines updates to match the display rate. These counters do not count lost recording samples.");
 
     // Labels go in even columns and values in odd columns, so every row lines up.
     addField(db_layout, 2, 0, "Bridge:", ui->bridge_state_label);

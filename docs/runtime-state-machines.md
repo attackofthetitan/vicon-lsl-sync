@@ -49,7 +49,7 @@ stateDiagram-v2
 1. `run()` makes one `ViconTimestampState` before the reconnect loop starts.
 2. `connectWithRetry()` reports `Connecting` before the first try.
 3. After a failed try, report how long it will wait, then wait in steps of no more than 100 ms.
-4. Once connected, set `ServerPush` mode and turn on segment and marker data.
+4. Once connected, set a 256-frame SDK buffer, set `ServerPush` mode, and turn on segment and marker data.
 5. If any setup call fails, disconnect and count it as a failed connection.
 6. If Stop comes in while connecting or waiting, close any connection that was made and report `Stopped`.
 
@@ -226,6 +226,12 @@ The buttons depend on the connection, confirmed state, wanted state, current
 action, path check, and whether the window is closing, all together. Only one
 command group can run at a time. A second Start or Stop, a refresh, or a file
 name change is refused while a group is running.
+
+The window retains a Stop Recording request made during Start or another
+command, and sends it once the recorder is idle. A lost connection retains the
+request until Connect restores it. The Stop button is disabled and the display
+shows Stopping while that request is waiting or the file is finishing. A local
+recorder still starting receives its Stop newline once its input pipe is ready.
 
 While the confirmed state is `Unknown`, you can still Start or Stop to recover,
 but only when connected and nothing else is running. The window always shows

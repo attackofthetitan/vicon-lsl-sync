@@ -66,6 +66,7 @@ private:
                       const QStringList& arguments,
                       QString* error);
     void setState(RecorderProcessState state, const QString& detail);
+    void sendStopInput();
     void appendOutput(const QByteArray& bytes, EventSeverity severity, QByteArray& partial_line);
     static QString queryLiteral(const QString& value, QString* error);
 
@@ -77,6 +78,7 @@ private:
     QByteArray partial_stdout_line_;
     QByteArray partial_stderr_line_;
     bool stop_requested_ = false;
+    bool stop_input_sent_ = false;
     bool ending_owned_process_ = false;
 };
 

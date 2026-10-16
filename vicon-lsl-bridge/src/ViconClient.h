@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ViconLSLBridgeInternal.h"
+#include "ViconFrameClock.h"
 
 #include <DataStreamClient.h>
 
@@ -45,4 +46,5 @@ private:
     unsigned int frame_number_ = 0;
     double frame_timestamp_ = 0.0;
     double frame_rate_ = 0.0;
+    vicon_lsl::ViconFrameClock frame_clock_;
 };
