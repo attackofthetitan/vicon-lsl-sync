@@ -654,7 +654,9 @@ TEST_CASE("A quick cancel and retry discovers selected streams before recording"
     StreamBinding binding;
     binding.name = QString::fromStdString(info.name());
     binding.source_id = QString::fromStdString(info.source_id());
-    configuration.recording_streams = {binding};
+    StreamBinding not_running;
+    not_running.name = "NotRunning";
+    configuration.recording_streams = {binding, not_running};
     SessionConfigurationStore::save(*settings, configuration);
     BridgeWindow window(nullptr, false, settings);
     auto* recorder = window.findChild<RecorderProcessController*>();
@@ -672,10 +674,12 @@ TEST_CASE("A quick cancel and retry discovers selected streams before recording"
                recorder->selectedStreamRecording();
     });
     const bool recorded_stream = eventLogContains(window, "with 1 stream(s)");
+    const bool warned_missing = eventLogContains(window, "NotRunning is not visible, so it will not be recorded");
     window.close();
     REQUIRE(waitUntil([&] { return !recorder->ownsRunningProcess(); }));
     REQUIRE(started);
     REQUIRE(recorded_stream);
+    REQUIRE(warned_missing);
     REQUIRE(recorder->boundedOutput().contains("Stop received"));
 }
 

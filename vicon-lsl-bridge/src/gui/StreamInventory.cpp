@@ -107,6 +107,20 @@ QVector<StreamIdentity> reconcileDiscoveredStreams(
     return reconciled;
 }
 
+void keepStreamsThePreviewReceives(QVector<StreamIdentity>& inventory,
+                                   const QVector<StreamIdentity>& preview,
+                                   const SessionConfiguration& configuration) {
+    QVector<StreamIdentity> receiving;
+    for (const StreamIdentity& stream : preview) {
+        if (stream.freshness_ms < 0 || stream.freshness_ms > 1000) continue;
+        const auto known = findByKey(inventory, stream);
+        // Keep what the search found, such as its duplicate-name warning.
+        if (known != inventory.end() && known->present) continue;
+        receiving.push_back(stream);
+    }
+    mergeStreamInventory(inventory, receiving, configuration);
+}
+
 QVector<StreamBinding> recordingBindingsForInventory(
     const QVector<StreamBinding>& saved, const QVector<StreamIdentity>& inventory) {
     QVector<StreamBinding> result;

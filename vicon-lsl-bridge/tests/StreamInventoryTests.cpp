@@ -8,6 +8,7 @@ namespace {
 using vicon_lsl::gui::SessionConfiguration;
 using vicon_lsl::gui::StreamBinding;
 using vicon_lsl::gui::StreamIdentity;
+using vicon_lsl::gui::keepStreamsThePreviewReceives;
 using vicon_lsl::gui::mergeStreamInventory;
 using vicon_lsl::gui::reconcileDiscoveredStreams;
 using vicon_lsl::gui::selectedStreams;
@@ -191,6 +192,38 @@ void testSelectedStreamsForRecording() {
     chosen = selectedStreams(inventory, true);
     expect(chosen.size() == 2, "recording every visible stream overrides the per-stream choices");
     expect(visibleStreamCount(inventory) == 2, "a stream that is gone is not counted as visible");
+}
+
+void testPreviewKeepsStreamsTheSearchMissed() {
+    SessionConfiguration configuration = configurationWithoutBindings();
+    for (const QString& name : {QString("Gaze"), QString("Pose")}) {
+        StreamBinding binding;
+        binding.name = name;
+        configuration.recording_streams.push_back(binding);
+    }
+    StreamIdentity markers = stream("Markers", "a");
+    markers.warning = "Found by the search";
+    // The short search found only the markers, so Gaze and Pose are listed as missing.
+    QVector<StreamIdentity> inventory = reconcileDiscoveredStreams({}, {markers}, configuration);
+
+    StreamIdentity gaze = stream("Gaze", "g");
+    gaze.freshness_ms = 0;
+    StreamIdentity pose = stream("Pose", "p");
+    pose.freshness_ms = 5000;
+    StreamIdentity previewed_markers = stream("Markers", "a");
+    previewed_markers.freshness_ms = 0;
+    keepStreamsThePreviewReceives(inventory, {gaze, pose, previewed_markers}, configuration);
+
+    const StreamIdentity* kept = findStream(inventory, "Gaze");
+    expect(kept && kept->present && kept->selected && kept->source_id == "g",
+           "a stream the preview is receiving is recorded even when the search missed it");
+    const StreamIdentity* stale = findStream(inventory, "Pose");
+    expect(stale && !stale->present, "a stream the preview stopped receiving stays missing");
+    const StreamIdentity* found = findStream(inventory, "Markers");
+    expect(found && found->warning == "Found by the search",
+           "a stream the search found keeps the search's details");
+    const QVector<StreamIdentity> chosen = selectedStreams(inventory, false);
+    expect(chosen.size() == 1 && chosen[0].name == "Gaze", "the recorder is given the stream the preview kept");
 }
 
 } // namespace labrecorder_client_tests
