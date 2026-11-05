@@ -79,6 +79,7 @@ void testReconcileKeepsChoicesAndFlagsMissingStreams();
 void testReconcileHonoursConfiguredAndEveryVisibleStreams();
 void testReconcileRetainsSelectedStreamThatVanished();
 void testSelectedStreamsForRecording();
+void testPreviewKeepsStreamsTheSearchMissed();
 void testSetupCheckRequiresEachComponent();
 void testSetupCheckReportsPathAndStreamProblems();
 void testSetupCheckRequiredStreamReadiness();

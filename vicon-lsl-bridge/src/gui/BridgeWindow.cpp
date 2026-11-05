@@ -1210,6 +1210,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
     connect(started, &vicon_lsl::StreamDiscoveryWorker::discoveryFinished, this, [this](QVector<StreamIdentity> discovered, const QString& warning) {
         if (discovery_cancel_requested_) return;
         stream_inventory_ = reconcileDiscoveredStreams(stream_inventory_, std::move(discovered), configuration_);
+        if (ui_->preview_panel) keepStreamsThePreviewReceives(stream_inventory_, ui_->preview_panel->streamInventory(), configuration_);
         populateStreamTable();
         populateBindingCombos();
         updateConfigurationFromUi();
@@ -1440,6 +1441,12 @@ void BridgeWindow::beginRecordingAfterSetupCheck() {
     if (configuration_.record_every_visible_stream) {
         accepted = labrecorder_client_->startRecording(path_result_.normalized_fields, true);
     } else {
+        for (const StreamIdentity& stream : stream_inventory_) {
+            if (stream.selected && !stream.present) {
+                appendEvent(SessionComponent::Recorder, EventSeverity::Warning,
+                            stream.displayText() + " is not visible, so it will not be recorded");
+            }
+        }
         QString err;
         accepted = recorder_process_->launchSelectedStreamRecorder(resolveSelectedStreamExecutable(), path_result_.absolute_path, recording_inventory_, &err);
         if (!accepted) appendEvent(SessionComponent::Recorder, EventSeverity::Error, "The selected-stream recorder could not start: " + err);

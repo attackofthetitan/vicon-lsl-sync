@@ -282,6 +282,9 @@ certain streams. So when you pick exact streams, the app starts the bundled
 `LabRecorderCLI` with the checked full output path and one search per chosen
 stream. Each search uses the source ID when there is one, and otherwise the name
 plus the computer it comes from. The list of streams is fixed before launch.
+A chosen stream counts as visible if the stream search finds it or the preview
+received a sample from it in the last second. A chosen stream that is not
+visible is left out, with a warning in the event log.
 Pressing Stop sends Enter to the command-line recorder, which tells it to finish. Because the app
 started this recorder, it may close it on shutdown once recording has stopped.
 

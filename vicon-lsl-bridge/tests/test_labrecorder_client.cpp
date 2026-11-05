@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
     run("reconcile configured streams", testReconcileHonoursConfiguredAndEveryVisibleStreams);
     run("reconcile vanished stream", testReconcileRetainsSelectedStreamThatVanished);
     run("selected streams", testSelectedStreamsForRecording);
+    run("preview keeps streams the search missed", testPreviewKeepsStreamsTheSearchMissed);
     run("setup check components", testSetupCheckRequiresEachComponent);
     run("setup check path and streams", testSetupCheckReportsPathAndStreamProblems);
     run("setup check required streams", testSetupCheckRequiredStreamReadiness);

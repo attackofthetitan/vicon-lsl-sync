@@ -24,6 +24,12 @@ QVector<StreamIdentity> reconcileDiscoveredStreams(
     QVector<StreamIdentity> discovered,
     const SessionConfiguration& configuration);
 
+// Marks a stream the search missed as visible again when the preview received a
+// sample from it in the last second. A short search can miss a HoloLens on Wi-Fi.
+void keepStreamsThePreviewReceives(QVector<StreamIdentity>& inventory,
+                                   const QVector<StreamIdentity>& preview,
+                                   const SessionConfiguration& configuration);
+
 // Saves Record/Required choices without replacing saved expectations with the
 // latest measurements or forgetting streams that have not been seen yet.
 QVector<StreamBinding> recordingBindingsForInventory(
