@@ -161,14 +161,18 @@ std::shared_ptr<QSettings> remoteRecorderSettings(const QTemporaryDir& directory
     return settings;
 }
 
+QLineEdit* recordingOverrideReason(const BridgeWindow& window) {
+    for (auto* edit : window.findChildren<QLineEdit*>()) {
+        if (edit->placeholderText().startsWith("Required reason")) return edit;
+    }
+    return nullptr;
+}
+
 // The test computer has no lab streams, so the setup check fails and the
 // recording is started with Record Anyway.
 bool startRecordingAnyway(BridgeWindow& window) {
     QMetaObject::invokeMethod(&window, "onStartRecording", Qt::DirectConnection);
-    QLineEdit* reason = nullptr;
-    for (auto* edit : window.findChildren<QLineEdit*>()) {
-        if (edit->placeholderText().startsWith("Required reason")) reason = edit;
-    }
+    auto* reason = recordingOverrideReason(window);
     if (!reason || !waitUntil([&] { return !window.findChild<StreamDiscoveryWorker*>(); })) {
         return false;
     }
@@ -509,6 +513,170 @@ TEST_CASE("Stop Session cancels graphical startup without reconnecting afterward
     REQUIRE(stopped);
     REQUIRE(!reconnected);
     REQUIRE(no_discovery);
+}
+
+TEST_CASE("Record Anyway starts after Check Setup, Start Recording, or Start Session") {
+    const std::pair<QString, bool> requests[] = {
+        {"Check Setup", false}, {"Check Setup", true},
+        {"Start Recording", false}, {"Start Session", false},
+    };
+    for (const auto& [action, press_enter] : requests) {
+        QTemporaryDir directory;
+        REQUIRE(directory.isValid());
+        FakeLabRecorder recorder;
+        BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+        auto* client = window.findChild<LabRecorderClient*>();
+        auto* reason = recordingOverrideReason(window);
+        auto* override_button = recorderButton(window, "Record Anyway");
+        auto* start_button = recorderButton(window, action);
+        REQUIRE(client);
+        REQUIRE(reason);
+        REQUIRE(override_button);
+        REQUIRE(start_button);
+        REQUIRE(recorder.accept());
+        start_button->click();
+        REQUIRE(waitUntil([&] { return !window.findChild<StreamDiscoveryWorker*>(); }));
+        REQUIRE(override_button->isEnabled());
+
+        reason->setText("   ");
+        override_button->click();
+        REQUIRE(eventLogContains(window, "Enter a reason before choosing Record Anyway"));
+        REQUIRE(!window.findChild<StreamDiscoveryWorker*>());
+        REQUIRE(override_button->isEnabled());
+
+        reason->setText("  Missing streams are intentional for this session  ");
+        if (press_enter) {
+            REQUIRE(QMetaObject::invokeMethod(reason, "returnPressed", Qt::DirectConnection));
+        } else {
+            override_button->click();
+        }
+        REQUIRE(!override_button->isEnabled());
+        // A second submission must not replace the reason captured for this Start.
+        reason->setText("A duplicate submission");
+        REQUIRE(QMetaObject::invokeMethod(&window, "onOverrideSetupCheck", Qt::DirectConnection));
+        QString command;
+        for (int step = 0; step < 4; ++step) {
+            command = recorder.nextCommand();
+            REQUIRE(!command.isEmpty());
+            recorder.reply();
+        }
+        REQUIRE_EQ(command, QString("start"));
+        REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+        REQUIRE(eventLogContains(window, "Failed setup check accepted: Missing streams are intentional for this session"));
+        REQUIRE(!override_button->isEnabled());
+        REQUIRE(!eventLogContains(window, "Failed setup check accepted: A duplicate submission"));
+        recorderButton(window, "Check Setup")->click();
+        REQUIRE(!override_button->isEnabled());
+        REQUIRE(QMetaObject::invokeMethod(reason, "returnPressed", Qt::DirectConnection));
+        REQUIRE(QMetaObject::invokeMethod(&window, "onOverrideSetupCheck", Qt::DirectConnection));
+        REQUIRE(!recorder.hasCommand(50));
+        window.close();
+        REQUIRE_EQ(recorder.nextCommand(), QString("stop"));
+        recorder.reply();
+        REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Stopped; }));
+    }
+}
+
+TEST_CASE("Canceling Record Anyway does not accept failed checks on the next Start") {
+    for (const char* stop_action : {"onStopRecording", "onStopSession"}) {
+        QTemporaryDir directory;
+        REQUIRE(directory.isValid());
+        FakeLabRecorder recorder;
+        BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+        REQUIRE(recorder.accept());
+        recorderButton(window, "Check Setup")->click();
+        recordingOverrideReason(window)->setText("Cancel this override");
+        recorderButton(window, "Record Anyway")->click();
+        REQUIRE(window.findChild<StreamDiscoveryWorker*>());
+        REQUIRE(QMetaObject::invokeMethod(&window, stop_action, Qt::DirectConnection));
+        REQUIRE(waitUntil([&] { return !window.findChild<StreamDiscoveryWorker*>(); }));
+
+        recorderButton(window, "Start Recording")->click();
+        REQUIRE(waitUntil([&] { return !window.findChild<StreamDiscoveryWorker*>(); }));
+        REQUIRE(eventLogContains(window, "Fix the failed setup checks or enter a reason"));
+        REQUIRE(!eventLogContains(window, "Failed setup check accepted"));
+        REQUIRE(recorderButton(window, "Record Anyway")->isEnabled());
+        REQUIRE(!recorder.hasCommand(50));
+        window.close();
+    }
+}
+
+TEST_CASE("Filename edits during Start are sent with the recording command") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    FakeLabRecorder recorder;
+    BridgeWindow window(nullptr, false, remoteRecorderSettings(directory, recorder.port()));
+    auto* client = window.findChild<LabRecorderClient*>();
+    QLineEdit* filename = nullptr;
+    for (auto* edit : window.findChildren<QLineEdit*>()) {
+        if (edit->text() == "run-%r.xdf") filename = edit;
+    }
+    REQUIRE(client);
+    REQUIRE(filename);
+    REQUIRE(recorder.accept());
+    recorderButton(window, "Check Setup")->click();
+    recordingOverrideReason(window)->setText("No lab streams needed");
+    recorderButton(window, "Record Anyway")->click();
+    REQUIRE(!recorderButton(window, "Refresh Recorder Streams")->isEnabled());
+    REQUIRE(QMetaObject::invokeMethod(&window, "onRefreshLabRecorder", Qt::DirectConnection));
+    filename->setText("edited-%r.xdf");
+
+    const QString first_command = recorder.nextCommand();
+    recorder.reply();
+    if (first_command != "update") window.close();
+    REQUIRE_EQ(first_command, QString("update"));
+    REQUIRE(eventLogContains(window, "Recording start requested for"));
+    REQUIRE(!eventLogContains(window, "Recording started at"));
+    REQUIRE_EQ(recorder.nextCommand(), QString("select all"));
+    recorder.reply();
+    REQUIRE(recorder.nextCommand().contains("edited-1.xdf"));
+    recorder.reply();
+    REQUIRE_EQ(recorder.nextCommand(), QString("start"));
+    recorder.reply();
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Recording; }));
+    REQUIRE(eventLogContains(window, "Recorder confirmed that recording started"));
+    window.close();
+    REQUIRE_EQ(recorder.nextCommand(), QString("stop"));
+    recorder.reply();
+    REQUIRE(waitUntil([&] { return client->recordingState() == RecorderRecordingState::Stopped; }));
+}
+
+TEST_CASE("A quick cancel and retry discovers selected streams before recording") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    lsl::stream_info info("RecordAnywayTest", "Test", 1, 10, lsl::cf_float32,
+                          "record-anyway-test-source");
+    lsl::stream_outlet outlet(info);
+    auto settings = sessionSettings(directory);
+    SessionConfiguration configuration = SessionConfigurationStore::load(*settings);
+    configuration.recorder_executable = installRecorderFixture(directory, "LabRecorderCLI");
+    configuration.recording_template = "session-stop.xdf";
+    StreamBinding binding;
+    binding.name = QString::fromStdString(info.name());
+    binding.source_id = QString::fromStdString(info.source_id());
+    configuration.recording_streams = {binding};
+    SessionConfigurationStore::save(*settings, configuration);
+    BridgeWindow window(nullptr, false, settings);
+    auto* recorder = window.findChild<RecorderProcessController*>();
+    REQUIRE(recorder);
+    recorderButton(window, "Check Setup")->click();
+    recorderButton(window, "Start Recording")->click();
+    auto* canceled_discovery = window.findChild<StreamDiscoveryWorker*>();
+    REQUIRE(canceled_discovery);
+    recorderButton(window, "Stop Recording")->click();
+    REQUIRE(canceled_discovery->isInterruptionRequested());
+    recordingOverrideReason(window)->setText("Record the test stream without Vicon");
+    recorderButton(window, "Record Anyway")->click();
+    const bool started = waitUntil([&] {
+        return recorder->state() == RecorderProcessState::OwnedRunning &&
+               recorder->selectedStreamRecording();
+    });
+    const bool recorded_stream = eventLogContains(window, "with 1 stream(s)");
+    window.close();
+    REQUIRE(waitUntil([&] { return !recorder->ownsRunningProcess(); }));
+    REQUIRE(started);
+    REQUIRE(recorded_stream);
+    REQUIRE(recorder->boundedOutput().contains("Stop received"));
 }
 
 TEST_CASE("One Stop Recording click waits for Start and sends exactly one Stop") {

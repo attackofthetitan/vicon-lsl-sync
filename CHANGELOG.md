@@ -2,6 +2,8 @@
 
 This file lists what changed in each release.
 
+## [1.15.4] - 2026-11-05
+
 ## [1.15.3] - 2026-10-17
 
 ## [1.15.2] - 2026-10-13

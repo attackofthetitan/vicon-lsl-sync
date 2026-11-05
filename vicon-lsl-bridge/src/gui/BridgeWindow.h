@@ -139,6 +139,7 @@ private:
                      const QString& message);
     void populateSetupCheck(const SetupCheckResult& result);
     SetupCheckResult runSetupCheck() const;
+    void requestRecordingStart(const QString& override_reason);
     void beginRecordingAfterSetupCheck();
     void completePendingRecordingStart();
     void populateStreamTable();
@@ -222,8 +223,9 @@ private:
     bool bridge_status_stale_ = false;
     bool startup_endpoint_probe_ = false;
     bool startup_launch_attempted_ = false;
+    bool discovery_cancel_requested_ = false;
     bool pending_recording_start_ = false;
-    bool setup_check_start_waiting_ = false;
+    QString pending_setup_check_override_reason_;
     bool close_finalizing_ = false;
     bool owned_process_end_requested_ = false;
     bool recorder_connection_loss_reported_ = false;

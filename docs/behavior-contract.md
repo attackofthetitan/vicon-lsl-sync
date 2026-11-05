@@ -385,6 +385,8 @@ The default pattern is:
   recorder address, who started the recorder, stream health, free space, older
   input that was skipped, and how many display frames were replaced.
 - A valid file name change is sent to a connected, idle LabRecorder 300 ms after you stop typing.
+  During Start, the new path travels with the recording command. Separate file
+  name updates and recorder refreshes cannot interrupt that start.
 - **Start Session** walks through starting the bridge, starting the preview,
   finding streams, the setup check, and recording, while every separate control
   stays available. **Stop Session** does it in reverse: recording, preview,
@@ -393,6 +395,9 @@ The default pattern is:
   recorder command that is still running before it sends Stop, and if the
   recorder connection was lost, it says so once and sends Stop after **Connect**
   restores it.
+- Canceling and immediately retrying Start runs a fresh stream search before
+  recording. The event log distinguishes requesting Start from the recorder
+  confirming it.
 - The setup check sorts these into required, warning, or information: how recent
   the bridge status is, whether the recorder is ready, the exact path, chosen
   streams, sample age, channel layout, coordinate details, expected rate, stair
@@ -402,7 +407,10 @@ The default pattern is:
   purpose. A required failure blocks Start unless **Record Anyway** is given a
   reason. The result and reason are saved with the session details. **Record
   Anyway** is only offered while the latest check has a required failure that
-  has not been accepted.
+  has not been accepted and **Start Recording** is enabled. Clicking it or
+  pressing Enter in the reason field starts recording after **Check Setup** or a
+  blocked Start. The reason survives the final checks and applies only to that
+  request; canceling it does not bypass checks on the next Start.
 
 Closing always follows the same steps without freezing the window. It refuses
 new work, cancels stream searches and file checks, asks the preview and bridge
