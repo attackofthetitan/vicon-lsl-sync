@@ -289,6 +289,8 @@ void BridgeWindow::connectSignals() {
     connect(ui_->stop_session_button, &QPushButton::clicked, this, &BridgeWindow::onStopSession);
     connect(ui_->run_setup_check_button, &QPushButton::clicked, this, &BridgeWindow::onRunSetupCheck);
     connect(ui_->setup_check_override_button, &QPushButton::clicked, this, &BridgeWindow::onOverrideSetupCheck);
+    connect(ui_->setup_check_override_reason_edit, &QLineEdit::returnPressed,
+            ui_->setup_check_override_button, &QPushButton::click);
     connect(ui_->browse_root_button, &QPushButton::clicked, this, &BridgeWindow::onBrowseStudyRoot);
     connect(ui_->browse_labrecorder_button, &QPushButton::clicked, this, &BridgeWindow::onBrowseLabRecorder);
     connect(ui_->launch_labrecorder_button, &QPushButton::clicked, this, &BridgeWindow::onLaunchLabRecorder);
@@ -936,6 +938,7 @@ void BridgeWindow::onLabRecorderRetry() {
 }
 
 void BridgeWindow::onRefreshLabRecorder() {
+    if (closing() || recordingActiveOrPending()) return;
     if (labrecorder_client_->refreshStreams()) setLabRecorderStatus("Recorder stream refresh queued");
     else setLabRecorderStatus("Recorder stream refresh is unavailable in the current state", EventSeverity::Warning);
 }
@@ -947,8 +950,10 @@ void BridgeWindow::scheduleFilenameSync() {
 }
 
 void BridgeWindow::syncFilenameToLabRecorder() {
+    if (closing() || recordingActiveOrPending() || recording_stop_requested_) return;
     validateRecordingPath();
-    if (!path_result_.valid() || !configuration_.record_every_visible_stream) return;
+    if (!path_result_.valid() || !configuration_.record_every_visible_stream ||
+        !recorderCanStart(*labrecorder_client_)) return;
     if (labrecorder_client_->updateFilename(path_result_.normalized_fields)) setLabRecorderStatus("Recording file path update queued");
 }
 
@@ -1002,7 +1007,8 @@ void BridgeWindow::updateRecordingButtons() {
     ui_->labrecorder_host_edit->setEnabled(!closing() && remote);
     ui_->labrecorder_port_spin->setEnabled(!closing() && remote);
     ui_->automatic_launch_check->setEnabled(!closing() && remote);
-    ui_->refresh_streams_button->setEnabled(!closing() && remote && recorderCanStart(*labrecorder_client_));
+    ui_->refresh_streams_button->setEnabled(!closing() && !recordingActiveOrPending() &&
+                                           remote && recorderCanStart(*labrecorder_client_));
     ui_->start_recording_button->setEnabled(!closing() && !stoppingSession() &&
                                            !recordingActiveOrPending() && !verificationActive());
     ui_->stop_recording_button->setEnabled(!closing() && recordingActiveOrPending() &&
@@ -1027,7 +1033,8 @@ void BridgeWindow::refreshUi() {
     updateReadiness();
     // Record Anyway is available only after a required check fails, and only once.
     ui_->setup_check_override_button->setEnabled(
-        !closing() && setup_check_.hasRequiredFailures() && !setup_check_.override_used);
+        ui_->start_recording_button->isEnabled() &&
+        setup_check_.hasRequiredFailures() && !setup_check_.override_used);
     updateDashboard();
 }
 
@@ -1193,6 +1200,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
     pending_recording_start_ = pending_recording_start_ || continue_recording_start;
     ui_->discover_streams_button->setEnabled(false);
     ui_->stream_discovery_status_label->setText("Discovering...");
+    discovery_cancel_requested_ = false;
     discovery_worker_ = new vicon_lsl::StreamDiscoveryWorker(configuration_, this);
     vicon_lsl::StreamDiscoveryWorker* started = discovery_worker_;
     connect(started, &vicon_lsl::StreamDiscoveryWorker::lifecycleChanged, this, [this](ComponentLifecycleState s, const QString& d) {
@@ -1200,6 +1208,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
         if (s == ComponentLifecycleState::Failed) appendEvent(SessionComponent::Streams, EventSeverity::Error, d);
     });
     connect(started, &vicon_lsl::StreamDiscoveryWorker::discoveryFinished, this, [this](QVector<StreamIdentity> discovered, const QString& warning) {
+        if (discovery_cancel_requested_) return;
         stream_inventory_ = reconcileDiscoveredStreams(stream_inventory_, std::move(discovered), configuration_);
         populateStreamTable();
         populateBindingCombos();
@@ -1214,7 +1223,11 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
         if (discovery_worker_ == started) discovery_worker_ = nullptr;
         started->deleteLater();
         ui_->discover_streams_button->setEnabled(!closing());
-        if (was_pending && !closing()) completePendingRecordingStart();
+        if (was_pending && !closing()) {
+            // A Start queued after cancellation needs its own discovery result.
+            if (discovery_cancel_requested_) startStreamDiscovery(true);
+            else completePendingRecordingStart();
+        }
         pumpSession();
     });
     appendEvent(SessionComponent::Streams, EventSeverity::Information, "Immediate pre-recording stream discovery started");
@@ -1223,6 +1236,7 @@ void BridgeWindow::startStreamDiscovery(bool continue_recording_start) {
 
 void BridgeWindow::cancelStreamDiscovery() {
     if (!discovery_worker_) return;
+    discovery_cancel_requested_ = true;
     discovery_worker_->requestInterruption();
     ui_->stream_discovery_status_label->setText("Canceling discovery...");
 }
@@ -1358,6 +1372,10 @@ void BridgeWindow::onRunSetupCheck() {
 }
 
 void BridgeWindow::onStartRecording() {
+    requestRecordingStart({});
+}
+
+void BridgeWindow::requestRecordingStart(const QString& override_reason) {
     if (recordingActiveOrPending() || verificationActive() || stoppingSession() || closing()) {
         appendEvent(SessionComponent::Recorder, EventSeverity::Warning, "Duplicate recording Start was rejected");
         return;
@@ -1365,7 +1383,8 @@ void BridgeWindow::onStartRecording() {
     saveSettings();
     filename_sync_timer_->stop();
     pending_recording_start_ = true;
-    setup_check_start_waiting_ = false;
+    // Every Start replaces the reason, including after a canceled request.
+    pending_setup_check_override_reason_ = override_reason;
     recording_stop_requested_ = false;
     startStreamDiscovery(true);
     refreshUi();
@@ -1376,32 +1395,31 @@ void BridgeWindow::completePendingRecordingStart() {
     updateConfigurationFromUi();
     validateRecordingPath(true);
     setup_check_ = runSetupCheck();
+    // Keep this request's reason through discovery and the final setup check.
+    setup_check_.override_reason = std::exchange(pending_setup_check_override_reason_, {});
+    setup_check_.override_used = !setup_check_.override_reason.isEmpty();
     populateSetupCheck(setup_check_);
-    if (setup_check_.hasRequiredFailures()) {
-        setup_check_start_waiting_ = true;
+    if (setup_check_.hasRequiredFailures() && !setup_check_.override_used) {
         pending_recording_start_ = false;
         appendEvent(SessionComponent::Application, EventSeverity::Warning, "Fix the failed setup checks or enter a reason to record anyway");
-        updateRecordingButtons();
+        refreshUi();
         return;
+    }
+    if (setup_check_.override_used) {
+        appendEvent(SessionComponent::Application, EventSeverity::Warning,
+                    "Failed setup check accepted: " + setup_check_.override_reason);
     }
     beginRecordingAfterSetupCheck();
 }
 
 void BridgeWindow::onOverrideSetupCheck() {
+    if (!setup_check_.hasRequiredFailures() || setup_check_.override_used) return;
     const QString reason = ui_->setup_check_override_reason_edit->text().trimmed();
-    if (!setup_check_.hasRequiredFailures() || reason.isEmpty()) {
+    if (reason.isEmpty()) {
         appendEvent(SessionComponent::Application, EventSeverity::Warning, "Enter a reason before choosing Record Anyway");
         return;
     }
-    setup_check_.override_used = true;
-    setup_check_.override_reason = reason;
-    appendEvent(SessionComponent::Application, EventSeverity::Warning, "Failed setup check accepted: " + reason);
-    populateSetupCheck(setup_check_);
-    if (setup_check_start_waiting_) {
-        setup_check_start_waiting_ = false;
-        pending_recording_start_ = true;
-        beginRecordingAfterSetupCheck();
-    }
+    requestRecordingStart(reason);
 }
 
 void BridgeWindow::beginRecordingAfterSetupCheck() {
@@ -1410,6 +1428,7 @@ void BridgeWindow::beginRecordingAfterSetupCheck() {
     if (!path_result_.valid()) {
         pending_recording_start_ = false;
         appendEvent(SessionComponent::Path, EventSeverity::Error, path_result_.firstError());
+        refreshUi();
         return;
     }
     recording_inventory_ = selectedStreams(stream_inventory_, configuration_.record_every_visible_stream);
@@ -1428,7 +1447,7 @@ void BridgeWindow::beginRecordingAfterSetupCheck() {
     pending_recording_start_ = false;
     if (accepted) {
         appendEvent(SessionComponent::Recorder, EventSeverity::Information,
-                    "Recording started at " + pending_recording_path_ + " with " + QString::number(recording_inventory_.size()) + " stream(s)");
+                    "Recording start requested for " + pending_recording_path_ + " with " + QString::number(recording_inventory_.size()) + " stream(s)");
     } else {
         appendEvent(SessionComponent::Recorder, EventSeverity::Error, "The selected recorder could not start recording");
     }
@@ -1442,7 +1461,6 @@ void BridgeWindow::onStopRecording() {
         return;
     }
     pending_recording_start_ = false;
-    setup_check_start_waiting_ = false;
     cancelStreamDiscovery();
     if (!recordingActiveOrPending()) {
         recording_stop_requested_ = false;
@@ -1538,7 +1556,6 @@ void BridgeWindow::onStopSession() {
     if (stoppingSession() || closing()) return;
     sequence_ = SessionSequence::StoppingSession;
     guided_stop_wait_reported_ = false;
-    setup_check_start_waiting_ = false;
     appendEvent(SessionComponent::Application, EventSeverity::Information, "Stopping the recorder, preview, and bridge");
     startup_endpoint_probe_ = false;
     labrecorder_retry_timer_->stop();
@@ -1739,7 +1756,6 @@ void BridgeWindow::beginClose() {
     }
     sequence_ = SessionSequence::Closing;
     pending_recording_start_ = false;
-    setup_check_start_waiting_ = false;
     saveSettings();
     filename_sync_timer_->stop();
     labrecorder_retry_timer_->stop();

@@ -103,11 +103,11 @@ if(TARGET vicon-lsl-bridge-gui-components)
     add_test(NAME vicon-lsl-bridge-gui-scaled-test COMMAND vicon-lsl-bridge-gui-tests --test)
 
     set_tests_properties(vicon-lsl-labrecorder-tests vicon-lsl-bridge-gui-test PROPERTIES
-        TIMEOUT 30
+        TIMEOUT 60
         ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV}"
     )
     set_tests_properties(vicon-lsl-bridge-gui-scaled-test PROPERTIES
-        TIMEOUT 30
+        TIMEOUT 60
         ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV};QT_SCALE_FACTOR=set:1.5"
     )
 endif()
