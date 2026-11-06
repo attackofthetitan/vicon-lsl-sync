@@ -38,13 +38,6 @@ void testCompletionCanStartNextCommand() {
     expect(client.recordingState() == RecorderRecordingState::Stopped &&
            client.operationState() == RecorderOperationState::Idle,
            "completed stop leaves no active command");
-
-    expect(client.sendCommand("start"), "generic command remains supported");
-    expect(readCommand(socket.get()) == "start", "generic command is forwarded");
-    expect(writeReply(socket.get(), "OK"), "generic command is acknowledged");
-    expect(waitUntil([&] { return completed.size() == 3; }), "generic command completes");
-    expect(client.recordingState() == RecorderRecordingState::Stopped,
-           "generic command text does not imply a recording state transition");
 }
 
 void testTcpCommandSequence() {
@@ -95,7 +88,10 @@ void testTcpCommandSequence() {
     expect(waitUntil([&completions]() { return completions == 2; }) && last_completion_ok,
            "client completes filename after acknowledgement");
 
-    expect(client.sendCommand("start"), "sends start");
+    // Start sends the file name again, then start, as one group.
+    expect(client.startRecording(fields, false), "sends start");
+    expect(readCommand(socket.get()) == expected[1], "server receives the file name with start");
+    expect(writeReply(socket.get(), "OK"), "server acknowledges the file name");
     expect(readCommand(socket.get()) == expected[2], "server receives start");
     expect(writeReply(socket.get(), "OK"), "server acknowledges start");
     expect(waitUntil([&completions]() { return completions == 3; }) && last_completion_ok,
@@ -180,7 +176,7 @@ void testFragmentedReplyControlsCommandProgress() {
                          completion_ok = ok;
                      });
 
-    expect(client.sendCommand("update"), "fragmented reply command queues");
+    expect(client.refreshStreams(), "fragmented reply command queues");
     expect(readCommand(socket.get()) == "update", "fragmented reply server receives command");
     expect(writeReply(socket.get(), "O"), "server writes first reply fragment");
     QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
@@ -243,9 +239,9 @@ void testCommandTimeoutDisconnectsAndDropsQueuedWork() {
                      [&failures](const QString&, bool ok, const QString&) {
                          if (!ok) ++failures;
                      });
-    expect(client.sendCommand("start"), "timeout command starts");
-    expect(!client.sendCommand("stop"), "concurrent command is rejected");
-    expect(readCommand(socket.get()) == "start", "timeout server receives first command");
+    expect(client.refreshStreams(), "timeout command starts");
+    expect(!client.stopRecording(), "concurrent command is rejected");
+    expect(readCommand(socket.get()) == "update", "timeout server receives first command");
     expect(waitUntil([&client]() {
         return client.connectionState() == RecorderConnectionState::Error;
     }, 1000), "missing acknowledgement transitions connection to error");
@@ -273,7 +269,7 @@ void testMidCommandDisconnectReportsFailure() {
                      [&failures](const QString&, bool ok, const QString&) {
                          if (!ok) ++failures;
                      });
-    expect(client.sendCommand("update"), "disconnect command queues");
+    expect(client.refreshStreams(), "disconnect command queues");
     expect(readCommand(socket.get()) == "update", "disconnect server receives command");
     socket->disconnectFromHost();
     expect(waitUntil([&client]() {
@@ -438,7 +434,7 @@ void testRecorderDuplicateAndShutdownProtocol() {
         expect(client.startRecording(fields, true), "shutdown Start begins");
         expect(readCommand(socket.get()) == "update", "Start preparation begins");
         expect(client.beginShutdown(), "shutdown waits for active Start");
-        expect(!client.sendCommand("ignored"), "shutdown rejects new work");
+        expect(!client.refreshStreams(), "shutdown rejects new work");
 
         const QStringList remaining = {
             "select all", LabRecorderFilenamePolicy::filenameCommand(fields), "start",

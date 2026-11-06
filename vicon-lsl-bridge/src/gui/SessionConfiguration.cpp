@@ -279,7 +279,7 @@ SessionConfiguration SessionConfiguration::fromJson(const QJsonObject& o, QStrin
     if (preview.value("segments").isObject()) config.preview_segments = StreamBinding::fromJson(preview.value("segments").toObject());
     if (preview.value("gaze").isObject()) config.preview_gaze = StreamBinding::fromJson(preview.value("gaze").toObject());
     if (preview.value("calibration").isObject()) config.preview_calibration = StreamBinding::fromJson(preview.value("calibration").toObject());
-    config.preview_match_tolerance = readFiniteDouble(preview, "matchTolerance", config.preview_match_tolerance);
+    config.preview_match_tolerance = std::clamp(readFiniteDouble(preview, "matchTolerance", config.preview_match_tolerance), 0.001, 1.0);
     config.preview_render_hz = std::clamp(preview.value("renderHz").toInt(config.preview_render_hz), 1, 60);
     config.preview_cache_megabytes = std::clamp(preview.value("cacheMegabytes").toInt(config.preview_cache_megabytes), 16, 2048);
     config.preview_trail_points = std::clamp(preview.value("trailPoints").toInt(config.preview_trail_points), 2, 500);
@@ -369,8 +369,10 @@ QStringList SessionConfigurationStore::presetNames(QSettings& settings) {
 bool SessionConfigurationStore::savePreset(QSettings& settings, const QString& name,
                                            const SessionConfiguration& config, QString* error) {
     const QString n = name.trimmed();
-    if (n.isEmpty() || n.contains('/')) {
-        if (error) *error = "Preset names must be non-empty and cannot contain '/'.";
+    // QSettings reads both slashes as group separators, so such a name would be
+    // saved in a sub-group and never listed.
+    if (n.isEmpty() || n.contains('/') || n.contains('\\')) {
+        if (error) *error = "Preset names must be non-empty and cannot contain '/' or '\\'.";
         return false;
     }
     settings.setValue("sessionPresets/" + n,

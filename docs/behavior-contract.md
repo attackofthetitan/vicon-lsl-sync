@@ -236,7 +236,8 @@ Recording only starts when:
 the folder, full paths as templates, names or characters Windows doesn't allow,
 names ending in a space or dot, paths that are too long, places it can't write,
 and existing files unless overwriting is on. Braces and line breaks would break
-the recorder command, so they're refused with the field to fix. Spaces at the
+the recorder command, and a `%` in a value would be read as a placeholder, so
+they're refused with the field to fix. Spaces at the
 ends are trimmed. Missing folders are only made once Start is accepted.
 
 The path shown in **Recording Destination** is exactly the path the recorder
@@ -274,8 +275,10 @@ check.
   file, path, and file check. A normal update never wipes the last error.
 - The event log keeps 1,000 entries. It can be copied or exported with the setup,
   stream lists, rates, setup and file checks, but never recording samples.
-- A valid file name change goes to a connected, idle LabRecorder 300 ms after you
-  stop typing. During Start, the new path goes with the start command instead.
+- The path is checked, and a valid file name sent to a connected, idle
+  LabRecorder, 300 ms after you stop typing, never on every key, because the
+  check writes a test file in the study folder. During Start, the new path goes
+  with the start command instead.
 
 ### Setup check
 
@@ -288,6 +291,9 @@ age, channel layout, coordinate names, rates, the stair model, and calibration.
 - A declared rate more than 1% off the saved one, or a stream arriving below 80%
   of its declared rate, is a warning.
 - Recorder-only mode turns the bridge check into information.
+- A recorder window whose address isn't this computer is a warning, because the
+  file check and run numbers only work if the study folder is the same shared
+  path on both computers.
 
 ## Preview
 

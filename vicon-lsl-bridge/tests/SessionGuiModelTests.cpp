@@ -89,6 +89,12 @@ void testNormalizedPathPolicy() {
     fields.participant = "P{unsafe}";
     expect(!LabRecorderFilenamePolicy::validate(fields).valid(),
            "rejects protocol-breaking metadata instead of silently changing it");
+    // "a%s" would otherwise become "a" plus the session value.
+    fields = validFields(root.path());
+    fields.participant = "a%s";
+    expect(hasIssue(LabRecorderFilenamePolicy::validate(fields),
+                    RecordingPathIssueLevel::Error, "'%'"),
+           "rejects a '%' in a value instead of letting it become a placeholder");
     fields = validFields(root.path());
     fields.templ = "../escape/run-%r.xdf";
     RecordingPathResult traversal = LabRecorderFilenamePolicy::validate(fields);
@@ -216,6 +222,10 @@ void testSessionConfiguration() {
                settings, "lab setup", preset, &error) &&
                preset.toJson() == configuration.toJson(),
            "loads a preset with every reproducibility field");
+    expect(!vicon_lsl::gui::SessionConfigurationStore::savePreset(
+               settings, "lab\\setup", configuration, &error) &&
+               !vicon_lsl::gui::SessionConfigurationStore::presetNames(settings).contains("lab\\setup"),
+           "refuses a preset name with a backslash, which would never be listed");
 
     const QString export_path = directory.filePath("session.json");
     expect(vicon_lsl::gui::SessionConfigurationStore::exportConfiguration(
@@ -226,6 +236,20 @@ void testSessionConfiguration() {
                export_path, imported, &error) &&
                imported.toJson() == configuration.toJson(),
            "imports the exported configuration without losing fields");
+
+    // A negative limit would match nothing, so it is held to the control's range.
+    QJsonObject negative_limit = configuration.toJson();
+    QJsonObject preview_settings = negative_limit.value("preview").toObject();
+    preview_settings["matchTolerance"] = -1.0;
+    negative_limit["preview"] = preview_settings;
+    QFile negative_file(directory.filePath("negative.json"));
+    negative_file.open(QIODevice::WriteOnly);
+    negative_file.write(QJsonDocument(negative_limit).toJson());
+    negative_file.close();
+    expect(vicon_lsl::gui::SessionConfigurationStore::importConfiguration(
+               negative_file.fileName(), imported, &error) &&
+               imported.preview_match_tolerance == 0.001,
+           "clamps an imported negative match limit to the smallest allowed value");
 
     vicon_lsl::gui::SessionUiState ui_state;
     ui_state.geometry = "geometry";

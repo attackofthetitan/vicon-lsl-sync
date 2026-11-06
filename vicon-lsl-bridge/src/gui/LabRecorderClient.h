@@ -33,7 +33,6 @@ public:
     bool shutdownSettledSafely() const;
     bool startMayHaveReachedServer() const { return start_may_have_reached_server_; }
 
-    bool sendCommand(const QString& command);
     bool refreshStreams();
     bool updateFilename(const LabRecorderFilenameFields& fields);
     bool startRecording(const LabRecorderFilenameFields& fields, bool select_all_first);

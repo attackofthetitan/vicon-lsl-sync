@@ -1083,6 +1083,45 @@ TEST_CASE("Opening recordings stops live preview, and shutdown cancels a queued 
     }
 }
 
+TEST_CASE("A blocked Start leaves no empty recording folders") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    BridgeWindow window(nullptr, false, sessionSettings(directory));
+    // The bridge isn't running, so the setup check blocks this Start.
+    recorderButton(window, "Start Recording")->click();
+    const bool blocked = waitUntil([&] {
+        return eventLogContains(window, "Fix the failed setup checks");
+    }, 5000);
+    const bool no_folders =
+        QDir(directory.path()).entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty();
+    window.close();
+    REQUIRE(blocked);
+    REQUIRE(no_folders);
+}
+
+TEST_CASE("Typing in a recording field checks the path once typing stops") {
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    BridgeWindow window(nullptr, false, sessionSettings(directory));
+    QLineEdit* participant = nullptr;
+    QLineEdit* destination = nullptr;
+    for (auto* edit : window.findChildren<QLineEdit*>()) {
+        if (edit->text() == "P001") participant = edit;
+        if (edit->accessibleName() == "Exact recording file path") destination = edit;
+    }
+    REQUIRE(participant);
+    REQUIRE(destination);
+    const QString before = destination->text();
+    // The check writes a test file in the study folder, which is slow on a
+    // network drive, so a burst of typing must not run it on every key.
+    for (const QString& id : {"P", "P0", "P00", "P009"}) participant->setText(id);
+    const bool waited = destination->text() == before;
+    const bool checked = waitUntil([&] { return destination->text().contains("P009"); });
+    window.close();
+    REQUIRE(waited);
+    REQUIRE(checked);
+}
+
 TEST_CASE("Live preview follows a stream replaced with a different channel count") {
     const auto open = [](int channels) {
         return std::make_unique<lsl::stream_outlet>(lsl::stream_info(

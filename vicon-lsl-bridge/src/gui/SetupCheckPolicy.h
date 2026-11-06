@@ -17,6 +17,9 @@ struct SetupCheckInputs {
     bool recorder_connected = false;
     bool selected_stream_recorder_available = false;
     bool recorder_idle = false;
+    // The recorder window's address is not this computer, so the file it saves
+    // may not be where this app looks for it.
+    bool recorder_on_other_computer = false;
     bool calibration_required = false;
     bool stair_model_loaded = false;
     SessionCalibrationState calibration = SessionCalibrationState::Uncalibrated;
