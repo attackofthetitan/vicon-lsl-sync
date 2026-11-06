@@ -48,16 +48,6 @@ namespace GazeLSL
         public int PushedValidGazeSampleCount { get; }
     }
 
-    public static class GazeSampleEncoder
-    {
-        public const int ChannelCount = GazeStreamContract.ChannelCount;
-
-        public static void WriteSample(GazeSample frame, double[] sample)
-        {
-            GazeStreamContract.WriteSample(frame, sample);
-        }
-    }
-
     public sealed class GazePublisherWorker
     {
         // Run faster than the tracker so readings that pile up during a short delay can clear.
@@ -184,7 +174,7 @@ namespace GazeLSL
         {
             try
             {
-                double[] sampleBuffer = new double[GazeSampleEncoder.ChannelCount];
+                double[] sampleBuffer = new double[GazeStreamContract.ChannelCount];
                 double stepRate = nominalRate * PublishOversample;
                 double intervalMilliseconds = 1000.0 / stepRate;
                 Stopwatch stopwatch = Stopwatch.StartNew();
@@ -257,7 +247,7 @@ namespace GazeLSL
 
         private void PublishSample(GazeSample sample, double[] buffer)
         {
-            GazeSampleEncoder.WriteSample(sample, buffer);
+            GazeStreamContract.WriteSample(sample, buffer);
             double timestamp = sample.Timestamp;
             if (!IsFinite(timestamp) || timestamp <= 0.0)
             {

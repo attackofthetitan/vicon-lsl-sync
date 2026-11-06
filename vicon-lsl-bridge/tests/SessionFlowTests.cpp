@@ -1,6 +1,7 @@
 #include "gui/BridgeWindow.h"
 #include "gui/LabRecorderClient.h"
 #include "gui/PreviewPanel.h"
+#include "gui/PreviewStreamWorker.h"
 #include "gui/RecorderProcessController.h"
 #include "gui/StreamDiscoveryWorker.h"
 #include "gui/StartupPermissions.h"
@@ -1061,4 +1062,36 @@ TEST_CASE("Opening recordings stops live preview, and shutdown cancels a queued 
         REQUIRE_EQ(file_state, route == 3 ? SessionFileState::None : SessionFileState::Loaded);
         REQUIRE(!loaded_while_live);
     }
+}
+
+TEST_CASE("Live preview follows a stream replaced with a different channel count") {
+    const auto open = [](int channels) {
+        return std::make_unique<lsl::stream_outlet>(lsl::stream_info(
+            "PreviewReplacedStream", "MoCap", channels, 100, lsl::cf_double64,
+            "preview-replaced-stream-test"));
+    };
+    auto outlet = open(4);
+    PreviewWorkerConfig config;
+    config.markers.name = "PreviewReplacedStream";
+    PreviewStreamWorker worker(config);
+    worker.start();
+    const auto receiving = [&](int channels) {
+        return waitUntil([&] {
+            outlet->push_sample(std::vector<double>(static_cast<std::size_t>(channels), 1.0));
+            const auto inventory = worker.streamInventory();
+            return std::any_of(inventory.cbegin(), inventory.cend(), [&](const StreamIdentity& stream) {
+                return stream.channel_count == channels && stream.freshness_ms >= 0 &&
+                       stream.freshness_ms < 500;
+            });
+        }, 8000);
+    };
+    const bool first = receiving(4);
+    // The bridge replaces its stream this way when Vicon subjects change.
+    outlet.reset();
+    outlet = open(8);
+    const bool replaced = receiving(8);
+    worker.requestInterruption();
+    worker.wait();
+    REQUIRE(first);
+    REQUIRE(replaced);
 }

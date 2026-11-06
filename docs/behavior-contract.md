@@ -69,6 +69,9 @@ data out of this app.
 - An empty marker or segment layout is fine. No LSL stream is opened for an empty group, and sending to it counts as success.
 - Re-read the layout after every 100 frames handled.
 - If the marker or segment layout changes, close and reopen both Vicon streams.
+  Do the same when the Vicon frame rate moves by more than 1%, because the rate
+  is written in the stream header. A rate change is not counted as a layout
+  change.
 - Count every layout change in `BridgeStatus`, including a layout that differs
   after a reconnect, because LabRecorder only takes a reopened stream back when
   its channel count is the same, and then keeps the old channel names. The
@@ -456,7 +459,7 @@ take no more than 50 ms, and no window clean-up waits forever.
 - A stream counts as fresh for 500 ms after its newest sample.
 - Read at most 16 samples from a stream at a time and keep the newest.
 - A new marker sample sets the frame time. Add segment and gaze data only if each is fresh and within the time limit, which is 50 ms by default.
-- If there is no new marker, a new segment or gaze sample can make a frame on its own. If both are new, use the later time.
+- If there is no new marker, a new segment or gaze sample can make a frame on its own. If both are new, use the later time. Add the latest markers too when they are fresh and within the time limit, so they do not blink out.
 - `*_stream_present` means the LSL input is connected. It does not mean the stream is fresh or has usable values.
 - Show Vicon positions in metres instead of millimetres. Gaze is already in metres.
 - Keep only one live frame waiting to be drawn. The window draws at 30 or 60 Hz,
@@ -477,6 +480,8 @@ take no more than 50 ms, and no window clean-up waits forever.
 - Use `relative_time` for frame time when it is there.
 - Otherwise, subtract the first finite `lsl_time` from each finite `lsl_time`.
 - Otherwise, use the row number, starting at zero.
+- Refuse the file, naming the row, if a row's time is earlier than the one
+  before it. Equal times are allowed.
 - Read numbers written with a decimal point, such as `0.5`, whatever the
   computer's language settings.
 - Turn marker, segment, and gaze columns into the shared `PreviewFrame` form. A
@@ -596,7 +601,9 @@ format versions are refused instead of guessed at or rewritten.
 Computer and window state is kept out of presets on purpose: `ui/windowGeometry`,
 `ui/mainSplitter`, the open control and preview tabs, up to ten recent
 recordings, and the last folders used for presets and session details. Saved
-calibrations are stored on their own at `session/calibrationProfiles`.
+calibrations are stored on their own at `session/calibrationProfiles`. Saving
+keeps any stored calibration this version cannot read, unchanged, so a newer
+version's calibrations survive a run of an older one.
 
 Changing the version-1 format needs a deliberate format change, plus tests that
 the old version is refused and the new one saves and loads correctly.

@@ -29,9 +29,6 @@ std::optional<PreviewFrame> assemblePreviewFrame(const PreviewFrameSnapshot& sna
     PreviewFrame frame;
     if (marker_master) {
         frame.timestamp = snapshot.markers.timestamp;
-        frame.markers = parseMarkerSample(snapshot.markers.labels,
-                                          snapshot.markers.sample,
-                                          snapshot.markers.transform);
     } else if (segment_fallback && gaze_fallback) {
         frame.timestamp = (std::max)(snapshot.segments.timestamp, snapshot.gaze.timestamp);
     } else if (segment_fallback) {
@@ -44,6 +41,15 @@ std::optional<PreviewFrame> assemblePreviewFrame(const PreviewFrameSnapshot& sna
     frame.segment_stream_present = snapshot.segments.connected;
     frame.gaze_stream_present = snapshot.gaze.connected;
 
+    // Markers that did not update in this pass still belong in a gaze or
+    // segment frame when fresh and close in time, or they would blink out.
+    if (marker_master || matchesFrame(snapshot.markers,
+                                      frame.timestamp,
+                                      snapshot.match_tolerance_seconds)) {
+        frame.markers = parseMarkerSample(snapshot.markers.labels,
+                                          snapshot.markers.sample,
+                                          snapshot.markers.transform);
+    }
     if (matchesFrame(snapshot.segments,
                      frame.timestamp,
                      snapshot.match_tolerance_seconds)) {

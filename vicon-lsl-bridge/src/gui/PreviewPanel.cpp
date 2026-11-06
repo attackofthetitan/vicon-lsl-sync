@@ -1053,7 +1053,7 @@ void PreviewPanel::reloadStairModel() {
         return;
     }
     try {
-        const PreviewMesh mesh = loadObjMesh(QDir::toNativeSeparators(path).toStdString());
+        const PreviewMesh mesh = loadObjMesh(QFileInfo(path).filesystemFilePath());
         widget_->setStairMesh(mesh, stairTransform());
         stair_model_loaded_ = true;
         setStatus("Stair model loaded: " + QFileInfo(path).fileName());

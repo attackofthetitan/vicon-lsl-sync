@@ -212,8 +212,13 @@ bool ViconLSLBridge::refreshStreams(BridgeState state) {
         return state == BridgeState::Streaming;
     }
     if (state == BridgeState::Streaming) {
-        if (discovery.layout == known_layout_) return true;
-        std::cout << "Layout changed, reinitializing streams" << std::endl;
+        // The header holds the rate, so a new camera rate needs new streams too;
+        // the recorder rejoins them because their channels stay the same.
+        const double rate = client_->frameRate();
+        const bool rate_changed =
+            std::abs(rate - published_rate_) > 0.01 * (std::max)(rate, published_rate_);
+        if (discovery.layout == known_layout_ && !rate_changed) return true;
+        std::cout << "Layout or frame rate changed, reinitializing streams" << std::endl;
         marker_stream_.destroy();
         segment_stream_.destroy();
     }
@@ -231,6 +236,7 @@ bool ViconLSLBridge::refreshStreams(BridgeState state) {
               << known_layout_.segments.size() << " segments" << std::endl;
 
     const double nominal_rate = client_->frameRate();
+    published_rate_ = nominal_rate;
     if (std::isfinite(nominal_rate) && nominal_rate > 0.0) {
         std::cout << "Vicon frame rate: " << nominal_rate << " Hz" << std::endl;
     } else {
@@ -267,7 +273,7 @@ bool ViconLSLBridge::refreshStreams(BridgeState state) {
         return false;
     }
     if (state == BridgeState::Streaming) {
-        reportStatus(BridgeState::Streaming, "Layout changed, streams reinitialized");
+        reportStatus(BridgeState::Streaming, "Layout or frame rate changed, streams reinitialized");
     }
     return true;
 }

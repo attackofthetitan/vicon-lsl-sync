@@ -19,6 +19,9 @@ namespace {
 constexpr int kResolveRetryMs = 1000;
 constexpr int kStatusIntervalMs = 1000;
 constexpr int kStaleSampleMs = 500;
+// A connected stream silent this long is looked up again, in case its source
+// replaced it with one the inlet cannot rejoin.
+constexpr int kSilentStreamRecheckMs = 2000;
 constexpr double kGazeLowRateFraction = 0.8;
 constexpr double kMetadataTimeoutSeconds = 0.25;
 constexpr double kResolveTimeoutSeconds = 0.05;
@@ -73,7 +76,7 @@ struct PreviewStreamWorker::StreamState {
     std::vector<double> latest_sample;
     PreviewRateTracker rate_tracker;
     double latest_timestamp = 0.0;
-    qint64 last_sample_ms = -1, next_resolve_ms = 0;
+    qint64 last_sample_ms = -1, next_resolve_ms = 0, opened_ms = 0;
     QString last_error;
     gui::StreamIdentity identity;
 
@@ -138,7 +141,9 @@ void PreviewStreamWorker::run() {
         const qint64 now = steadyNowMs();
         for (StreamState* s : all_streams) {
             if (isInterruptionRequested()) break;
-            if (!s->connected() && now >= s->next_resolve_ms) {
+            const bool silent = s->connected() &&
+                now - (s->hasSample() ? s->last_sample_ms : s->opened_ms) > kSilentStreamRecheckMs;
+            if ((!s->connected() || silent) && now >= s->next_resolve_ms) {
                 connectStream(*s);
                 s->next_resolve_ms = now + kResolveRetryMs;
             }
@@ -212,8 +217,13 @@ bool PreviewStreamWorker::connectStream(StreamState& state) {
             return false;
         }
 
-        return openStream(state, streams[static_cast<std::size_t>(selection.index)],
-                          selection.should_warn ? selection.explanation : QString());
+        const lsl::stream_info& chosen = streams[static_cast<std::size_t>(selection.index)];
+        // liblsl only rejoins a replacement with the same channel count, so a
+        // silent inlet keeps waiting only while its outlet is still the one found.
+        if (state.connected() && QString::fromStdString(chosen.uid()) == state.identity.uid) {
+            return false;
+        }
+        return openStream(state, chosen, selection.should_warn ? selection.explanation : QString());
     } catch (const std::exception& ex) {
         state.inlet.reset();
         state.clearSample();
@@ -235,6 +245,7 @@ bool PreviewStreamWorker::openStream(StreamState& state, const lsl::stream_info&
     state.inlet = std::move(inlet);
     state.inlet->set_postprocessing(lsl::post_clocksync);
     state.clearSample();
+    state.opened_ms = steadyNowMs();
     state.last_error.clear();
     state.identity = gui::identityFromStreamInfo(metadata);
     state.identity.role = previewStreamRoleName(state.role);

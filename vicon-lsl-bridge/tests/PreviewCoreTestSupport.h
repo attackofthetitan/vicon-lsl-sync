@@ -29,9 +29,10 @@ class TemporaryFilePath {
 public:
     explicit TemporaryFilePath(const char* suffix) {
         static std::atomic<unsigned long long> sequence{0};
+        // The suffix is UTF-8, so tests can name files with non-English letters.
         path_ = std::filesystem::temp_directory_path() /
-                ("vicon_lsl_preview_test_" + std::to_string(currentProcessId()) +
-                 "_" + std::to_string(++sequence) + suffix);
+                std::filesystem::u8path("vicon_lsl_preview_test_" + std::to_string(currentProcessId()) +
+                                        "_" + std::to_string(++sequence) + suffix);
     }
 
     ~TemporaryFilePath() {
@@ -40,6 +41,7 @@ public:
     }
 
     std::string string() const { return path_.string(); }
+    const std::filesystem::path& path() const { return path_; }
 
 private:
     std::filesystem::path path_;

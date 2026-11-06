@@ -3,6 +3,7 @@
 #include "preview/PreviewTypes.h"
 #include "preview/PreviewLoad.h"
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,9 @@ void boundPreviewRecordingCache(PreviewRecording& recording,
                                 std::size_t maximum_frames,
                                 std::size_t maximum_memory_bytes);
 
-PreviewRecording loadMergedPreviewCsv(const std::string& path,
+// Takes a path, not a string, because Windows reads a narrow string in the
+// local code page and a non-English folder name would then not be found.
+PreviewRecording loadMergedPreviewCsv(const std::filesystem::path& path,
                                       const PreviewTransformProfile& vicon_transform,
                                       const PreviewTransformProfile& gaze_transform,
                                       const PreviewLoadOptions& options = {});

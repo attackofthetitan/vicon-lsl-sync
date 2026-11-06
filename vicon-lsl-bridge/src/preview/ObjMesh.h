@@ -2,12 +2,12 @@
 
 #include "preview/PreviewTypes.h"
 
+#include <filesystem>
 #include <istream>
-#include <string>
 
 namespace vicon_lsl {
 
 PreviewMesh parseObjMesh(std::istream& input);
-PreviewMesh loadObjMesh(const std::string& path);
+PreviewMesh loadObjMesh(const std::filesystem::path& path);
 
 } // namespace vicon_lsl

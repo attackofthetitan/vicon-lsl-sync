@@ -324,7 +324,8 @@ When there is no new marker, but segment or gaze data is new:
 
 - If both are new and fresh, use the later time.
 - Otherwise, use the time of the one fresh stream that is new.
-- Only add a stream if its latest time is within the limit of the chosen time.
+- Only add a stream, markers included, if it is fresh and its latest time is
+  within the limit of the chosen time.
 
 This is a "closest current sample" match for display. It never makes up samples between real ones.
 
@@ -409,7 +410,7 @@ For each row:
 2. Otherwise, use `lsl_time - first_finite_lsl_time` if `lsl_time` is finite.
 3. Otherwise, use the row number, starting at zero.
 
-The CSV reader does not correct clocks or match separate streams. It expects the rows to be merged already.
+The CSV reader does not correct clocks or match separate streams. It expects the rows to be merged already. A row whose time is earlier than the row before it stops the load with an error that names the row, because playback cannot run time backward.
 
 ## Coordinate words
 

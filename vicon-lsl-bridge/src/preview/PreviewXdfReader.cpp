@@ -27,14 +27,14 @@ enum class XdfChunkTag : std::uint16_t {
 // Reads numbers stored lowest byte first, and throws instead of reading past the end.
 class BinaryReader {
 public:
-    explicit BinaryReader(const std::string& path) : input_(path, std::ios::binary) {
+    explicit BinaryReader(const std::filesystem::path& path) : input_(path, std::ios::binary) {
         if (!input_) {
-            throw std::runtime_error("Failed to open XDF: " + path);
+            throw std::runtime_error("Failed to open XDF: " + path.u8string());
         }
         input_.seekg(0, std::ios::end);
         const std::streamoff end = input_.tellg();
         if (end < 0) {
-            throw std::runtime_error("Failed to size XDF: " + path);
+            throw std::runtime_error("Failed to size XDF: " + path.u8string());
         }
         size_ = static_cast<std::uint64_t>(end);
         input_.seekg(0, std::ios::beg);
@@ -555,7 +555,7 @@ void enforceIndexMemoryBudget(std::map<std::uint32_t, XdfStreamData>& streams,
 
 } // namespace
 
-XdfLoadResult loadXdfNumericStreams(const std::string& path,
+XdfLoadResult loadXdfNumericStreams(const std::filesystem::path& path,
                                     const PreviewLoadOptions& options) {
     BinaryReader reader(path);
     if (options.maximum_file_bytes > 0 && reader.size() > options.maximum_file_bytes) {

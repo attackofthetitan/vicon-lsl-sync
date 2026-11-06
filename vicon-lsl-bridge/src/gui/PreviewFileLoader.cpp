@@ -2,6 +2,7 @@
 
 #include "preview/PreviewXdf.h"
 
+#include <QFileInfo>
 #include <QMutexLocker>
 
 #include <exception>
@@ -75,10 +76,10 @@ void PreviewFileLoader::run() {
 
         PreviewRecording loaded;
         if (type_ == PreviewFileType::Csv) {
-            loaded = loadMergedPreviewCsv(path_.toStdString(),
+            loaded = loadMergedPreviewCsv(QFileInfo(path_).filesystemFilePath(),
                                           vicon_transform_, gaze_transform_, options);
         } else {
-            XdfLoadResult xdf = loadXdfNumericStreams(path_.toStdString(), options);
+            XdfLoadResult xdf = loadXdfNumericStreams(QFileInfo(path_).filesystemFilePath(), options);
             emit progressChanged("stream details", 100, "Found all XDF streams");
             const XdfMappingAnalysis analysis = analyzeXdfStreamMapping(xdf);
             XdfStreamMapping mapping;

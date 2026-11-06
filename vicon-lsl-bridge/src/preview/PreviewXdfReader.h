@@ -4,6 +4,7 @@
 #include "preview/PreviewLoad.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,7 @@ struct XdfLoadResult {
 // Reads every stream in an XDF file, corrects its times with the recorded clock
 // offsets, and keeps as many samples as the memory limit allows, counting text
 // streams but skipping their values.
-XdfLoadResult loadXdfNumericStreams(const std::string& path,
+XdfLoadResult loadXdfNumericStreams(const std::filesystem::path& path,
                                     const PreviewLoadOptions& options = {});
 
 } // namespace vicon_lsl

@@ -126,7 +126,7 @@ void RecordingVerifier::run() {
         };
         emit lifecycleChanged(ComponentLifecycleState::Running,
                               "Checking streams and sample times");
-        const XdfLoadResult loaded = loadXdfNumericStreams(request_.path.toStdString(), options);
+        const XdfLoadResult loaded = loadXdfNumericStreams(QFileInfo(request_.path).filesystemFilePath(), options);
         if (cancel_requested_.load() || isInterruptionRequested()) {
             throw std::runtime_error("Recording file check canceled");
         }

@@ -74,6 +74,8 @@ private:
     vicon_lsl::ViconLayout known_layout_;
     // The layout of the last streams opened, kept across reconnects.
     std::optional<vicon_lsl::ViconLayout> published_layout_;
+    // The frame rate written into the open streams' headers, or 0 for irregular.
+    double published_rate_ = 0.0;
     unsigned int layout_change_count_ = 0;
     unsigned int frame_count_ = 0;
     unsigned int frames_since_layout_check_ = 0;
