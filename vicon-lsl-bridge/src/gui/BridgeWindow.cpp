@@ -340,8 +340,9 @@ void BridgeWindow::connectSignals() {
               ui_->run_spin, ui_->storage_warning_spin, ui_->allow_overwrite_check,
               ui_->allow_outside_root_check, ui_->automatic_run_increment_check}, [this]() {
         updateConfigurationFromUi();
-        validateRecordingPath();
-        scheduleFilenameSync();
+        // The path check writes a test file and asks for free space, which is
+        // slow on a network study folder, so wait until typing stops.
+        filename_sync_timer_->start();
     });
 
     onEdited({ui_->server_edit, ui_->marker_stream_edit, ui_->segment_stream_edit,
@@ -824,7 +825,6 @@ void BridgeWindow::beginLabRecorderStartup() {
         // recording starts. It has no remote-control connection to establish.
         startup_endpoint_probe_ = false;
         labrecorder_retry_timer_->stop();
-        filename_sync_timer_->stop();
         if (labrecorder_client_->connectionState() != RecorderConnectionState::Disconnected ||
             recorder_process_->kind() == RecorderProcessKind::GraphicalRecorder) {
             onDetachLabRecorder();
@@ -943,17 +943,20 @@ void BridgeWindow::onRefreshLabRecorder() {
     else setLabRecorderStatus("Recorder stream refresh is unavailable in the current state", EventSeverity::Warning);
 }
 
+// Never stops the timer, because a path check waiting since the last edit must
+// still run, even while the recorder connection keeps changing.
 void BridgeWindow::scheduleFilenameSync() {
-    if (!filename_sync_timer_ || closing() || pending_recording_stop_ || recording_stop_requested_) return;
+    if (closing() || filename_sync_timer_->isActive()) return;
     if (configuration_.record_every_visible_stream && path_result_.valid() && recorderCanStart(*labrecorder_client_)) filename_sync_timer_->start();
-    else filename_sync_timer_->stop();
 }
 
+// Runs once the recording fields stop changing: check the path, then send it to
+// a connected recorder that can take it.
 void BridgeWindow::syncFilenameToLabRecorder() {
-    if (closing() || recordingActiveOrPending() || recording_stop_requested_) return;
+    if (closing()) return;
     validateRecordingPath();
-    if (!path_result_.valid() || !configuration_.record_every_visible_stream ||
-        !recorderCanStart(*labrecorder_client_)) return;
+    if (recordingActiveOrPending() || recording_stop_requested_ || !path_result_.valid() ||
+        !configuration_.record_every_visible_stream || !recorderCanStart(*labrecorder_client_)) return;
     if (labrecorder_client_->updateFilename(path_result_.normalized_fields)) setLabRecorderStatus("Recording file path update queued");
 }
 
@@ -1346,6 +1349,7 @@ SetupCheckResult BridgeWindow::runSetupCheck() const {
     inputs.selected_stream_recorder_available = !resolveSelectedStreamExecutable().isEmpty();
     inputs.recorder_idle = effectiveOperationState() == RecorderOperationState::Idle &&
                            effectiveRecordingState() != RecorderRecordingState::Recording;
+    inputs.recorder_on_other_computer = !recorderHostIsLocal(configuration_.recorder_host);
     inputs.calibration_required = configuration_.calibration_required;
     inputs.stair_model_loaded = ui_->preview_panel && ui_->preview_panel->stairModelLoaded();
     if (ui_->preview_panel) inputs.calibration = ui_->preview_panel->sessionCalibrationState();
@@ -1394,7 +1398,9 @@ void BridgeWindow::requestRecordingStart(const QString& override_reason) {
 void BridgeWindow::completePendingRecordingStart() {
     if (!pending_recording_start_ || closing()) return;
     updateConfigurationFromUi();
-    validateRecordingPath(true);
+    // Folders are only made once the setup check lets Start go ahead, so a
+    // blocked Start leaves no empty folders behind.
+    validateRecordingPath(false);
     setup_check_ = runSetupCheck();
     // Keep this request's reason through discovery and the final setup check.
     setup_check_.override_reason = std::exchange(pending_setup_check_override_reason_, {});
@@ -1636,7 +1642,8 @@ void BridgeWindow::onVerificationFilePoll() {
     report.findings.push_back({
         EventSeverity::Error, "output-not-found", {},
         "The exact expected output did not appear within 15 seconds after Stop",
-        "Keep the recorder open, confirm its status, and inspect the destination without overwriting it.",
+        "Keep the recorder open, confirm its status, and inspect the destination without overwriting it. "
+        "A recorder on another computer saves on that computer unless the study folder is a shared path.",
     });
     finishVerification(report);
 }

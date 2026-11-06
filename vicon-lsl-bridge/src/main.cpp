@@ -7,8 +7,9 @@
 
 static ViconLSLBridge* g_bridge = nullptr;
 
-void signalHandler(int sig) {
-    std::cout << "\nCaught signal " << sig << ", stopping" << std::endl;
+// Only flips the stop flag, because printing isn't safe inside a signal
+// handler. run() prints "Stopped" once it has closed everything.
+void signalHandler(int) {
     if (g_bridge) g_bridge->stop();
 }
 

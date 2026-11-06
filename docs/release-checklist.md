@@ -1,6 +1,6 @@
 # Release checklist
 
-Last release: `v1.15.6`, 2026-11-06. Release notes are left empty.
+Last release: `v1.15.7`, 2026-11-06. Release notes are left empty.
 
 Before you tag a release, check that:
 
@@ -15,14 +15,13 @@ Before you tag a release, check that:
 
 Then merge the pull request and push the tag (`vN.N.N`) on the merge commit. The
 tag build makes the release by itself, with five downloads and
-`SHA256SUMS.txt`.
+`SHA256SUMS.txt`. If one platform fails on something the same code passed
+before, re-run just that job before changing any code.
 
 ## Known gaps
 
 - Linux and Mac builds and all packaging only run on the build server.
 - Nobody tests on real Vicon hardware, a HoloLens, or a full recording session
   before a release.
-- The GUI layout check can fail on a local PC with a different screen. The
-  build server's Windows run is the one that counts.
-- The file name fix in 1.15.6 only shows on a Windows PC that doesn't use UTF-8
-  as its code page.
+- Opening files from folders with non-English names only fails on a Windows PC
+  that doesn't use UTF-8 as its code page, so a UTF-8 PC can't show that bug.

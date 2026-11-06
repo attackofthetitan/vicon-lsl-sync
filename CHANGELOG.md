@@ -2,6 +2,8 @@
 
 This file lists what changed in each release.
 
+## [1.15.7] - 2026-11-06
+
 ## [1.15.6] - 2026-11-06
 
 ## [1.15.5] - 2026-11-05

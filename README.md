@@ -157,7 +157,7 @@ By default, **Start Recording** runs LabRecorderCLI with the streams you picked.
 No recorder window opens, and you don't need **Connect**.
 
 If you'd rather see a recorder window, or record on another computer, turn on
-**Record every visible stream in a separate recorder window**. The app then talks
+**Record every visible stream in a recorder window**. The app then talks
 to the LabRecorder window at `localhost:22345`, unless you change it. Turn on
 remote control in LabRecorder with the same port. That window can't be told to
 record only some streams, so it records every stream it can see. Before starting
@@ -165,6 +165,11 @@ its own LabRecorder, the app checks that address so it doesn't start a second
 one. It shows **Started here** for one it started and **External** for one that
 was already running, and it never closes an external one. **Disconnect / Detach**
 lets go of a recorder without closing it.
+
+A recorder on another computer saves the file on that computer. So use a study
+folder that's the same shared path on both computers. Otherwise this app can't
+find the file to check it, can't warn you before a file is replaced, and won't
+move on to the next run number. The setup check reminds you of this.
 
 To record:
 

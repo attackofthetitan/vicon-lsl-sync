@@ -63,6 +63,12 @@ SetupCheckResult runSetupCheck(const SetupCheckInputs& inputs,
         inputs.record_every_visible_stream
             ? "Connect the graphical recorder and stop any current recording."
             : "Make sure LabRecorderCLI is installed beside the recorder program and stop any current recording.");
+    if (inputs.record_every_visible_stream && inputs.recorder_on_other_computer) {
+        add(SessionComponent::Recorder, SetupCheckLevel::Warning, false,
+            "The recorder is on another computer, so this app may not see the file it saves",
+            "Use a study folder that is the same shared path on both computers. Otherwise the file "
+            "check, the overwrite check, and the run number can't find the file.");
+    }
 
     add(SessionComponent::Path, SetupCheckLevel::Required, path.valid(),
         path.valid() ? "Recording folder is ready" : path.firstError(),

@@ -47,16 +47,6 @@ public:
         metrics_.coalesced_input_samples += count;
     }
 
-    PreviewDeliveryMetrics metrics() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return metrics_;
-    }
-
-    std::size_t queuedFrameCount() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return latest_frame_ ? 1U : 0U;
-    }
-
 private:
     mutable std::mutex mutex_;
     std::optional<PreviewFrame> latest_frame_;

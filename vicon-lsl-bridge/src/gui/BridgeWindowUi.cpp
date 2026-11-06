@@ -320,25 +320,26 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     labrecorder_form->addRow("Address:", endpoint);
     recorder_layout->addLayout(labrecorder_form);
 
-    ui->automatic_launch_check = makeCheck("Start the graphical recorder when it is not already running", "In separate-window mode, try to connect first, then start the bundled or chosen graphical recorder.");
-    ui->record_every_visible_check = makeCheck("Record every visible stream in a separate recorder window", "Control a graphical recorder and save every stream it can see. Turn this off to choose streams here and start the local recorder with Start Recording; no connection is needed.");
+    // Check boxes can't wrap, so their text stays short enough for a narrow panel.
+    ui->automatic_launch_check = makeCheck("Start the recorder window if it isn't running", "In separate-window mode, try to connect first, then start the bundled or chosen graphical recorder.");
+    ui->record_every_visible_check = makeCheck("Record every visible stream in a recorder window", "Control a graphical recorder and save every stream it can see. Turn this off to choose streams here and start the local recorder with Start Recording; no connection is needed.");
     ui->record_every_visible_check->setObjectName("recordEveryVisibleStream");
     recorder_layout->addWidget(ui->automatic_launch_check);
     recorder_layout->addWidget(ui->record_every_visible_check);
 
-    auto* recorder_buttons = new QGridLayout();
+    // The buttons wrap when the panel is narrow.
+    auto* recorder_buttons = new FlowLayout();
     ui->launch_labrecorder_button = makeButton("Launch Recorder", "Start the graphical recorder in the background.");
     ui->connect_labrecorder_button = makeButton("Connect", "Connect to the graphical recorder at the host and port above. Enable remote control in its window. Selected-stream recording needs no connection.");
     ui->detach_labrecorder_button = makeButton("Disconnect / Detach", "Disconnect from the recorder without closing it.");
     ui->refresh_streams_button = makeButton("Refresh Recorder Streams", "Ask the graphical recorder to refresh its visible stream list.");
     ui->start_recording_button = makeButton("Start Recording", "Check the setup, then start recording.", "Start recording", QKeySequence("Ctrl+R"));
     ui->stop_recording_button = makeButton("Stop Recording", "Ask the recorder to stop.", "Stop recording", QKeySequence("Ctrl+S"));
-    recorder_buttons->addWidget(ui->launch_labrecorder_button, 0, 0);
-    recorder_buttons->addWidget(ui->connect_labrecorder_button, 0, 1);
-    recorder_buttons->addWidget(ui->detach_labrecorder_button, 0, 2);
-    recorder_buttons->addWidget(ui->refresh_streams_button, 1, 0);
-    recorder_buttons->addWidget(ui->start_recording_button, 1, 1);
-    recorder_buttons->addWidget(ui->stop_recording_button, 1, 2);
+    for (QWidget* control : {ui->launch_labrecorder_button, ui->connect_labrecorder_button,
+                             ui->detach_labrecorder_button, ui->refresh_streams_button,
+                             ui->start_recording_button, ui->stop_recording_button}) {
+        recorder_buttons->addWidget(control);
+    }
     recorder_layout->addLayout(recorder_buttons);
 
     ui->labrecorder_status_label = makeMessageValue("Disconnected", "Detailed recorder status");
@@ -360,16 +361,19 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     // Streams Tab
     auto [streams_page, streams_layout] = makePage();
 
-    auto* discovery_row = new QHBoxLayout();
+    // The button and check box wrap when the panel is narrow, with the search
+    // status on its own line below.
+    auto* discovery_row = new FlowLayout();
     ui->discover_streams_button = makeButton("Find LSL Streams", "Find available streams and keep the details needed to reconnect.",
                                              "Discover visible LSL streams", QKeySequence("Ctrl+D"));
     ui->preview_external_streams_check = new QCheckBox("Choose preview streams separately");
     ui->preview_external_streams_check->setObjectName("previewExternalStreams");
     ui->preview_external_streams_check->setToolTip("Let the preview use streams other than the bridge outputs.");
     ui->stream_discovery_status_label = makeStateValue("Not searched", "Stream search status");
-    addWidgets(discovery_row, {ui->discover_streams_button, ui->preview_external_streams_check});
-    discovery_row->addWidget(ui->stream_discovery_status_label, 1);
+    discovery_row->addWidget(ui->discover_streams_button);
+    discovery_row->addWidget(ui->preview_external_streams_check);
     streams_layout->addLayout(discovery_row);
+    streams_layout->addWidget(ui->stream_discovery_status_label);
 
     ui->stream_table = new QTableWidget(0, 13);
     ui->stream_table->setHorizontalHeaderLabels({
@@ -395,7 +399,9 @@ std::unique_ptr<BridgeWindowUi> buildBridgeWindowUi(
     int binding_row = 0;
     for (const auto& row : bindings_rows) {
         *row.combo = new QComboBox();
-        (*row.combo)->setMinimumContentsLength(22);
+        // Only a floor: the column stretches, so the combo still fills the room
+        // left beside its label and check box and shows long stream names.
+        (*row.combo)->setMinimumContentsLength(8);
         (*row.combo)->setToolTip("Choose the visible stream source for this part of the preview. Duplicate names are never chosen silently.");
         *row.follow = makeCheck("Reconnect by name", "Use the stream name when the original stream restarts.");
         addField(bindings, binding_row, 0, row.label, *row.combo, (*row.combo)->toolTip());

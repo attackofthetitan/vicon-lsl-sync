@@ -112,17 +112,19 @@ inline void addField(QGridLayout* layout, int row, int col, const QString& label
     layout->addWidget(control, row, col + 1, 1, span);
 }
 
-// Keep the label beside its control when FlowLayout wraps rows.
+// Keep the label with its control when FlowLayout wraps rows. The label sits
+// above the control, so a chip is only as wide as the wider of the two and
+// still fits a narrow panel when the system font is wide.
 inline QWidget* makeFieldChip(const QString& label, QWidget* control,
                               const QString& tooltip, int control_width = 160) {
     auto* chip = new QWidget();
-    auto* row = new QHBoxLayout(chip);
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(6);
-    row->addWidget(makeTooltipLabel(label, control, tooltip));
+    auto* column = new QVBoxLayout(chip);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(2);
+    column->addWidget(makeTooltipLabel(label, control, tooltip));
     control->setMinimumWidth(70);
     control->setMaximumWidth(control_width);
-    row->addWidget(control, 1);
+    column->addWidget(control);
     return chip;
 }
 

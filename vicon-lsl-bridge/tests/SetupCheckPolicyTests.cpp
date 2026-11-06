@@ -122,6 +122,18 @@ void testSetupCheckReportsPathAndStreamProblems() {
     result = vicon_lsl::gui::runSetupCheck(inputs, configuration, validPath(), inventory);
     expect(mentions(result, "No recording streams are selected"),
            "selected-stream recording requires a chosen stream");
+
+    // A recorder window on another computer saves its file there, which this app
+    // can only check through a shared study folder.
+    inputs = readyInputs();
+    inputs.recorder_on_other_computer = true;
+    result = vicon_lsl::gui::runSetupCheck(inputs, configuration, validPath(), inventory);
+    expect(mentions(result, "another computer") && !result.hasRequiredFailures(),
+           "a recorder on another computer is a warning, not a blocker");
+    inputs.record_every_visible_stream = false;
+    result = vicon_lsl::gui::runSetupCheck(inputs, configuration, validPath(), inventory);
+    expect(!mentions(result, "another computer"),
+           "the command-line recorder always runs here, so it gets no warning");
 }
 
 void testSetupCheckRequiredStreamReadiness() {

@@ -83,10 +83,6 @@ bool LabRecorderClient::shutdownSettledSafely() const {
     return shutdownReady() && !start_may_have_reached_server_;
 }
 
-bool LabRecorderClient::sendCommand(const QString& command) {
-    return beginBatch(RecorderOperationState::Refreshing, command, {command});
-}
-
 bool LabRecorderClient::refreshStreams() {
     return beginBatch(RecorderOperationState::Refreshing, "refresh streams", {"update"});
 }

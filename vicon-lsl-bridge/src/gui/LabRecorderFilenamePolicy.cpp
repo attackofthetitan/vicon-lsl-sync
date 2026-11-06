@@ -279,6 +279,13 @@ RecordingPathResult LabRecorderFilenamePolicy::validate(
                          " value contains a path separator or reserved filename character.",
                      "Use letters, numbers, spaces, hyphens, or underscores.");
         }
+        // A '%' in a value would be read as a placeholder by the next replacement,
+        // here or in LabRecorder, and quietly change the file name.
+        if (value.contains('%')) {
+            addIssue(result, RecordingPathIssueLevel::Error, name,
+                     "The " + name + " value contains '%', which would be read as a file name placeholder.",
+                     "Remove the '%'.");
+        }
         if (isReservedWindowsName(value)) {
             addIssue(result, RecordingPathIssueLevel::Error, name,
                      "The " + name +
