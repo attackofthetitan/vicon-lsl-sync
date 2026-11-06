@@ -1,41 +1,28 @@
-# v1.15.6 release checklist
+# Release checklist
 
-## Release details
+Last release: `v1.15.6`, 2026-11-06. Release notes are left empty.
 
-- Version: `1.15.6`
-- Previous release: `v1.15.5`
-- Target date: 2026-11-06
-- Status: local checks passed; publishing starts when the release tag is pushed
-- Release body: empty, as requested
+Before you tag a release, check that:
 
-## Before publishing
+- [ ] The version in `vicon-lsl-bridge/CMakeLists.txt` and the dated heading in
+  `CHANGELOG.md` both say the new version.
+- [ ] The desktop app builds and all six test suites pass on Windows with Qt
+  6.8.3, including the scaled GUI run.
+- [ ] `python tools/generate_stream_contracts.py --check` passes.
+- [ ] `.github/scripts/verify-release-version.sh` passes for the new tag.
+- [ ] `git diff --check` finds nothing.
+- [ ] The pull request build passes on Linux, Windows, and Mac.
 
-- [x] The CMake version and dated changelog section both say `1.15.6`.
-- [x] The full desktop build passes locally on Windows with Qt 6.8.3.
-- [x] The logic, recorder, lifecycle, and stream recovery suites pass locally.
-- [ ] The GUI suites pass locally. All 27 GUI test cases pass in the normal and
-  scaled runs, but the window layout check fails on this PC's display, as it
-  did before these changes. The pull request build on the build server must
-  pass it.
-- [x] Generated stream files pass `tools/generate_stream_contracts.py --check`.
-- [x] The release version passes `.github/scripts/verify-release-version.sh`.
-- [x] `git diff --check` finds nothing.
+Then merge the pull request and push the tag (`vN.N.N`) on the merge commit. The
+tag build makes the release by itself, with five downloads and
+`SHA256SUMS.txt`.
 
-## Publishing
+## Known gaps
 
-- [ ] The pull request build passes on Linux x64, Windows x64, and Apple
-  Silicon Mac before merging.
-- [ ] The patch is merged into `main` through a pull request.
-- [ ] Tag `v1.15.6` points at the released commit on `main`.
-- [ ] The tagged build passes the logic tests, HoloLens tests, and desktop
-  build, tests, and packaging on all three platforms.
-- [ ] Five platform downloads and `SHA256SUMS.txt` are published.
-- [x] The release workflow creates the release with an empty notes body.
-
-## Not tested locally
-
-- Linux and Mac builds, and all platform packaging, run on the build server.
-- Real Vicon hardware, a HoloLens headset, and a physical recording session
-  were not tested.
-- The file-name fix only shows on a Windows PC whose code page is not UTF-8;
-  the PC used for these checks has UTF-8 turned on.
+- Linux and Mac builds and all packaging only run on the build server.
+- Nobody tests on real Vicon hardware, a HoloLens, or a full recording session
+  before a release.
+- The GUI layout check can fail on a local PC with a different screen. The
+  build server's Windows run is the one that counts.
+- The file name fix in 1.15.6 only shows on a Windows PC that doesn't use UTF-8
+  as its code page.

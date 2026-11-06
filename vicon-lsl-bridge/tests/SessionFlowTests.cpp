@@ -207,6 +207,25 @@ void writeRecording(const QString& path) {
                       "ViconMarkers_M:Z,ViconMarkers_M:Valid\n0,1000,0,0,1\n") > 0);
 }
 
+// The app gives a recorder it launched 15 seconds to come up, so a slow start on
+// a busy build machine is fine. If it never runs, say what state it got stuck in.
+bool launchedRecorderRuns(RecorderProcessController& process) {
+    QString last_message;
+    const auto watch = QObject::connect(&process, &RecorderProcessController::stateChanged,
+        [&last_message](RecorderProcessState, const QString& message) { last_message = message; });
+    const bool running = waitUntil([&] {
+        return process.state() == RecorderProcessState::OwnedRunning;
+    }, 15000);
+    QObject::disconnect(watch);
+    if (!running) {
+        std::cerr << "The launched recorder never ran. State: "
+                  << recorderProcessStateText(process.state()).toStdString()
+                  << ". Last message: " << last_message.toStdString()
+                  << ". Output: " << process.boundedOutput().toStdString() << std::endl;
+    }
+    return running;
+}
+
 } // namespace
 
 TEST_CASE("Selected-stream startup neither connects nor launches the graphical recorder") {
@@ -308,7 +327,7 @@ TEST_CASE("Connect reuses the launched GUI and switching to selected streams rel
         [&](RecorderProcessState state, const QString&) {
             if (state == RecorderProcessState::Launching) ++launches;
         });
-    REQUIRE(waitUntil([&] { return process->state() == RecorderProcessState::OwnedRunning; }));
+    REQUIRE(launchedRecorderRuns(*process));
     QPointer<QProcess> graphical = process->findChild<QProcess*>();
     REQUIRE(graphical);
     REQUIRE(QMetaObject::invokeMethod(&window, "onConnectLabRecorder", Qt::DirectConnection));
@@ -424,7 +443,7 @@ TEST_CASE("Start Session waits for the graphical recorder before checking the re
     auto* client = window.findChild<LabRecorderClient*>();
     REQUIRE(process);
     REQUIRE(client);
-    REQUIRE(waitUntil([&] { return process->state() == RecorderProcessState::OwnedRunning; }));
+    REQUIRE(launchedRecorderRuns(*process));
     REQUIRE(QMetaObject::invokeMethod(&window, "onStartSession", Qt::DirectConnection));
     const bool waited = !window.findChild<StreamDiscoveryWorker*>();
     REQUIRE(server.listen(QHostAddress::LocalHost, port));
@@ -503,7 +522,7 @@ TEST_CASE("Stop Session cancels graphical startup without reconnecting afterward
     auto* client = window.findChild<LabRecorderClient*>();
     REQUIRE(process);
     REQUIRE(client);
-    REQUIRE(waitUntil([&] { return process->state() == RecorderProcessState::OwnedRunning; }));
+    REQUIRE(launchedRecorderRuns(*process));
     REQUIRE(QMetaObject::invokeMethod(&window, "onStartSession", Qt::DirectConnection));
     REQUIRE(QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection));
     const bool stopped = waitUntil([&] { return !process->ownsRunningProcess() && sessionStopped(window); });
