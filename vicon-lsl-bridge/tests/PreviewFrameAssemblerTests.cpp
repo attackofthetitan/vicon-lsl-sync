@@ -79,6 +79,27 @@ TEST_CASE("Live preview fallback uses the newest fresh updated companion") {
     REQUIRE(frame->marker_stream_present);
 }
 
+TEST_CASE("Live preview gaze frames keep fresh markers that did not update this pass") {
+    const vicon_lsl::PreviewTransformProfile identity;
+    const auto gaze_labels = preview_core_test_support::gazeLabels();
+    const auto gaze_sample = gazeSample();
+    const std::vector<std::string> no_labels;
+    const std::vector<double> no_sample;
+
+    const vicon_lsl::PreviewStreamSnapshot markers{
+        kMarkerLabels, kMarkerSample, identity, 20.0, true, true, false};
+    const vicon_lsl::PreviewStreamSnapshot segments{
+        no_labels, no_sample, identity, 0.0, false, false, false};
+    const vicon_lsl::PreviewStreamSnapshot gaze{
+        gaze_labels, gaze_sample, identity, 20.03, true, true, true};
+
+    const auto frame = vicon_lsl::assemblePreviewFrame({markers, segments, gaze, 0.05});
+    REQUIRE(frame.has_value());
+    REQUIRE(preview_core_test_support::near(frame->timestamp, 20.03));
+    REQUIRE_EQ(frame->markers.size(), static_cast<std::size_t>(1));
+    REQUIRE_EQ(frame->gaze_rays.size(), static_cast<std::size_t>(3));
+}
+
 TEST_CASE("Live preview fallback rejects stale updated streams") {
     const vicon_lsl::PreviewTransformProfile identity;
     const std::vector<std::string> no_labels;

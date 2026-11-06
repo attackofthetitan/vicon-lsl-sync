@@ -85,10 +85,12 @@ Each time round the streaming loop:
 ### Handle a layout check
 
 - If reading the layout fails, report the error and keep the current streams.
-- If the layout is the same, keep streaming.
-- If it changed, close both streams before opening new ones, and count the
-  change. A layout that differs from the last one with streams after a reconnect
-  counts too.
+- If the layout and the Vicon frame rate are the same, keep streaming. A rate
+  within 1% of the one in the stream headers counts as the same.
+- If either changed, close both streams before opening new ones. Count only a
+  layout change: a rate change keeps the channels, so the recorder rejoins the
+  new streams. A layout that differs from the last one with streams after a
+  reconnect counts too.
 - If opening the new ones fails, stop streaming and clean up fully.
 - If it works, report that the streams were reopened.
 
@@ -419,6 +421,7 @@ stateDiagram-v2
     ConnectedNoSample --> Resolving: input error
     Fresh --> Resolving: input error
     Stale --> Resolving: input error
+    Stale --> ConnectedNoSample: silent over 2 s and the search finds a different outlet
 ```
 
 Being connected and having recent data are not the same thing.
@@ -431,6 +434,11 @@ A missing source ID never quietly turns into a match by name alone. **Follow by
 name** allows a predictable match by name and reports duplicates or fallbacks.
 Stream searches wait at most 50 ms, stream detail reads at most 250 ms, sample
 reads never wait, and a missing stream is looked for again after one second.
+A connected stream that has sent nothing for two seconds is also looked for
+again, once a second. If the search finds a different outlet, the preview opens
+it, because liblsl only rejoins a replacement with the same channel count, and
+the bridge changes the channel count when Vicon subjects change. If it finds the
+same outlet, the preview keeps waiting on it.
 
 ### Load a recording and choose streams
 

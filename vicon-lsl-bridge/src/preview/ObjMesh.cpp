@@ -54,10 +54,10 @@ PreviewMesh parseObjMesh(std::istream& input) {
     return mesh;
 }
 
-PreviewMesh loadObjMesh(const std::string& path) {
+PreviewMesh loadObjMesh(const std::filesystem::path& path) {
     std::ifstream input(path);
     if (!input) {
-        throw std::runtime_error("Failed to open OBJ mesh: " + path);
+        throw std::runtime_error("Failed to open OBJ mesh: " + path.u8string());
     }
     return parseObjMesh(input);
 }

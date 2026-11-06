@@ -206,6 +206,14 @@ bool CalibrationProfileStore::save(QSettings& settings, const QVector<ManagedCal
         }
         arr.push_back(p.toJson());
     }
+    // Keep the stored entries load() skipped, such as another app version's, so
+    // saving here never deletes calibrations this version cannot read.
+    const auto stored = QJsonDocument::fromJson(settings.value("session/calibrationProfiles").toByteArray());
+    for (const auto& entry : stored.array()) {
+        QString unreadable;
+        ManagedCalibrationProfile::fromJson(entry.toObject(), &unreadable);
+        if (!unreadable.isEmpty()) arr.push_back(entry);
+    }
     settings.setValue("session/calibrationProfiles", QJsonDocument(arr).toJson(QJsonDocument::Compact));
     if (settings.status() != QSettings::NoError) {
         if (error) *error = "Could not save calibrations";

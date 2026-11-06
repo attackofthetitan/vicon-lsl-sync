@@ -120,7 +120,7 @@ void appendBoundedPreviewFrame(PreviewRecording& recording,
     }
 }
 
-PreviewRecording loadMergedPreviewCsv(const std::string& path,
+PreviewRecording loadMergedPreviewCsv(const std::filesystem::path& path,
                                       const PreviewTransformProfile& vicon_transform,
                                       const PreviewTransformProfile& gaze_transform,
                                       const PreviewLoadOptions& options) {
@@ -132,12 +132,12 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
     }
     std::ifstream input(path);
     if (!input) {
-        throw std::runtime_error("Failed to open CSV: " + path);
+        throw std::runtime_error("Failed to open CSV: " + path.u8string());
     }
 
     std::string header;
     if (!std::getline(input, header)) {
-        throw std::runtime_error("CSV has no header: " + path);
+        throw std::runtime_error("CSV has no header: " + path.u8string());
     }
     if (header.size() > options.maximum_line_bytes) {
         throw std::runtime_error("CSV header exceeds the configured line-size limit");
@@ -153,6 +153,17 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
     std::string line;
     double first_lsl_time = std::numeric_limits<double>::quiet_NaN();
     std::optional<PreviewFrame> pending_last_frame;
+    std::vector<double> pending_last_sample;
+    // Only kept rows are turned into markers, segments, and gaze, because a long
+    // file skips most rows and this is the costly part.
+    const auto fill_frame = [&](PreviewFrame& frame, const std::vector<double>& sample) {
+        frame.markers = parseMarkerSample(labels, sample, vicon_transform);
+        frame.segments = parseSegmentSample(labels, sample, vicon_transform);
+        frame.gaze_rays = parseGazeSample(labels, sample, gaze_transform);
+        frame.marker_stream_present = !frame.markers.empty();
+        frame.segment_stream_present = !frame.segments.empty();
+        frame.gaze_stream_present = !frame.gaze_rays.empty();
+    };
     reportPreviewLoadProgress(options, PreviewLoadStage::Reading, 0, file_size, "CSV header");
     while (std::getline(input, line)) {
         if (line.size() > options.maximum_line_bytes) {
@@ -179,24 +190,25 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
             frame.timestamp = static_cast<double>(recording.source_frame_count);
         }
 
-        frame.markers = parseMarkerSample(labels, sample, vicon_transform);
-        frame.segments = parseSegmentSample(labels, sample, vicon_transform);
-        frame.gaze_rays = parseGazeSample(labels, sample, gaze_transform);
-        frame.marker_stream_present = !frame.markers.empty();
-        frame.segment_stream_present = !frame.segments.empty();
-        frame.gaze_stream_present = !frame.gaze_rays.empty();
+        // Playback cannot run times backward, so name the row instead of loading it.
+        if (recording.source_frame_count > 0 && frame.timestamp < recording.source_end_timestamp) {
+            throw std::runtime_error("CSV time goes backward at data row " +
+                                     std::to_string(recording.source_frame_count + 1));
+        }
         if (recording.source_frame_count == 0) {
             recording.source_start_timestamp = frame.timestamp;
         }
         recording.source_end_timestamp = frame.timestamp;
         const std::size_t source_index = recording.source_frame_count++;
         if (source_index % recording.stored_frame_stride == 0) {
+            fill_frame(frame, sample);
             appendBoundedPreviewFrame(recording, std::move(frame),
                                       options.maximum_preview_frames,
                                       options.maximum_memory_bytes);
             pending_last_frame.reset();
         } else {
             pending_last_frame = std::move(frame);
+            pending_last_sample = std::move(sample);
         }
         if (recording.source_frame_count % (std::max)(
                 std::size_t{1}, options.cancellation_check_sample_interval) == 0) {
@@ -209,6 +221,7 @@ PreviewRecording loadMergedPreviewCsv(const std::string& path,
     }
 
     if (pending_last_frame) {
+        fill_frame(*pending_last_frame, pending_last_sample);
         appendBoundedPreviewFrame(recording, std::move(*pending_last_frame),
                                   options.maximum_preview_frames,
                                   options.maximum_memory_bytes);

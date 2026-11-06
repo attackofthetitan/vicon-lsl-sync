@@ -109,6 +109,9 @@ TEST_CASE("Preview CSV loader decimates predictably and honors cancellation") {
     REQUIRE(bounded.stored_frame_stride > static_cast<std::size_t>(1));
     REQUIRE(near(bounded.source_start_timestamp, 0.0));
     REQUIRE(near(bounded.source_end_timestamp, 0.99));
+    // The last row falls between kept rows, so it is held back and built at the end.
+    REQUIRE_EQ(bounded.frames.back().markers.size(), static_cast<std::size_t>(1));
+    REQUIRE(bounded.frames.back().markers.front().valid);
     REQUIRE(progress_updates > 0);
     REQUIRE(bounded.estimated_memory_bytes > 0);
     REQUIRE(bounded.estimated_memory_bytes <= options.maximum_memory_bytes);
@@ -188,6 +191,33 @@ TEST_CASE("Preview CSV cache stays bounded for short one-hour and multi-hour rec
                              2.0 * 60.0 * 60.0) < 120.0);
         }
     }
+}
+
+TEST_CASE("Preview CSV loader refuses a time that goes backward") {
+    const TemporaryFilePath temporary_path("_backward.csv");
+    {
+        std::ofstream output(temporary_path.path());
+        output << "relative_time,ViconMarkers_M:X,ViconMarkers_M:Y,ViconMarkers_M:Z\n"
+                  "0.00,1,0,0\n0.01,2,0,0\n0.005,3,0,0\n";
+    }
+    bool refused = false;
+    try {
+        (void)vicon_lsl::loadMergedPreviewCsv(temporary_path.path(), {}, {});
+    } catch (const std::runtime_error& error) {
+        refused = std::string(error.what()).find("backward at data row 3") != std::string::npos;
+    }
+    REQUIRE(refused);
+}
+
+TEST_CASE("Preview CSV loader opens a file whose name has non-English letters") {
+    // Windows reads a narrow path in the local code page, which would miss this file.
+    const TemporaryFilePath temporary_path("_\xC3\xA9t\xC3\xA9.csv");
+    {
+        std::ofstream output(temporary_path.path());
+        output << "relative_time,ViconMarkers_M:X,ViconMarkers_M:Y,ViconMarkers_M:Z\n0,1,0,0\n";
+    }
+    const auto recording = vicon_lsl::loadMergedPreviewCsv(temporary_path.path(), {}, {});
+    REQUIRE_EQ(recording.frames.size(), static_cast<std::size_t>(1));
 }
 
 TEST_CASE("Preview CSV loader rejects configured row and column limits") {

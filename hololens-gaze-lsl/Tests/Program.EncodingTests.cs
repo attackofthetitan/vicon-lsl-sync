@@ -169,8 +169,8 @@ internal static partial class Program
         Equal(GazeStreamContract.ChannelCount, GazeStreamContract.Labels.Length);
         Equal(GazeStreamContract.ChannelCount, GazeStreamContract.Units.Length);
 
-        double[] sample = new double[GazeSampleEncoder.ChannelCount];
-        GazeSampleEncoder.WriteSample(frame, sample);
+        double[] sample = new double[GazeStreamContract.ChannelCount];
+        GazeStreamContract.WriteSample(frame, sample);
         for (int i = 0; i < GazeStreamContract.ChannelCount; i++)
         {
             double expected;

@@ -80,7 +80,8 @@ public:
         return 100.0 + static_cast<double>(get_frame_calls);
     }
 
-    double frameRate() const override { return 120.0; }
+    double frame_rate = 120.0;
+    double frameRate() const override { return frame_rate; }
 
     vicon_lsl::CountRead readSubjectCount() const override {
         ++discovery_calls;
@@ -476,6 +477,40 @@ void testLayoutChangeReplacesStreams() {
            "layout replacement uses the discovered layout without reading it again");
 }
 
+// The stream header holds the rate, so a new camera rate reopens the streams,
+// but the channels stay the same and the recorder rejoins them.
+void testFrameRateChangeReopensStreamsWithoutLayoutChange() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 102;
+    client->expose_marker = true;
+    auto outlets = std::make_shared<OutletState>();
+    std::vector<double> rates;
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client,
+            [outlets, &rates](const lsl::stream_info& info) {
+                rates.push_back(info.nominal_srate());
+                return std::make_unique<FakeOutlet>(outlets, info.name());
+            },
+            [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 101) client->frame_rate = 240.0;
+        if (call == 102) bridge->stop();
+    };
+    unsigned int layout_changes = 0;
+    bridge->setStatusCallback([&layout_changes](const BridgeStatus& status) {
+        layout_changes = status.layout_change_count;
+    });
+
+    bridge->run();
+
+    expect(rates == std::vector<double>({120.0, 240.0}),
+           "a new Vicon frame rate reopens the marker stream with that rate");
+    expect(layout_changes == 0, "a frame rate change is not reported as a layout change");
+}
+
 // The recorder cannot follow new streams with other channels however they
 // appear, so a layout that differs after a reconnect counts as a change too.
 void testLayoutChangeAcrossReconnectIsCounted() {
@@ -668,6 +703,7 @@ int main() {
     testStopDuringSuccessfulConnectionDisconnects();
     testInitializationFailureClosesPartialStreams();
     testLayoutChangeReplacesStreams();
+    testFrameRateChangeReopensStreamsWithoutLayoutChange();
     testLayoutChangeAcrossReconnectIsCounted();
     testFrameTimeoutsKeepStreamsUntilTheyRepeat();
     testOcclusionFlickerIsReportedLikeARepeat();

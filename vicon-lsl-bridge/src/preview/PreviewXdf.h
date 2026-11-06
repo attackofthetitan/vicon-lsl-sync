@@ -13,7 +13,7 @@ PreviewRecording buildXdfPreviewRecording(const XdfLoadResult& xdf,
                                           const XdfStreamMapping& mapping = {},
                                           const PreviewLoadOptions& options = {});
 
-PreviewRecording loadXdfPreviewRecording(const std::string& path,
+PreviewRecording loadXdfPreviewRecording(const std::filesystem::path& path,
                                          const PreviewTransformProfile& vicon_transform,
                                          const PreviewTransformProfile& gaze_transform,
                                          double match_tolerance_seconds,

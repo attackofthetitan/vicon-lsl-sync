@@ -421,6 +421,15 @@ void testCalibrationProfileStore() {
         ManagedCalibrationProfile::fromJson(unsupported, &error);
     expect(rejected.id.isEmpty() && !error.isEmpty(),
            "rejects unsupported future calibration profile versions");
+
+    settings.setValue("session/calibrationProfiles",
+                      QJsonDocument(QJsonArray{unsupported}).toJson(QJsonDocument::Compact));
+    expect(CalibrationProfileStore::save(settings, CalibrationProfileStore::load(settings), &error),
+           "saves calibrations beside one from a newer version");
+    const QJsonArray kept = QJsonDocument::fromJson(
+        settings.value("session/calibrationProfiles").toByteArray()).array();
+    expect(kept.size() == 2 && kept.contains(unsupported),
+           "keeps a newer version's calibration when saving");
 }
 
 void testSelectedStreamRecorderPolicy() {
