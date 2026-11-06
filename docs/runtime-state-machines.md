@@ -1,27 +1,16 @@
 # How each part starts, stops, and recovers
 
-## What this guide is for
+This is the order things happen in when each part starts, fails, retries, and
+shuts down. A tidy-up can move this code into smaller files, but must not change
+the order, wait times, who owns what, or the states that get reported.
 
-This guide lists the order things happen when each part starts, fails, retries, and shuts down. A code tidy-up may move this work into smaller files, but it must not change the order, wait times, who owns what, or the states that get reported.
+What users and other programs see is in [Behavior that must stay the
+same](behavior-contract.md). Clock math is in [How time and coordinates
+work](time-and-coordinate-semantics.md).
 
-Related guides:
+## Vicon bridge
 
-- [How the code is organized](architecture.md)
-- [Behavior that must stay the same](behavior-contract.md)
-- [How time and coordinates work](time-and-coordinate-semantics.md)
-
-## Desktop bridge
-
-### States other code can see
-
-`BridgeState` has four values:
-
-- `Disconnected`
-- `Connecting`
-- `Streaming`
-- `Stopped`
-
-Inside, the bridge also goes through steps for retrying, reading the first frame, reading the layout, opening streams, replacing streams, and cleaning up.
+`BridgeState` is `Disconnected`, `Connecting`, `Streaming`, or `Stopped`.
 
 ```mermaid
 stateDiagram-v2
@@ -34,7 +23,7 @@ stateDiagram-v2
     Initializing --> Connecting: layout or stream setup fails / disconnect and wait
     Initializing --> Streaming: streams are ready
     Streaming --> Streaming: frame read and both sends work
-    Streaming --> Reinitializing: 100-frame check finds a new layout
+    Streaming --> Reinitializing: 100-frame check finds a new layout or rate
     Reinitializing --> Streaming: both streams reopened
     Reinitializing --> Disconnected: stream setup fails
     Streaming --> Disconnected: GetFrame or either send fails
@@ -46,88 +35,75 @@ stateDiagram-v2
 
 ### Connect
 
-1. `run()` makes one `ViconTimestampState` before the reconnect loop starts.
-2. `connectWithRetry()` reports `Connecting` before the first try.
-3. After a failed try, report how long it will wait, then wait in steps of no more than 100 ms.
-4. Once connected, set a 256-frame SDK buffer, set `ServerPush` mode, and turn on segment and marker data.
-5. If any setup call fails, disconnect and count it as a failed connection.
-6. If Stop comes in while connecting or waiting, close any connection that was made and report `Stopped`.
+1. `run()` makes one timestamp record before the reconnect loop, and keeps it
+   across reconnects so time never goes backward.
+2. Report `Connecting`, then try. After a failure, report the wait, then wait in
+   steps of at most 100 ms so Stop takes effect fast.
+3. Once connected, set a 256-frame SDK buffer, use `ServerPush`, and turn on
+   marker and segment data. If any of that fails, disconnect and count it as a
+   failed connection.
+4. Stop while connecting or waiting closes any connection and reports `Stopped`.
 
-### Read the first frame and open streams
+### First frame and opening streams
 
-1. Read one Vicon frame before reading names or opening streams.
-2. If this first `GetFrame` fails, report `Connecting` and disconnect. The first time, retry right away. If it keeps failing, wait the normal retry time. A good first frame resets this.
-3. On success, update `frame_count_`.
-4. Stop reading the layout at the first count or name that fails. Return no layout, along with the errors.
-5. Only clear errors from an earlier session once the layout has been read.
-6. Use the Vicon frame rate as the LSL expected rate only if it is positive and finite. Otherwise, use an irregular rate.
-7. If the computer name cannot be read, use `default` in the source IDs.
-8. Open the marker stream before the segment stream. If either throws an error, close both and report failure.
-9. An empty layout counts as success and opens no LSL stream.
+1. Read one frame before reading names or opening streams.
+2. If that first read fails, disconnect. Retry right away the first time, since a
+   server that's still starting usually answers next time. After that, wait the
+   normal interval, so a server that never sends frames can't cause a retry
+   loop. A good first frame resets this.
+3. Read the layout in Vicon's order. Stop at the first count or name that fails,
+   and throw the half-read layout away. Never publish half a layout.
+4. Only clear errors from an earlier session once the layout has been read.
+5. Open the marker stream, then the segment stream. If either fails, close both.
+   An empty layout is fine and opens no stream.
 
 ### Send frames
 
-Each time round the streaming loop:
+Each time round:
 
-1. Read a frame. If no frame came within the SDK's one-second wait, keep the
-   streams and try again, reporting the wait once and the recovery when frames
-   return. Leave the session after five of those in a row, or when `GetFrame`
-   fails any other way.
-2. Pick a finite timestamp that is later than the last one. If none can be made, skip the frame.
-3. `buildViconFrame` reads every known marker and segment and returns their values, whether each read worked, and any errors. Each stream turns missing values into its own `NaN` sample.
-4. Send markers first and segments second, with the same timestamp.
-5. A hidden or failed item becomes a fixed-size "missing" value. It does not end the session.
-6. If sending to either LSL stream fails, report that streams will be reopened and leave the session.
-7. Group read errors after both sends. Only 100 clean frames in a row count as
-   recovered.
-8. After 100 times round the loop, reset the layout counter, report status, and read the layout again.
+1. Read a frame. If none came within the SDK's one-second wait, keep the streams,
+   log `No Vicon frame arrived in time; waiting` once, and log `Vicon frames
+   resumed` when they come back. Five waits in a row, or any other failed read,
+   ends the session.
+2. Pick a finite timestamp later than the last one. If there isn't one, skip the
+   frame.
+3. Read every known marker and segment. A hidden or failed item sends a fixed-size
+   "missing" value and doesn't end the session.
+4. Send markers, then segments, with the same timestamp. If either send fails,
+   report that streams will be reopened and end the session.
+5. Every 100 frames, report status and read the layout again.
 
-### Handle a layout check
+### Layout check
 
-- If reading the layout fails, report the error and keep the current streams.
-- If the layout and the Vicon frame rate are the same, keep streaming. A rate
-  within 1% of the one in the stream headers counts as the same.
-- If either changed, close both streams before opening new ones. Count only a
-  layout change: a rate change keeps the channels, so the recorder rejoins the
-  new streams. A layout that differs from the last one with streams after a
-  reconnect counts too.
-- If opening the new ones fails, stop streaming and clean up fully.
-- If it works, report that the streams were reopened.
+- If reading the layout fails, report the error but keep the current streams,
+  and don't say the layout changed.
+- If the layout and frame rate are the same (a rate within 1% counts as the
+  same), keep going.
+- If either changed, close both streams, then open new ones. Only a layout change
+  is counted, because a rate change keeps the channels and the recorder rejoins
+  the new streams. A layout that differs after a reconnect counts too.
+- If opening the new streams fails, clean up fully.
+
+### Errors and status
+
+- Errors keep the frame number, subject, object, action, SDK result, and message
+  all the way to the log.
+- Errors are grouped by action, subject, object, SDK result, and message. The
+  first copy is logged, then every 100th repeat with a count.
+- Reads count as recovered only after 100 clean frames in a row, which logs
+  `Vicon reads recovered`. So a marker hidden every other frame is logged like
+  any repeating error.
+- `BridgeStatus` holds the state, marker and segment counts, frame number, layout
+  change count, and a message.
 
 ### Clean up
 
-In this order:
+In this order: close the marker stream, close the segment stream, disconnect,
+reset the frame count, layout, and errors, report `Disconnected`. Then wait and
+reconnect, or report `Stopped` if Stop was asked for.
 
-1. Close the marker stream.
-2. Close the segment stream.
-3. Disconnect from Vicon.
-4. Reset the frame count, layout counter, known layout, grouped errors, and last error.
-5. Report `Disconnected`.
-6. If still running, wait and reconnect.
-7. Otherwise, report `Stopped` and return.
-
-Do not reset the timestamp record when reconnecting. Because source IDs stay the same and timestamps only go up, LabRecorder treats a reopened stream as the same stream coming back.
-
-The run flag starts as true when the bridge is created. `run()` never sets it back to true. The desktop app makes a new bridge after every Stop.
-
-### Bridge tests
-
-- [ ] Stop before the first connection reports `Stopped` and returns quickly.
-- [ ] Repeated connection failures wait for the chosen interval.
-- [ ] A setup failure disconnects before retrying.
-- [ ] A first-frame failure reconnects without publishing half a layout.
-- [ ] The first first-frame failure in a row reconnects without waiting, and
-      every later one waits the chosen interval.
-- [ ] A layout read failure throws away partial names and waits before retrying.
-- [ ] Empty marker, segment, or both layouts reach `Streaming` without opening extra streams.
-- [ ] Hidden or failed reads send fixed-size "missing" values and keep streaming.
-- [ ] If opening a stream throws, the other stream that was already opened is closed.
-- [ ] A marker or segment send failure closes both streams and reconnects.
-- [ ] Layout checks still happen every 100 frames.
-- [ ] A layout read error keeps the current streams; a real change replaces both.
-- [ ] Marker and segment samples from one frame share a timestamp.
-- [ ] Timestamps keep going up after reconnecting when source IDs stay the same.
-- [ ] Stopping a live session reports `Disconnected` before `Stopped`.
+`stop()` only flips a flag, and nothing flips it back. The desktop app makes a
+new bridge after every Stop.
 
 ## Desktop window and bridge worker
 
@@ -141,22 +117,16 @@ stateDiagram-v2
     Finished --> Idle: worker thread cleaned up
 ```
 
-- `BridgeWindow::onStart()` copies the server and both stream names into `Config`, saves them, locks the fields, creates one `BridgeWorker`, hooks up its signals, and starts it.
-- The worker adds the bridge status callback inside `run()`.
-- If the bridge throws, the worker sends `terminal(Failed, message)`.
-- `onStop()` disables the Stop button and asks the bridge to stop. It does not delete the worker itself.
-- `onWorkerFinished()` turns the controls back on, clears the rate and out-of-date status, schedules the thread for deletion, clears the pointer, and lets a waiting window close go ahead.
+- Start creates one `BridgeWorker` and starts it. The worker sets the status
+  callback inside its own `run()`.
+- Stop disables the Stop button and asks the bridge to stop. It doesn't delete
+  the worker.
+- When the worker finishes, the controls come back, the worker is deleted later,
+  and a waiting window close can go ahead.
+- The shown rate is the change in frame number over the time between status
+  messages.
 
-### Status age
-
-- The rate the window shows is the change in frame number divided by the time between status messages.
-- Normal status messages come with the 100-frame layout check, plus extra ones for state changes and errors.
-- If no streaming status arrives for more than 3000 ms, mark it out of date once and show `0.0 Hz`.
-- A new status clears that mark.
-
-## LabRecorder remote connection
-
-### Connection state
+## LabRecorder connection
 
 ```mermaid
 stateDiagram-v2
@@ -168,54 +138,27 @@ stateDiagram-v2
     Connecting --> Error: socket error or connection timeout
     Connected --> Error: bad reply, write error, or command timeout
     Connected --> Disconnected: recorder closes while idle
-    Error --> Error: close callback after a failure
 ```
 
-`connectToServer()` is refused while a command group is running, or while the
-open connection is recording or may have sent a Start. A lost connection can
-always be replaced, and the note that a Start may have been sent is kept until
-Stop is confirmed. Otherwise it replaces the old connection:
+A new connection is refused while a command group is running, or while the open
+connection is recording or may have sent a Start. A lost connection can always be
+replaced. Replacing one stops both timers, drops unsent data and partial
+replies, closes the old socket, and sets the recording state to `Unknown`. The
+connection and command timeouts are separate.
 
-1. Stop both timers.
-2. Throw away unsent command data and partial replies.
-3. Close the old connection straight away.
-4. Store the connection and command timeouts separately.
-5. Set the recording state to `Unknown`.
-6. Set the connection state to `Connecting`, start connecting, and start the connection timer if it is still needed.
-
-Once connected, the state is `Connected`. The recording state stays `Unknown` until this app gets a good reply to Start or Stop.
-
-### Recording state
-
-```mermaid
-stateDiagram-v2
-    [*] --> Unknown
-    Unknown --> Recording: Start group succeeds
-    Stopped --> Recording: Start group succeeds
-    Unknown --> Stopped: Stop succeeds
-    Recording --> Stopped: Stop succeeds
-    Recording --> Unknown: connection or reply fails
-    Stopped --> Unknown: reconnect or failure
-```
-
-The last confirmed state is only part of the picture. `LabRecorderClient` also
-tracks the state it wants to reach and what it is doing right now:
-
-- `Idle`
-- `Refreshing`
-- `UpdatingFilename`
-- `Starting`
-- `Stopping`
-- `ShuttingDown`
+The recording state is `Unknown`, `Recording`, or `Stopped`, and only changes
+when this app gets a good reply to Start or Stop. A failure sets it back to
+`Unknown`. The app also tracks what it's doing right now: `Idle`, `Refreshing`,
+`UpdatingFilename`, `Starting`, `Stopping`, or `ShuttingDown`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
     Idle --> Refreshing: Refresh
-    Idle --> UpdatingFilename: valid file name edit after a short pause
+    Idle --> UpdatingFilename: file name edit after a short pause
     Idle --> Starting: Start accepted
     Refreshing --> Idle: confirmed
-    UpdatingFilename --> Idle: newest file name confirmed
+    UpdatingFilename --> Idle: confirmed
     Starting --> Idle: done or failed
     Starting --> Stopping: closing waits for Start, then sends Stop
     Idle --> Stopping: Stop accepted
@@ -224,155 +167,75 @@ stateDiagram-v2
     Stopping --> ShuttingDown: close waits for the Stop already sent
 ```
 
-The buttons depend on the connection, confirmed state, wanted state, current
-action, path check, and whether the window is closing, all together. Only one
-command group can run at a time. A second Start or Stop, a refresh, or a file
-name change is refused while a group is running.
-
-The window retains a Stop Recording request made during Start or another
-command, and sends it once the recorder is idle. A lost connection retains the
-request until Connect restores it. The Stop button is disabled and the display
-shows Stopping while that request is waiting or the file is finishing. A local
-recorder still starting receives its Stop newline once its input pipe is ready.
-
-While the confirmed state is `Unknown`, you can still Start or Stop to recover,
-but only when connected and nothing else is running. The window always shows
-`Starting`, `Recording`, `Stopping`, `Stopped`, or `Unknown`, and which command
-number is waiting for a reply.
-
 ### Command groups
 
-```mermaid
-stateDiagram-v2
-    [*] --> Writing: group accepted
-    Writing --> AwaitingReply: whole command and newline sent
-    AwaitingReply --> Writing: reply starts with OK and more commands left
-    AwaitingReply --> Complete: reply starts with OK and group is done
-    Writing --> Failed: write error
-    AwaitingReply --> Failed: timeout, disconnect, or bad reply
-    Complete --> [*]
-    Failed --> [*]
-```
+- One group at a time, and one command waiting for a reply at a time.
+- Keep any part of a command not sent yet, and keep partial replies until `OK`
+  can be checked. Skip spaces, tabs, and line breaks before it. `OK` is enough,
+  so don't wait for the rest of the line.
+- A timeout, bad reply, write error, or disconnect fails the group and closes the
+  connection. A bad reply is logged with at most its first 80 bytes.
+- A second Start or Stop, a refresh, or a file name change is refused while a
+  group runs. So double clicks send one command.
+- A Stop asked for during Start or another command is kept and sent once the
+  recorder is idle. If the connection was lost, it's kept until **Connect**
+  brings it back. Meanwhile the Stop button is off and the display shows
+  Stopping.
+- Reconnecting after a lost connection remembers that a Start may have reached
+  the recorder, until Stop is confirmed.
 
-Keep these rules:
+### Starting a recorder here
 
-- Only one group runs at a time.
-- Only one command in that group waits for a reply.
-- Keep any part of a command that has not been sent yet.
-- Keep pieces of a reply until `OK` can be checked.
-- Skip line breaks, spaces, and tabs at the start of a reply.
-- The two letters `OK` are enough. Do not wait for the rest of the line.
-- A failure ends the group and closes the connection.
-- A successful group only changes the recording state if the group says which state it leads to (anything other than `Unknown`).
-- In record-every-visible-stream mode, Start is one unbroken group: `update`, `select all`, `filename`, `start`.
-- Closing while Start is running lets that group finish, then sends exactly one
-  Stop. All new work is refused once closing begins.
-- A timeout, bad reply, disconnect, or allowed connection replacement ends the
-  work in progress as failed and sets both the confirmed and wanted state back
-  to `Unknown`. Replacing the connection is refused while recording work is running
-  on it. Reconnecting after the connection was lost remembers that Start may have
-  reached the recorder, until Stop is confirmed.
+1. Check the recorder address first. If something answers, use it.
+2. Only start one if automatic start is on and nothing answers.
+3. Run it from its own folder without freezing the window. Its state is
+   `External`, `Launching`, `OwnedRunning`, `OwnedExited`, `LaunchFailed`, or
+   `Detached`, shown as words like **External** and **Started here**.
+4. Send its output to the event log, at most 64 KiB in all and 4 KiB per line.
+5. Try to connect every 250 ms, while not connected or connecting, for up to 15
+   seconds.
+6. **Disconnect** never closes a recorder someone else started. **Detach** leaves
+   one started here running and stops the app closing it later.
 
-### Start the bundled LabRecorder
+In exact-stream mode, the app starts `LabRecorderCLI` the same way, with the
+output path and one search per stream. Stop sends it Enter. The app never mixes
+this up with a LabRecorder window someone else started.
 
-1. Check the recorder address first. Never start a second copy if something already answers there.
-2. Only start it if automatic start is on and nothing answers at that address.
-3. Use the program the user picked if it is valid. Otherwise, look for LabRecorder in the `labrecorder` folder next to the desktop app (`LabRecorder.exe` on Windows).
-4. Start it without freezing the window, running from the program's own folder.
-   Its state is `External`, `Launching`, `OwnedRunning`, `OwnedExited`,
-   `LaunchFailed`, or `Detached`.
-5. Pass its output and errors into the event log, keeping at most 64 KiB of output and 4 KiB per line.
-6. Try the remote connection every 250 ms, only while not connected and not connecting, for at most 15 seconds.
-7. Disconnecting from a recorder someone else started never closes it. Detach
-   leaves a recorder started here running and stops the app from closing it
-   later. On Linux and macOS it ignores `SIGPIPE`, so it keeps recording after
-   the app quits and its output pipes close.
-
-On screen, these states read as plain words such as **External**, **Starting
-here**, and **Started here**.
-
-When you pick exact streams, the app starts the bundled `LabRecorderCLI` without
-freezing the window. It passes one full output path and one search per chosen
-stream. Each search uses the source ID when there is one, and otherwise the name
-plus the computer it comes from. Pressing Stop sends Enter to the program. The
-app owns this process and never mixes it up with a LabRecorder window someone
-else started.
-
-### LabRecorder tests
-
-- [ ] Replacing a connection is refused while a group runs or while the open
-  connection is recording, and allowed once the connection is lost, keeping the
-  note that a Start may have been sent.
-- [ ] The connection timeout does not change the command timeout.
-- [ ] A command sent in pieces, or an `OK` split across replies, moves forward by exactly one command.
-- [ ] A bad reply closes the connection and reports at most its first 80 bytes.
-- [ ] Start sends `update`, `select all`, `filename`, and `start` in that order.
-- [ ] A timeout or disconnect stops every later command in the group.
-- [ ] The recording state only changes after Start or Stop is confirmed.
-- [ ] Pressing Start or Stop twice sends exactly one command.
-- [ ] Closing during each Start command lets the group finish and then sends one
-  final `stop`.
-- [ ] Connection replacement, bad replies, disconnects, and the recorder exiting
-  all leave a clear state and a way to recover.
-- [ ] The app checks the address before starting a recorder. Finding a custom or
-  bundled recorder, its working folder, limited output, detach, and the
-  15-second limit all still work.
-
-## Closing the desktop window
+## Closing the window
 
 ```mermaid
 stateDiagram-v2
     [*] --> Open
     Open --> Closing: first closeEvent
     Closing --> Closing: closed again / show time left
-    Closing --> Closing: a part reports progress
     Closing --> Finalizing: every required part stopped
     Finalizing --> Closed: final close
 ```
 
-On the first close request:
+On the first close:
 
-- Enter `Closing` once and ignore further close requests.
-- Refuse new Start, stream search, file name, and guided session work.
-- Note which bridge, preview, file, stream search, file check, and recorder work
-  must stop, and when each was asked to stop and must be done by.
-- Call `LabRecorderClient::beginShutdown()`. If Start has not reached the `start` command yet, it cancels it. Otherwise it sets up or waits for one final Stop. A Stop already in progress is never sent twice.
-- Ask the preview and bridge to stop without waiting, cancel file and stream
-  work, and keep the window responsive.
-- Check every 50 ms, only to update which part is still running and how much time
-  is left. These checks never treat a running worker as gone.
+- Enter Closing once and ignore later close requests.
+- Refuse new Start, stream search, file name, and session work.
+- Tell the recorder to shut down once. If Start hasn't reached `start` yet, it's
+  cancelled. Otherwise one final Stop is sent after it. A Stop already sent is
+  never sent again. Closing doesn't start a file check.
+- Ask the preview and bridge to stop, cancel file and stream work, and keep the
+  window responsive.
+- Every 50 ms, update which part is still running and how long it's taken.
 
-The time limits shown are four seconds for the bridge, two seconds for the
-preview and file work, and 15 seconds for the recorder. They report a delay; they
-do not make the window wait. A Vicon call that cannot be cancelled may keep
-running past four seconds. The window stays responsive and shows it until the
-call returns. LSL stream searches wait at most 50 ms, stream detail reads at
-most 250 ms, and sample reads never wait.
+The limits shown are four seconds for the bridge, two for the preview and file
+work, and 15 for the recorder. Only the recorder limit does anything: after it,
+a recorder this app started is closed, and forced a second later. A recorder
+someone else started is never closed. If its connection was already lost, it's
+marked done straight away as `Recorder connection lost`. The other limits are
+only shown. A Vicon call that can't be cancelled may run past four seconds, and
+the window shows that until it returns.
 
-A recorder started by the app is only closed after the remote Stop is done or
-the 15-second limit runs out. It gets one more second to close before the app
-forces it. A recorder someone else started is never closed. If the remote
-connection was already lost, an external recorder is marked done straight away
-with `RecorderConnectionLost`, while a recorder started here waits for the time
-limit.
-
-Normal clean-up does not wait for running work. A worker that is still running
-cleans itself up when it finishes. The backup clean-up waits at most two
-seconds, then makes one last 100 ms try, but the normal close path never deletes
-a running worker.
-
-Normal work on the window thread should finish within 50 ms. A Stop request only
-sets a cancel flag and returns. Clean-up for the Vicon SDK, LSL, files,
-processes, and file checks happens off the window thread.
-
-Test normal replies, each Start command, a Stop in progress, disconnects, the
-rules for recorders started here or elsewhere, bridge connection and retry
-delays, preview search and calibration, opening files, cancelled file checks,
-and closing more than once.
+Normal window work should finish within 50 ms. Stop only sets a flag. Clean-up
+for Vicon, LSL, files, and processes happens off the window thread, and a running
+worker is never deleted.
 
 ## Preview
-
-### Switch between live and recorded data
 
 ```mermaid
 stateDiagram-v2
@@ -393,19 +256,11 @@ stateDiagram-v2
     Failed --> Starting: retry
 ```
 
-- Starting the live preview stops playback, clears old trails, copies the chosen
-  streams and settings into `PreviewWorkerConfig`, keeps one newest frame to
-  draw, and starts a worker. Calibration only starts collecting when you select
-  **Calibrate from Stair Target**.
-- Stop only sets a cancel flag and returns within the normal 50 ms target. The
-  panel stays in `Stopping`, with restart and file open turned off, until the
-  worker has really ended. The two-second preview limit is just shown as a
-  delay; it does not force a stop.
-- Opening a CSV or XDF while live remembers one file, asks the worker to stop, and loads the file once `finished` arrives.
-- After loading, CSV and XDF use the same playback storage and clock.
-- Live drawing runs at 30 or 60 Hz and only uses the newest waiting frame.
-  Stream rate, skipped older input, calibration samples, replaced display frames,
-  and display delay are all counted separately.
+- Starting the live preview stops playback, clears trails, and starts a worker.
+- Stop only sets a flag. The panel stays in Stopping, with restart and file open
+  off, until the worker has really ended.
+- Opening a file while live remembers it, stops the worker, and loads the file
+  once the worker is done.
 
 ### One live stream
 
@@ -424,23 +279,17 @@ stateDiagram-v2
     Stale --> ConnectedNoSample: silent over 2 s and the search finds a different outlet
 ```
 
-Being connected and having recent data are not the same thing.
-`PreviewFrame::*_stream_present` means an input is connected, even if it has no
-sample yet or its last sample is old.
+Connected and having recent data aren't the same thing. `*_stream_present` only
+means the input is connected.
 
-Finding a stream normally needs its saved source ID. If the same source shows up
-several times after coming back, pick the one started most recently and say so.
-A missing source ID never quietly turns into a match by name alone. **Follow by
-name** allows a predictable match by name and reports duplicates or fallbacks.
-Stream searches wait at most 50 ms, stream detail reads at most 250 ms, sample
-reads never wait, and a missing stream is looked for again after one second.
-A connected stream that has sent nothing for two seconds is also looked for
-again, once a second. If the search finds a different outlet, the preview opens
-it, because liblsl only rejoins a replacement with the same channel count, and
-the bridge changes the channel count when Vicon subjects change. If it finds the
-same outlet, the preview keeps waiting on it.
+Searches wait at most 50 ms, detail reads at most 250 ms, and sample reads never
+wait. A missing stream is looked for once a second. So is a connected stream
+that's been silent for two seconds: if the search finds a different outlet, the
+preview opens it. This matters because liblsl only rejoins a replacement with the
+same channel count, and the bridge changes the channel count when Vicon subjects
+change. If it finds the same outlet, the preview keeps waiting.
 
-### Load a recording and choose streams
+### Loading a recording
 
 ```mermaid
 stateDiagram-v2
@@ -464,28 +313,9 @@ stateDiagram-v2
     Loaded --> StableSource: replaced by a new source
 ```
 
-The worker reads, indexes, gets stream details, fixes up times, chooses streams,
-applies calibration, and prepares frames within the memory limit. It checks for
-cancel after at most 1,024 lines, chunks, samples, or sample batches, and reports
-progress at every step. The 250 ms cancel target includes time spent waiting for
-the user to choose streams; cancelling ends that wait at once. A failure or
-cancel keeps what was on screen before and never hands over half a recording.
-
-Before building XDF frames, group candidate streams by role, source ID, name,
-computer, and channel layout. Matching pieces are joined. If the same source ID
-shows up on different computers, or one role has several clashing streams, the
-user has to choose. That choice sets the main timeline and which streams are
-included. The summary records the main ID, the chosen and left-out IDs, joined
-pieces, time ranges, unmatched samples, and clock corrections. If no stream the
-preview understands is found, loading fails instead of picking some unrelated
-number stream.
-
-Playback is `Loaded`, `Playing`, or `Paused`. Jumping updates the shared CSV/XDF
-clock without changing speed. The user can also jump to the start or end, step
-one frame or a set time, open recent files, drag and drop a file, and export the
-current picture. At the end, playback stops when loop is off and wraps round
-when loop is on. The memory limit caps the decoded result, and skipping frames
-when drawing does not change the file check numbers.
+The worker checks for cancel at least every 1,024 steps and reports progress at
+each stage. Cancelling also ends a wait for the user to pick streams. A failure
+or cancel keeps what was on screen and never hands over half a recording.
 
 ### Stair alignment
 
@@ -494,7 +324,7 @@ stateDiagram-v2
     [*] --> Uncalibrated
     Uncalibrated --> Collecting: user selects Calibrate
     Collecting --> Collecting: add a steady tracked position
-    Collecting --> Collecting: target lost or moved / start collecting again
+    Collecting --> Collecting: target lost or moved / start again
     Collecting --> Uncalibrated: math or quality check fails
     Collecting --> AutomaticSession: 20 good samples give an alignment
     AutomaticSession --> SavedProfile: Save Session Calibration
@@ -503,26 +333,19 @@ stateDiagram-v2
     Uncalibrated --> SavedProfile: Apply saved calibration
 ```
 
-`SavedProfile` is the name in the code; the screen shows **Saved calibration**.
-`Uncalibrated` shows as **Not calibrated**. There is no typed-in alignment to fall
-back on, so gaze is drawn as the HoloLens sent it until an alignment is worked out
-or applied.
+On screen, `SavedProfile` is **Saved calibration** and `Uncalibrated` is **Not
+calibrated**.
 
-- Losing the target clears the collected positions.
-- A position that moved too far from the first one starts collecting again from that new position.
-- If coordinate details are missing or do not match, collecting pauses until the
-  user confirms. Whether they match, and why a result was refused, stay visible.
-- An automatic alignment stays in memory for this desktop session and is not
-  saved unless the user saves it as a full calibration.
-- Alignment changes reach the worker through a lock. The drawing area then fits the view again.
-- Importing, exporting, **Copy**, **Hide**, editing the stair position, and
-  **Apply** all keep the calibration's ID, version, setup, stair identity,
-  coordinate names, notes, creation time, sample count, and position and angle
-  error.
-- Calibration progress is sent at most every 100 ms so the target stream cannot
-  swamp the window.
+- Losing the target clears the collected positions. A position that moved too far
+  starts collecting again from there.
+- If coordinate details are missing or don't match, collecting waits until the
+  user confirms.
+- An automatic alignment only lasts for this app session unless it's saved.
+- Alignment changes reach the worker through a lock, and the view refits.
+- Progress updates go out at most every 100 ms, so the target stream can't flood
+  the window.
 
-## Check the setup and record a session
+## A recording session
 
 ```mermaid
 stateDiagram-v2
@@ -544,55 +367,33 @@ stateDiagram-v2
     Complete --> Idle: start another run
 ```
 
-Setup items are `Required`, `Warning`, or `Information`. Required failures for
-the bridge, recorder, path, chosen streams, sample age, and channel layout block
-Start. Recorder-only mode turns the bridge requirement into information. Warnings
-such as low free space, missing stream details, duplicate choices, a declared
-rate more than 1% from the saved one, or a stream arriving below 80% of its
-declared rate stay visible but do not block. A blocked result can only be
-skipped with a reason. Both the result and the reason go into the session log and
-export.
-
-The guided session starts the bridge, preview, stream search, setup check, and
-recorder in that order, while every separate control stays available. Stopping
-goes the other way: stop the recorder, wait for the file check, then stop the
-preview and bridge. If only some steps finished, you can see which and stop each
-one on its own. Stopping waits for a recorder command that is still running
-before it sends Stop. If the recorder connection was lost, it says so once and
-sends Stop after **Connect** restores the connection.
+**Start Session** starts the bridge, the preview, the stream search, the setup
+check, and the recorder, in that order. **Stop Session** goes the other way:
+stop the recorder, wait for the file check, then stop the preview and bridge.
+Every step can also be done by hand, and you can see which steps finished.
+Cancelling and retrying Start runs a fresh stream search.
 
 A Vicon layout change during a recording is logged as an error, because the
-recorder cannot follow the replaced streams. Stop and start a new recording.
+recorder can't follow the new streams. Stop and start a new recording.
 
-## Check the file after recording
+## File check
 
 ```mermaid
 stateDiagram-v2
     [*] --> NotRun
     NotRun --> WaitingForFile: Stop succeeds
     WaitingForFile --> Running: the exact XDF appears
-    WaitingForFile --> NeedsAttention: waited too long for the file
+    WaitingForFile --> NeedsAttention: waited 15 s for the file
     Running --> Verified: all required data passes
     Running --> VerifiedWithWarnings: data is there, with warnings
     Running --> NeedsAttention: data missing, doesn't match, or can't be read
     Running --> NeedsAttention: cancelled by closing
 ```
 
-This diagram uses the names from the code. On screen, `Verified` shows as
-**Checked** and `VerifiedWithWarnings` as **Checked with warnings**.
+On screen, `Verified` is **Checked** and `VerifiedWithWarnings` is **Checked
+with warnings**.
 
-The file check runs off the window thread and never changes the recording. It
-compares the recorded streams with the list saved before Start, then reports the
-source ID, channel layout, sample count, time range, length, measured rate, gaps,
-clock corrections, repaired timestamps, and whether a cut-off file ending was
-recovered. A stream with a set rate that stops more than two seconds, or ten
-samples if that is longer, before the recording ends is a warning. Closing the
-app does not start a file check. The report can be exported and links to playback. The automatic run
-number increase only happens after the file exists and the chosen rule passes.
-
-## HoloLens tracker and gaze reader
-
-### Tracker life
+## HoloLens tracker
 
 ```mermaid
 stateDiagram-v2
@@ -609,26 +410,38 @@ stateDiagram-v2
     Watching --> Destroyed: Unity component destroyed
 ```
 
-Four counters and checks keep old work out of a new session:
+Counters keep old work out of a new session:
 
 - `watcherGeneration` ignores a late reply from an older watcher.
-- `trackerLifecycleGeneration` ignores a late `OpenAsync` reply after the tracker was removed or restarted.
-- `sessionGeneration` tags each raw reading and tells the LSL output when the tracker session changes.
-- Starting, removing, or restarting a tracker resets the reading-time check, empties both queues, and clears the position-lookup failure count.
+- `trackerLifecycleGeneration` ignores a late `OpenAsync` reply after the tracker
+  was removed or restarted.
+- `sessionGeneration` tags each reading and tells the LSL output when the session
+  changed.
+- Starting, removing, or restarting a tracker resets the reading-time check,
+  empties both queues, and clears the lookup failure count.
 
 ### One gaze sample
 
-Each time the publisher runs:
+1. `TryGetNextSample` works forward from the last accepted capture time, up to 32
+   readings per step, while holding the tracker lock. It waits until one frame
+   plus the delivery delay has passed, and stops once it has the newest reading.
+   With no last capture time yet, or while catching up is paused, it asks for the
+   reading at the current time instead.
+2. Refuse a missing, repeated, earlier, or broken capture time. A reading fetched
+   for the current time must be within 50 ms either way.
+3. A failed read inside the SDK doesn't hold back samples already waiting. They're
+   sent first, and the failure is reported once the queue is empty. After three of
+   the SDK's broken "nothing newer" results, stop catching up for ten seconds.
+4. Copy the combined ray, and each eye's ray if there is one.
+5. Add it to the raw queue, which holds at most 500 ms and 360 items.
+6. Unity's `Update` converts at most 32 readings, each using where the headset was
+   at that reading's capture time, and adds them to the converted queue.
+7. Before sending, if the converted queue is over its limit, keep only the newest
+   item. Then send the oldest.
 
-1. `TryGetNextSample` works through every reading made since the last accepted capture time, up to 32 per step, while holding the tracker lock. It does not ask until one frame period plus the measured delivery delay has passed since that capture. It stops once a reading brings it up to the newest reading the tracker has made. If there is no last capture time yet, or working through readings is paused, it asks for the reading at the current time instead.
-2. Refuse a reading with a missing, repeated, out-of-order, or broken capture time. Refuse a reading fetched for the current time if its age is more than 50 ms either way. An old reading found while working through earlier readings only means the step is catching up, but one that seems captured more than 50 ms after the ask means the headset clock changed, so it is skipped and counted.
-3. A read that fails inside the SDK does not hold back samples that are already converted and waiting. Send the waiting sample, and only report the failure once the queue is empty, so recovery still sees failures that keep happening. After three of the SDK's broken "nothing newer" results since reading last resumed, stop working through earlier readings for ten seconds. A good reading does not wipe that count.
-4. Copy the combined ray, and the left and right rays if they are there, in tracker coordinates.
-5. Add the raw reading, keeping the queue within 500 ms and 360 items.
-6. Unity's `Update` handles at most 32 raw readings. For each, find where the headset was at the original capture time, move the rays into the world, and add a `GazeSample` to the next queue.
-7. Before sending, if the converted queue is over its limit, keep only the newest item. Then take the oldest item left.
-
-If looking up the headset position simply fails, still make a sample at the capture time, with the rays marked invalid. If it keeps throwing errors, restart the tracker. Never make up a new capture time.
+If the headset position lookup just fails, still send a sample at the capture
+time with invalid rays. If it keeps throwing, restart the tracker. Never make up a
+capture time.
 
 ## HoloLens LSL output
 
@@ -636,7 +449,7 @@ If looking up the headset position simply fails, still make a sample at the capt
 stateDiagram-v2
     [*] --> WaitingForTracker: Start with config and gaze reader set
     WaitingForTracker --> Publishing: active session reports 90 Hz
-    Publishing --> Stopping: rate or session goes away or changes
+    Publishing --> Stopping: rate or session changes
     Publishing --> RecoveringProvider: gaze reader keeps failing
     Publishing --> Disabled: output or worker fails for good
     RecoveringProvider --> WaitingForTracker: worker stops and tracker restart begins
@@ -646,43 +459,14 @@ stateDiagram-v2
     Publishing --> Destroyed: OnDestroy after a clean stop
 ```
 
-Keep these rules:
+- Never close or replace the stream while the old worker might still send to it.
+  If the worker doesn't stop within 500 ms, keep both and try again later.
+- Short gaze reader errors don't restart the tracker. About one second of errors
+  in a row does.
+- Drop samples with bad times but keep to the schedule.
+- An error from the LSL output stops the worker for good.
+- A reopened stream keeps its name, type, and source ID.
 
-- Never replace or close the stream while the old worker might still send to it.
-- If the worker does not stop within 500 ms, keep the worker and stream and try again on a later update.
-- Short gaze reader errors do not replace the tracker. About one second of errors in a row starts recovery.
-- Drop samples with bad capture times, but keep to the sending schedule.
-- Treat an error from the LSL output as a permanent worker failure.
-- When reopening the stream, use the saved name, type, source ID, and current expected rate.
-
-The stair target output is simpler. It checks that it has a config and a model target, opens one stream, and sends in every `LateUpdate`. An error while opening or sending turns it off and closes its stream at once, as destroying it does.
-
-### Device tests
-
-- [ ] Denied permission leaves no half-made stream.
-- [ ] A tracker that cannot do exactly 90 Hz never starts sending.
-- [ ] A late `OpenAsync` reply from an old session cannot replace the current tracker.
-- [ ] Removing the tracker empties both queues and blocks samples from the old session.
-- [ ] Short gaze reader errors do not restart the tracker straight away.
-- [ ] Errors that keep going stop the worker before the tracker restarts.
-- [ ] If the worker takes too long to stop, the output stays open until the worker ends.
-- [ ] A reopened stream keeps its identity and never sends an earlier timestamp.
-- [ ] Destroying the component stops the watcher, tracker, and worker before letting go of anything else.
-
-Use the [hardware test guide](device-parity-runbook.md) to collect results from the device.
-
-## Main source files
-
-- `vicon-lsl-bridge/src/ViconLSLBridge.cpp`
-- `vicon-lsl-bridge/src/ViconClient.cpp`
-- `vicon-lsl-bridge/src/ViconFrameMapper.*`
-- `vicon-lsl-bridge/src/gui/BridgeWindow.*`
-- `vicon-lsl-bridge/src/gui/LabRecorderClient.*`
-- `vicon-lsl-bridge/src/gui/RecorderProcessController.*`
-- `vicon-lsl-bridge/src/gui/PreviewPanel.*`
-- `vicon-lsl-bridge/src/gui/PreviewStreamWorker.*`
-- `hololens-gaze-lsl/Assets/Scripts/GazeDataProvider.cs`
-- `hololens-gaze-lsl/Assets/Scripts/GazePublisherWorker.cs`
-- `hololens-gaze-lsl/Assets/Scripts/GazeLSLOutlet.cs`
-- `hololens-gaze-lsl/Assets/Scripts/VuforiaModelTargetPoseOutlet.cs`
-- State and recovery tests under `vicon-lsl-bridge/tests` and `hololens-gaze-lsl/Tests`
+The stair target output is simpler. It opens one stream and sends every
+`LateUpdate`. An error while opening or sending turns it off and closes the
+stream.
