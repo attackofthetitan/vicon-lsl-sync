@@ -164,11 +164,16 @@ stateDiagram-v2
     Disconnected --> Connecting: connectToServer
     Error --> Connecting: connectToServer
     Connected --> Connecting: replace the connection
-    Connecting --> Connected: socket connects
-    Connecting --> Error: socket error or connection timeout
+    Connecting --> Connected: socket connects and stays open for 200 ms
+    Connecting --> Error: socket error, connection timeout, or closed within 200 ms
     Connected --> Error: bad reply, write error, or command timeout
     Connected --> Disconnected: recorder closes while idle
 ```
+
+A connection counts only once it has stayed open for 200 ms. Some network
+filters, including the one on GitHub's macOS 26 build machines, complete a
+connection to a port nobody listens on and reset it a moment later. Counted at
+once, that looked like a running recorder, so the app never launched its own.
 
 A new connection is refused while a command group is running, or while the open
 connection is recording or may have sent a Start. A lost connection can always be

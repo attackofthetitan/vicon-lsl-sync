@@ -16,6 +16,11 @@
 class LabRecorderClient : public QObject {
     Q_OBJECT
 public:
+    // How long a new connection must stay open before it counts as connected.
+    // Some network filters complete a connection to a port nobody listens on
+    // and reset it a moment later.
+    static constexpr int kConnectionSettleMs = 200;
+
     explicit LabRecorderClient(QObject* parent = nullptr);
     ~LabRecorderClient() override;
 
@@ -57,6 +62,7 @@ private slots:
     void onBytesWritten(qint64 bytes);
     void onReadyRead();
     void onConnectionTimeout();
+    void onConnectionSettled();
     void onCommandTimeout();
 
 private:
@@ -81,6 +87,7 @@ private:
 
     QTcpSocket socket_;
     QTimer connection_timeout_;
+    QTimer connection_settle_;
     QTimer command_timeout_;
     std::optional<CommandBatch> active_batch_;
     QByteArray pending_payload_;

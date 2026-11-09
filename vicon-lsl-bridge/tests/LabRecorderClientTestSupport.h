@@ -52,6 +52,7 @@ void testTcpCommandSequence();
 void testCompletionCanStartNextCommand();
 void testTcpStartRecordingSequenceWithSelectAll();
 void testFragmentedReplyControlsCommandProgress();
+void testConnectionResetAtOnceIsNotConnected();
 void testConnectionTimeoutDoesNotShortenCommandTimeout();
 void testCommandTimeoutDisconnectsAndDropsQueuedWork();
 void testMidCommandDisconnectReportsFailure();

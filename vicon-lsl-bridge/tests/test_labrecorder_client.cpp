@@ -19,6 +19,7 @@ int main(int argc, char** argv) {
     run("completion callback", testCompletionCanStartNextCommand);
     run("TCP Start sequence", testTcpStartRecordingSequenceWithSelectAll);
     run("fragmented reply", testFragmentedReplyControlsCommandProgress);
+    run("connection reset at once", testConnectionResetAtOnceIsNotConnected);
     run("separate timeouts", testConnectionTimeoutDoesNotShortenCommandTimeout);
     run("command timeout", testCommandTimeoutDisconnectsAndDropsQueuedWork);
     run("mid-command disconnect", testMidCommandDisconnectReportsFailure);

@@ -123,11 +123,14 @@ public:
 
     quint16 port() const { return server_.serverPort(); }
 
-    // Takes the next connection the app makes.
+    // Takes the next connection the app makes, and gives it time to count as
+    // connected, which the app only does once it has stayed open a moment.
     bool accept() {
         if (!waitUntil([this] { return server_.hasPendingConnections(); })) return false;
         socket_.reset(server_.nextPendingConnection());
-        return socket_ != nullptr;
+        if (!socket_) return false;
+        waitUntil([] { return false; }, LabRecorderClient::kConnectionSettleMs + 100);
+        return socket_->state() == QAbstractSocket::ConnectedState;
     }
 
     QString nextCommand() {

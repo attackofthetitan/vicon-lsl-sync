@@ -8,6 +8,8 @@ LabRecorderClient::LabRecorderClient(QObject* parent) : QObject(parent) {
     qRegisterMetaType<RecorderRecordingState>("RecorderRecordingState");
     qRegisterMetaType<RecorderOperationState>("RecorderOperationState");
     connection_timeout_.setSingleShot(true);
+    connection_settle_.setSingleShot(true);
+    connection_settle_.setInterval(kConnectionSettleMs);
     command_timeout_.setSingleShot(true);
     connect(&socket_, &QTcpSocket::connected, this, &LabRecorderClient::onConnected);
     connect(&socket_, &QTcpSocket::disconnected, this, &LabRecorderClient::onDisconnected);
@@ -15,11 +17,13 @@ LabRecorderClient::LabRecorderClient(QObject* parent) : QObject(parent) {
     connect(&socket_, &QTcpSocket::bytesWritten, this, &LabRecorderClient::onBytesWritten);
     connect(&socket_, &QTcpSocket::readyRead, this, &LabRecorderClient::onReadyRead);
     connect(&connection_timeout_, &QTimer::timeout, this, &LabRecorderClient::onConnectionTimeout);
+    connect(&connection_settle_, &QTimer::timeout, this, &LabRecorderClient::onConnectionSettled);
     connect(&command_timeout_, &QTimer::timeout, this, &LabRecorderClient::onCommandTimeout);
 }
 
 LabRecorderClient::~LabRecorderClient() {
     connection_timeout_.stop();
+    connection_settle_.stop();
     command_timeout_.stop();
     QObject::disconnect(&socket_, nullptr, this, nullptr);
     socket_.abort();
@@ -40,6 +44,7 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int c
         return;
     }
     connection_timeout_.stop();
+    connection_settle_.stop();
     command_timeout_.stop();
     pending_payload_.clear();
     response_buffer_.clear();
@@ -54,6 +59,7 @@ void LabRecorderClient::connectToServer(const QString& host, quint16 port, int c
 
 void LabRecorderClient::disconnectFromServer() {
     connection_timeout_.stop();
+    connection_settle_.stop();
     command_timeout_.stop();
     if (active_batch_) finishActiveBatch(false, "LabRecorder connection detached");
     pending_payload_.clear();
@@ -66,7 +72,8 @@ void LabRecorderClient::disconnectFromServer() {
 }
 
 bool LabRecorderClient::isConnected() const {
-    return socket_.state() == QAbstractSocket::ConnectedState;
+    return connection_state_ == RecorderConnectionState::Connected &&
+           socket_.state() == QAbstractSocket::ConnectedState;
 }
 
 RecorderRecordingState LabRecorderClient::desiredRecordingState() const {
@@ -218,6 +225,7 @@ void LabRecorderClient::finishActiveBatch(bool ok, const QString& message) {
 
 void LabRecorderClient::failActiveConnection(const QString& message) {
     connection_timeout_.stop();
+    connection_settle_.stop();
     command_timeout_.stop();
     socket_.abort();
     setRecordingState(RecorderRecordingState::Unknown);
@@ -250,13 +258,25 @@ void LabRecorderClient::updateOperationState() {
 
 void LabRecorderClient::onConnected() {
     connection_timeout_.stop();
+    connection_settle_.start();
+}
+
+void LabRecorderClient::onConnectionSettled() {
+    if (connection_state_ != RecorderConnectionState::Connecting ||
+        socket_.state() != QAbstractSocket::ConnectedState) return;
     setConnectionState(RecorderConnectionState::Connected,
                        "Connected to LabRecorder remote control; the recorder must confirm Start or Stop before its state is known");
     setRecordingState(RecorderRecordingState::Unknown);
 }
 
 void LabRecorderClient::onDisconnected() {
+    if (connection_state_ == RecorderConnectionState::Connecting) {
+        // Closed before it settled, so nothing usable answered at that address.
+        failActiveConnection("The recorder address closed the connection as soon as it opened");
+        return;
+    }
     connection_timeout_.stop();
+    connection_settle_.stop();
     command_timeout_.stop();
     if (connection_state_ != RecorderConnectionState::Error) {
         setConnectionState(RecorderConnectionState::Disconnected, "LabRecorder disconnected");
