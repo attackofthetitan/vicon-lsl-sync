@@ -207,9 +207,20 @@ void writeRecording(const QString& path) {
                       "ViconMarkers_M:Z,ViconMarkers_M:Valid\n0,1000,0,0,1\n") > 0);
 }
 
+// What a plain connection to the recorder port does right now, to tell a port
+// nobody listens on from one something else answers.
+QString rawConnectionResult(quint16 port) {
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, port);
+    if (socket.waitForConnected(1000)) return "connected";
+    return socket.errorString();
+}
+
 // The app gives a recorder it launched 15 seconds to come up, so a slow start on
-// a busy build machine is fine. If it never runs, say what state it got stuck in.
-bool launchedRecorderRuns(RecorderProcessController& process) {
+// a busy build machine is fine. If it never runs, say what state it got stuck in,
+// what the recorder connection did, and what the window logged.
+bool launchedRecorderRuns(RecorderProcessController& process, const BridgeWindow& window,
+                          const LabRecorderClient& client, quint16 port) {
     QString last_message;
     const auto watch = QObject::connect(&process, &RecorderProcessController::stateChanged,
         [&last_message](RecorderProcessState, const QString& message) { last_message = message; });
@@ -218,10 +229,19 @@ bool launchedRecorderRuns(RecorderProcessController& process) {
     }, 15000);
     QObject::disconnect(watch);
     if (!running) {
+        const auto* log = window.findChild<QPlainTextEdit*>();
+        const QStringList lines = log ? log->toPlainText().split('\n') : QStringList();
         std::cerr << "The launched recorder never ran. State: "
                   << recorderProcessStateText(process.state()).toStdString()
                   << ". Last message: " << last_message.toStdString()
-                  << ". Output: " << process.boundedOutput().toStdString() << std::endl;
+                  << ". Output: " << process.boundedOutput().toStdString()
+                  << ". Recorder connection: "
+                  << recorderConnectionStateText(client.connectionState()).toStdString()
+                  << ". A plain connection to port " << port << ": "
+                  << rawConnectionResult(port).toStdString() << ". Last events:\n  "
+                  << lines.mid((std::max)(0, static_cast<int>(lines.size()) - 10))
+                         .join("\n  ").toStdString()
+                  << std::endl;
     }
     return running;
 }
@@ -327,7 +347,7 @@ TEST_CASE("Connect reuses the launched GUI and switching to selected streams rel
         [&](RecorderProcessState state, const QString&) {
             if (state == RecorderProcessState::Launching) ++launches;
         });
-    REQUIRE(launchedRecorderRuns(*process));
+    REQUIRE(launchedRecorderRuns(*process, window, *client, port));
     QPointer<QProcess> graphical = process->findChild<QProcess*>();
     REQUIRE(graphical);
     REQUIRE(QMetaObject::invokeMethod(&window, "onConnectLabRecorder", Qt::DirectConnection));
@@ -443,7 +463,7 @@ TEST_CASE("Start Session waits for the graphical recorder before checking the re
     auto* client = window.findChild<LabRecorderClient*>();
     REQUIRE(process);
     REQUIRE(client);
-    REQUIRE(launchedRecorderRuns(*process));
+    REQUIRE(launchedRecorderRuns(*process, window, *client, port));
     REQUIRE(QMetaObject::invokeMethod(&window, "onStartSession", Qt::DirectConnection));
     const bool waited = !window.findChild<StreamDiscoveryWorker*>();
     REQUIRE(server.listen(QHostAddress::LocalHost, port));
@@ -522,7 +542,7 @@ TEST_CASE("Stop Session cancels graphical startup without reconnecting afterward
     auto* client = window.findChild<LabRecorderClient*>();
     REQUIRE(process);
     REQUIRE(client);
-    REQUIRE(launchedRecorderRuns(*process));
+    REQUIRE(launchedRecorderRuns(*process, window, *client, port));
     REQUIRE(QMetaObject::invokeMethod(&window, "onStartSession", Qt::DirectConnection));
     REQUIRE(QMetaObject::invokeMethod(&window, "onStopSession", Qt::DirectConnection));
     const bool stopped = waitUntil([&] { return !process->ownsRunningProcess() && sessionStopped(window); });
