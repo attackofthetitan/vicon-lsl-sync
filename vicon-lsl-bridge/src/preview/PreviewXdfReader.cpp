@@ -181,7 +181,8 @@ double parseDoubleTag(const std::string& xml, const std::string& tag, double def
 }
 
 // Uses the <label> values when there is one per channel, or else names the
-// channels ch_0, ch_1, and so on.
+// channels ch_0, ch_1, and so on. The count must already be within the limit,
+// since a damaged header can claim billions of channels.
 std::vector<std::string> parseChannelLabels(const std::string& xml, int channel_count) {
     std::vector<std::string> labels;
     std::size_t cursor = 0;
@@ -209,7 +210,8 @@ std::vector<std::string> parseChannelLabels(const std::string& xml, int channel_
     return labels;
 }
 
-void parseStreamHeaderMetadata(XdfStreamData& stream, const std::string& xml) {
+void parseStreamHeaderMetadata(XdfStreamData& stream, const std::string& xml,
+                               int maximum_channels) {
     stream.name = xmlTagValue(xml, "name").value_or(
         "stream_" + std::to_string(stream.stream_id));
     stream.type = xmlTagValue(xml, "type").value_or("");
@@ -217,6 +219,9 @@ void parseStreamHeaderMetadata(XdfStreamData& stream, const std::string& xml) {
     stream.hostname = xmlTagValue(xml, "hostname").value_or("");
     stream.session_id = xmlTagValue(xml, "session_id").value_or("");
     stream.channel_count = parseIntTag(xml, "channel_count", 0);
+    if (stream.channel_count > maximum_channels) {
+        throw std::runtime_error("Invalid or excessive XDF channel count");
+    }
     stream.nominal_srate = parseDoubleTag(xml, "nominal_srate", 0.0);
     stream.channel_format = xmlTagValue(xml, "channel_format").value_or("double64");
     stream.coordinate_frame = xmlTagValue(xml, "coordinate_frame").value_or("");
@@ -614,7 +619,8 @@ XdfLoadResult loadXdfNumericStreams(const std::filesystem::path& path,
                     throw std::runtime_error("XDF stream header exceeds the configured size limit");
                 }
                 parseStreamHeaderMetadata(
-                    stream, reader.readString(static_cast<std::size_t>(header_size)));
+                    stream, reader.readString(static_cast<std::size_t>(header_size)),
+                    options.maximum_channels);
                 if (stream.channel_count <= 0 || stream.channel_count > options.maximum_channels) {
                     throw std::runtime_error("Invalid or excessive XDF channel count");
                 }

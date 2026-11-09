@@ -139,6 +139,31 @@ void writeClockOffsetChunk(std::ostream& output,
 
 } // namespace
 
+// Found by fuzzing: a header claiming 1,667,062,270 channels made the reader
+// build that many labels, using gigabytes, before checking the channel limit.
+TEST_CASE("Preview XDF rejects a huge channel count before building labels") {
+    const TemporaryFilePath temporary_path("_huge_channel_count.xdf");
+    {
+        std::ofstream output(temporary_path.path(), std::ios::binary);
+        output.write("XDF:", 4);
+        const std::uint32_t stream_id = 1;
+        writeXdfChunk(output, 2,
+                      "<?xml version=\"1.0\"?><info><name>Huge</name><type>EEG</type>"
+                      "<channel_count>1667062270</channel_count><nominal_srate>100</nominal_srate>"
+                      "<channel_format>double64</channel_format></info>",
+                      &stream_id);
+    }
+    const auto started = std::chrono::steady_clock::now();
+    bool rejected = false;
+    try {
+        vicon_lsl::loadXdfNumericStreams(temporary_path.path());
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("channel count") != std::string::npos;
+    }
+    REQUIRE(rejected);
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds(2));
+}
+
 TEST_CASE("Preview XDF playback keeps legacy tracker-local gaze uncalibrated") {
     const auto profile = vicon_lsl::defaultStairCalibrationProfile();
 

@@ -18,12 +18,12 @@ stateDiagram-v2
     Connecting --> Connecting: connection fails / wait and retry
     Connecting --> Stopped: Stop before a session starts
     Connecting --> InitialFrame: connected and set up
-    InitialFrame --> Connecting: first GetFrame fails / disconnect
+    InitialFrame --> Connecting: first GetFrame fails or five waits time out / disconnect
     InitialFrame --> Initializing: first frame arrives
     Initializing --> Connecting: layout or stream setup fails / disconnect and wait
-    Initializing --> Streaming: streams are ready
+    Initializing --> Streaming: streams are ready, or the open ones still match
     Streaming --> Streaming: frame read and both sends work
-    Streaming --> Reinitializing: 100-frame check finds a new layout or rate
+    Streaming --> Reinitializing: periodic check finds a new layout or rate
     Reinitializing --> Streaming: both streams reopened
     Reinitializing --> Disconnected: stream setup fails
     Streaming --> Disconnected: GetFrame or either send fails
@@ -42,20 +42,26 @@ stateDiagram-v2
 3. Once connected, set a 256-frame SDK buffer, use `ServerPush`, and turn on
    marker and segment data. If any of that fails, disconnect and count it as a
    failed connection.
-4. Stop while connecting or waiting closes any connection and reports `Stopped`.
+4. Wait 200 ms, then keep only the newest frame the SDK holds. Vicon first sends
+   a new client frames left from the last client, which can be minutes old.
+5. Stop while connecting or waiting closes any connection and reports `Stopped`.
 
 ### First frame and opening streams
 
-1. Read one frame before reading names or opening streams.
-2. If that first read fails, disconnect. Retry right away the first time, since a
+1. Read one frame before reading names or opening streams. Allow the same five
+   one-second waits as streaming, because Vicon sends nothing while it's paused
+   or between frames of a slow replay.
+2. If that first read fails, or all five waits time out, disconnect. Retry right away the first time, since a
    server that's still starting usually answers next time. After that, wait the
    normal interval, so a server that never sends frames can't cause a retry
    loop. A good first frame resets this.
 3. Read the layout in Vicon's order. Stop at the first count or name that fails,
    and throw the half-read layout away. Never publish half a layout.
 4. Only clear errors from an earlier session once the layout has been read.
-5. Open the marker stream, then the segment stream. If either fails, close both.
-   An empty layout is fine and opens no stream.
+5. If both streams are still open from before a reconnect, and the layout and
+   rate match them, keep them. Otherwise close any open ones, then open the
+   marker stream, then the segment stream. If either fails, close both. An empty
+   layout is fine and opens no stream.
 
 ### Send frames
 
@@ -65,13 +71,17 @@ Each time round:
    log `No Vicon frame arrived in time; waiting` once, and log `Vicon frames
    resumed` when they come back. Five waits in a row, or any other failed read,
    ends the session.
-2. Pick a finite timestamp later than the last one. If there isn't one, skip the
-   frame.
+2. Pick a finite timestamp later than the last one (see [How time and
+   coordinates work](time-and-coordinate-semantics.md)). If there isn't one, skip
+   the frame. Report when the frame clock restarts or time steps back, and log
+   the first small nudge and every 100th after it.
 3. Read every known marker and segment. A hidden or failed item sends a fixed-size
    "missing" value and doesn't end the session.
 4. Send markers, then segments, with the same timestamp. If either send fails,
    report that streams will be reopened and end the session.
-5. Every 100 frames, report status and read the layout again.
+5. Every 100 frames, or every second if that comes first, report status and read
+   the layout again. The window counts a bridge silent for three seconds as
+   stale, and 100 frames take longer than that below about 33 Hz.
 
 ### Layout check
 
@@ -98,9 +108,29 @@ Each time round:
 
 ### Clean up
 
-In this order: close the marker stream, close the segment stream, disconnect,
-reset the frame count, layout, and errors, report `Disconnected`. Then wait and
-reconnect, or report `Stopped` if Stop was asked for.
+In this order: close the marker stream and the segment stream if Stop was asked
+for, disconnect, reset the frame count, layout, and errors, report
+`Disconnected`. Then wait and reconnect, or report `Stopped` if Stop was asked
+for.
+
+A reconnect keeps the streams open. Closing a stream that LabRecorder is
+reading makes liblsl send it one last sample with old values and a current time,
+and LabRecorder takes seconds to find a reopened stream. While Vicon is away the
+streams stay visible but send nothing. They close when Stop is asked for, when a
+send fails, or when the layout or rate changes.
+
+With LabRecorder reading, liblsl took 1 to 7 s to close a stream in testing. So
+the command-line and desktop apps make a `BackgroundOutletCloser` first thing in
+`main()`, and streams close on its thread instead:
+
+- The bridge keeps reading Vicon while a replaced stream closes, and Stop
+  returns at once.
+- A new stream with the same source ID can appear before the old one has
+  finished closing. The old one stops answering stream searches when its close
+  starts, and LabRecorder only rejoins a stream with a new ID.
+- Before the program exits, the closer waits up to 10 s for the last closes.
+
+Without a closer, as in the tests, a stream closes where the bridge lets it go.
 
 `stop()` only flips a flag, and nothing flips it back. The desktop app makes a
 new bridge after every Stop.

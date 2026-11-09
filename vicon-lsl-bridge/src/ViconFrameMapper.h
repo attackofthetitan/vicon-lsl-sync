@@ -25,13 +25,22 @@ double viconFrameTimestamp(double receipt_timestamp,
                            double latency_seconds,
                            bool latency_valid);
 
+// The longest enforceViconTimestamp holds time just after the last time. A
+// candidate further behind means the earlier times ran ahead of the clock, and
+// holding every later frame at one instant until the clock caught up would be
+// worse than one step back.
+constexpr double kMaxViconTimestampHoldSeconds = 1.0;
+
 // Keeps times finite and increasing by falling back to receipt time or the next
-// possible time after the last one, and returns false if neither works.
+// possible time after the last one, and returns false if neither works. A
+// candidate more than kMaxViconTimestampHoldSeconds behind the last time is
+// accepted as it is, and stepped_back reports that.
 bool enforceViconTimestamp(double candidate_timestamp,
                            double receipt_timestamp,
                            ViconTimestampState& state,
                            double& output_timestamp,
-                           bool* adjusted = nullptr);
+                           bool* adjusted = nullptr,
+                           bool* stepped_back = nullptr);
 
 MarkerSample invalidMarkerSample();
 SegmentSample invalidSegmentSample();

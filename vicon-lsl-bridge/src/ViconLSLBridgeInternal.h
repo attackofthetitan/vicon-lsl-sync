@@ -24,6 +24,9 @@ public:
     virtual bool frameTimedOut() const { return false; }
     virtual unsigned int frameNumber() const = 0;
     virtual double frameTimestamp() const = 0;
+    // How far this frame's timestamp was moved back to match its arrival time
+    // because the frame numbers stopped matching real time, or 0 if it wasn't.
+    virtual double frameTimestampResync() const { return 0.0; }
     virtual double frameRate() const = 0;
 
     virtual CountRead readSubjectCount() const = 0;

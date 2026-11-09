@@ -1,6 +1,6 @@
 # Release checklist
 
-Last release: `v1.15.7`, 2026-11-06. Release notes are left empty.
+Last release: `v1.15.8`, 2026-11-09. Release notes are left empty.
 
 Before you tag a release, check that:
 

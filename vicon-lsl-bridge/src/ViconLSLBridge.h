@@ -53,14 +53,17 @@ public:
 
 private:
     void connectWithRetry();
+    bool readFirstFrame();
     void waitForRetry();
     void streamFrames(vicon_lsl::ViconTimestampState& timestamp_state);
     void resetConnectedSession();
     bool refreshStreams(BridgeState state);
+    const std::string& sourceHost();
     bool streamFrame(double timestamp);
     void reportStatus(BridgeState state, const std::string& message = "");
     void handleDiagnostics(const std::vector<vicon_lsl::ViconDiagnostic>& diagnostics,
                            BridgeState state = BridgeState::Streaming);
+    void reportTimestampCorrections(double resync_seconds, bool adjusted, bool stepped_back);
 
     Config config_;
     std::shared_ptr<vicon_lsl::bridge_internal::ViconClient> client_;
@@ -82,4 +85,9 @@ private:
     unsigned int clean_frames_ = 0;
     vicon_lsl::DiagnosticAggregator diagnostic_aggregator_;
     std::string last_diagnostic_message_;
+    unsigned long long timestamp_adjustments_ = 0;
+    unsigned long long timestamp_resyncs_ = 0;
+    double last_resync_report_ = 0.0;
+    bool resync_reported_ = false;
+    std::string source_host_;
 };

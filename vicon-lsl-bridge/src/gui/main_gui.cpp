@@ -5,6 +5,7 @@
 #include <clocale>
 
 #include "BridgeWindow.h"
+#include "StreamOutlet.h"
 #ifdef Q_OS_MACOS
 #include "gui/MacInstallation.h"
 #endif
@@ -14,6 +15,9 @@
 #endif
 
 int main(int argc, char* argv[]) {
+    // Made first so it outlives the window and its bridges, and closes their
+    // last LSL streams after the window has gone.
+    BackgroundOutletCloser outlet_closer;
     QApplication app(argc, argv);
     // Qt takes number formats from the user's locale, where "0.5" is written
     // "0,5"; LSL and the recording files always use the C form.

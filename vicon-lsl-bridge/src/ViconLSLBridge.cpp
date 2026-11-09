@@ -8,7 +8,9 @@
 #include <cmath>
 #include <chrono>
 #include <exception>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <thread>
 #include <utility>
 
@@ -26,6 +28,12 @@ constexpr unsigned int kStatusIntervalFrames = 100;
 // Frame waits, about a second each, that may time out in a row before the
 // bridge reconnects.
 constexpr unsigned int kMaxFrameTimeouts = 5;
+// Shortest time between status reports that timestamps were re-synchronized, so a
+// replay that keeps drifting does not report on every frame.
+constexpr double kResyncReportIntervalSeconds = 5.0;
+// Longest time between status reports and layout checks while streaming, so a
+// slow camera rate still reports more often than the window's three-second limit.
+constexpr double kStatusIntervalSeconds = 1.0;
 
 vicon_lsl::bridge_internal::Dependencies liveDependencies(const Config& config) {
     vicon_lsl::bridge_internal::Dependencies dependencies;
@@ -86,7 +94,11 @@ void ViconLSLBridge::run() {
             break;
         }
 
-        if (!client_->getFrame()) {
+        if (!readFirstFrame()) {
+            if (!running_) {
+                client_->disconnect();
+                break;
+            }
             std::cerr << "Failed to get initial frame, reconnecting" << std::endl;
             reportStatus(BridgeState::Connecting, "Failed to get initial frame, reconnecting");
             client_->disconnect();
@@ -109,6 +121,9 @@ void ViconLSLBridge::run() {
         waitForRetry();
     }
 
+    // Streams kept open through a reconnect close only now.
+    marker_stream_.destroy();
+    segment_stream_.destroy();
     reportStatus(BridgeState::Stopped, "Stopped");
     std::cout << "Stopped" << std::endl;
 }
@@ -119,6 +134,7 @@ void ViconLSLBridge::streamFrames(vicon_lsl::ViconTimestampState& timestamp_stat
     // Vicon pauses briefly without dropping the connection, so a few missed
     // frames keep the streams open for the recorder.
     unsigned int frame_timeouts = 0;
+    double last_status_time = clock_();
     while (running_ && client_->isConnected()) {
         if (!client_->getFrame()) {
             if (client_->frameTimedOut() && ++frame_timeouts < kMaxFrameTimeouts) {
@@ -141,26 +157,30 @@ void ViconLSLBridge::streamFrames(vicon_lsl::ViconTimestampState& timestamp_stat
 
         double timestamp = 0.0;
         bool timestamp_adjusted = false;
+        bool timestamp_stepped_back = false;
         if (!vicon_lsl::enforceViconTimestamp(
                 client_->frameTimestamp(),
                 clock_(),
                 timestamp_state,
                 timestamp,
-                &timestamp_adjusted)) {
+                &timestamp_adjusted,
+                &timestamp_stepped_back)) {
             std::cerr << "Unable to obtain a finite Vicon frame timestamp" << std::endl;
             continue;
         }
-        if (timestamp_adjusted) {
-            std::cerr << "Adjusted non-monotonic Vicon frame timestamp" << std::endl;
-        }
+        reportTimestampCorrections(client_->frameTimestampResync(), timestamp_adjusted,
+                                   timestamp_stepped_back);
         if (!streamFrame(timestamp)) {
             reportStatus(BridgeState::Connecting,
                          "LSL outlet failed; reconnecting and recreating streams");
             return;
         }
 
-        if (++frames_since_layout_check_ >= kStatusIntervalFrames) {
+        const double now = clock_();
+        if (++frames_since_layout_check_ >= kStatusIntervalFrames ||
+            now - last_status_time >= kStatusIntervalSeconds) {
             frames_since_layout_check_ = 0;
+            last_status_time = now;
             reportStatus(BridgeState::Streaming);
             if (!refreshStreams(BridgeState::Streaming)) {
                 reportStatus(BridgeState::Connecting, last_diagnostic_message_);
@@ -170,9 +190,15 @@ void ViconLSLBridge::streamFrames(vicon_lsl::ViconTimestampState& timestamp_stat
     }
 }
 
+// Keeps the streams through a reconnect, because closing an LSL stream that a
+// recorder is reading makes liblsl send it one last sample holding old values
+// with a current time, and a reopened stream takes the recorder seconds to find.
+// refreshStreams() reopens them only if the layout or rate changed.
 void ViconLSLBridge::resetConnectedSession() {
-    marker_stream_.destroy();
-    segment_stream_.destroy();
+    if (!running_) {
+        marker_stream_.destroy();
+        segment_stream_.destroy();
+    }
     client_->disconnect();
     frame_count_ = 0;
     frames_since_layout_check_ = 0;
@@ -193,6 +219,21 @@ void ViconLSLBridge::connectWithRetry() {
     }
 }
 
+// Allows the same run of one-second waits as streaming, because Vicon sends no
+// frames while it is paused or between frames of a slow replay.
+bool ViconLSLBridge::readFirstFrame() {
+    unsigned int timeouts = 0;
+    while (running_) {
+        if (client_->getFrame()) return true;
+        if (!client_->frameTimedOut() || ++timeouts >= kMaxFrameTimeouts) return false;
+        if (timeouts == 1) {
+            std::cerr << "No Vicon frame arrived in time; waiting for the first frame" << std::endl;
+            reportStatus(BridgeState::Connecting, "Waiting for the first Vicon frame");
+        }
+    }
+    return false;
+}
+
 // Sleeps in steps of at most 100 ms so stop() takes effect quickly.
 void ViconLSLBridge::waitForRetry() {
     int remaining_ms = config_.reconnect_interval_ms;
@@ -203,25 +244,37 @@ void ViconLSLBridge::waitForRetry() {
     }
 }
 
-// Opens the streams when connecting, and while streaming reopens both only if
-// the layout changed, keeping the working streams if the read fails.
+// Opens the streams, or keeps the ones already open when their layout and rate
+// still match (while streaming, and after a reconnect), and reopens both only if
+// either changed. A failed layout read keeps working streams while streaming.
 bool ViconLSLBridge::refreshStreams(BridgeState state) {
     const auto discovery = vicon_lsl::discoverLayout(*client_, frame_count_);
     if (!discovery.ok()) {
         handleDiagnostics(discovery.diagnostics, state);
         return state == BridgeState::Streaming;
     }
-    if (state == BridgeState::Streaming) {
-        // The header holds the rate, so a new camera rate needs new streams too;
-        // the recorder rejoins them because their channels stay the same.
-        const double rate = client_->frameRate();
-        const bool rate_changed =
-            std::abs(rate - published_rate_) > 0.01 * (std::max)(rate, published_rate_);
-        if (discovery.layout == known_layout_ && !rate_changed) return true;
-        std::cout << "Layout or frame rate changed, reinitializing streams" << std::endl;
-        marker_stream_.destroy();
-        segment_stream_.destroy();
+    // The header holds the rate, so a new camera rate needs new streams too;
+    // the recorder rejoins them because their channels stay the same.
+    const double rate = client_->frameRate();
+    const bool rate_changed =
+        std::abs(rate - published_rate_) > 0.01 * (std::max)(rate, published_rate_);
+    const bool streams_open = marker_stream_.isInitialized() && segment_stream_.isInitialized();
+    if (streams_open && published_layout_ && discovery.layout == *published_layout_ &&
+        !rate_changed) {
+        if (state == BridgeState::Connecting) {
+            known_layout_ = discovery.layout;
+            diagnostic_aggregator_.clear();
+            last_diagnostic_message_.clear();
+            clean_frames_ = 0;
+            std::cout << "Layout and frame rate unchanged; keeping the open streams" << std::endl;
+        }
+        return true;
     }
+    if (streams_open) {
+        std::cout << "Layout or frame rate changed, reinitializing streams" << std::endl;
+    }
+    marker_stream_.destroy();
+    segment_stream_.destroy();
 
     known_layout_ = discovery.layout;
     diagnostic_aggregator_.clear();
@@ -244,15 +297,7 @@ bool ViconLSLBridge::refreshStreams(BridgeState state) {
                   << std::endl;
     }
 
-    std::string hostname = "default";
-    char buffer[256];
-    if (gethostname(buffer, sizeof(buffer)) == 0) {
-        hostname = buffer;
-    } else {
-        std::cerr << "Failed to resolve local hostname; using default LSL source suffix"
-                  << std::endl;
-    }
-
+    const std::string& hostname = sourceHost();
     try {
         marker_stream_.initialize(
             known_layout_.markers,
@@ -278,6 +323,23 @@ bool ViconLSLBridge::refreshStreams(BridgeState state) {
     return true;
 }
 
+// Read once per bridge, because macOS can rename the computer while it runs (for
+// example after a name clash on the network), and a source ID that changed after
+// a reconnect would leave the recorder unable to rejoin the streams.
+const std::string& ViconLSLBridge::sourceHost() {
+    if (source_host_.empty()) {
+        char buffer[256] = {};
+        if (gethostname(buffer, sizeof(buffer) - 1) == 0 && buffer[0] != '\0') {
+            source_host_ = buffer;
+        } else {
+            std::cerr << "Failed to resolve local hostname; using default LSL source suffix"
+                      << std::endl;
+            source_host_ = "default";
+        }
+    }
+    return source_host_;
+}
+
 bool ViconLSLBridge::streamFrame(double timestamp) {
     const auto frame = vicon_lsl::buildViconFrame(*client_, known_layout_, frame_count_);
     const StreamPushResult marker_result = marker_stream_.pushSample(frame.markers, timestamp);
@@ -285,6 +347,41 @@ bool ViconLSLBridge::streamFrame(double timestamp) {
     handleDiagnostics(frame.diagnostics);
     return marker_result == StreamPushResult::Pushed &&
            segment_result == StreamPushResult::Pushed;
+}
+
+// Logs the first timestamp nudge and then every 100th, and reports each
+// re-synchronization and step back, since both mean the frame numbers or the
+// earlier times disagreed with this computer's clock.
+void ViconLSLBridge::reportTimestampCorrections(double resync_seconds,
+                                                bool adjusted,
+                                                bool stepped_back) {
+    if (adjusted && (++timestamp_adjustments_ == 1 ||
+                     timestamp_adjustments_ % kStatusIntervalFrames == 0)) {
+        std::cerr << "Adjusted non-monotonic Vicon frame timestamp ("
+                  << timestamp_adjustments_ << " so far)" << std::endl;
+    }
+    if (stepped_back) {
+        const std::string message =
+            "Vicon timestamps had run ahead of this computer's clock and stepped back to it";
+        std::cerr << message << std::endl;
+        reportStatus(BridgeState::Streaming, message);
+    }
+    if (resync_seconds == 0.0) return;
+    ++timestamp_resyncs_;
+    const double now = clock_();
+    if (resync_reported_ && std::isfinite(now) &&
+        now - last_resync_report_ < kResyncReportIntervalSeconds) {
+        return;
+    }
+    resync_reported_ = true;
+    last_resync_report_ = now;
+    std::ostringstream message;
+    message << "Vicon frame numbers " << (resync_seconds > 0.0 ? "ran ahead of" : "fell behind")
+            << " real time by " << std::fixed << std::setprecision(3) << std::abs(resync_seconds)
+            << " s; timestamps re-synchronized to arrival time";
+    if (timestamp_resyncs_ > 1) message << " (" << timestamp_resyncs_ << " times so far)";
+    std::cerr << message.str() << std::endl;
+    reportStatus(BridgeState::Streaming, message.str());
 }
 
 void ViconLSLBridge::handleDiagnostics(

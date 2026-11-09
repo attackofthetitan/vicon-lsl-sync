@@ -77,9 +77,13 @@ bool enforceViconTimestamp(double candidate_timestamp,
                            double receipt_timestamp,
                            ViconTimestampState& state,
                            double& output_timestamp,
-                           bool* adjusted) {
+                           bool* adjusted,
+                           bool* stepped_back) {
     if (adjusted) {
         *adjusted = false;
+    }
+    if (stepped_back) {
+        *stepped_back = false;
     }
 
     double timestamp = std::isfinite(candidate_timestamp) ? candidate_timestamp
@@ -91,15 +95,16 @@ bool enforceViconTimestamp(double candidate_timestamp,
     if (state.have_timestamp && timestamp <= state.last_timestamp) {
         if (std::isfinite(receipt_timestamp) && receipt_timestamp > state.last_timestamp) {
             timestamp = receipt_timestamp;
+            if (adjusted) *adjusted = true;
+        } else if (state.last_timestamp - timestamp > kMaxViconTimestampHoldSeconds) {
+            if (stepped_back) *stepped_back = true;
         } else {
             timestamp = std::nextafter(
                 state.last_timestamp, std::numeric_limits<double>::infinity());
-        }
-        if (!std::isfinite(timestamp)) {
-            return false;
-        }
-        if (adjusted) {
-            *adjusted = true;
+            if (!std::isfinite(timestamp)) {
+                return false;
+            }
+            if (adjusted) *adjusted = true;
         }
     }
 
