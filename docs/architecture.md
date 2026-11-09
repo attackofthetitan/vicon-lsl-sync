@@ -84,6 +84,9 @@ ViconLSLBridge -----------------> MarkerStream / SegmentStream
   in fixed-size "missing" values, collects errors, and keeps timestamps going up.
 - `MarkerStream` and `SegmentStream` share one private helper that sets up the
   stream details, checks sample sizes, owns the stream, and handles send errors.
+  It hands a stream it's done with to `retireStreamOutlet`, which closes it on
+  the `BackgroundOutletCloser` thread that each app's `main()` makes, because
+  liblsl can take seconds to close a stream a recorder is reading.
 - `ViconLSLBridge::run()` connects, reads the first frame, opens the streams, and
   cleans up before trying again. It's the only place that decides to retry.
 

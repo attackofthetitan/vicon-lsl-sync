@@ -186,6 +186,33 @@ void testFragmentedReplyControlsCommandProgress() {
            "complete fragmented acknowledgement finishes command");
 }
 
+// GitHub's macOS 26 build image completes a connection to a port nobody listens
+// on and resets it a millisecond later. Counting that as a recorder stopped the
+// app from launching its own, so a connection must stay open to count.
+void testConnectionResetAtOnceIsNotConnected() {
+    QTcpServer server;
+    expect(server.listen(QHostAddress::LocalHost, 0), "resetting server listens");
+    QObject::connect(&server, &QTcpServer::newConnection, [&server]() {
+        while (QTcpSocket* accepted = server.nextPendingConnection()) {
+            accepted->abort();
+            accepted->deleteLater();
+        }
+    });
+    LabRecorderClient client;
+    bool reported_connected = false;
+    QObject::connect(&client, &LabRecorderClient::connectionStateChanged,
+                     [&reported_connected](RecorderConnectionState state, const QString&) {
+                         if (state == RecorderConnectionState::Connected) reported_connected = true;
+                     });
+    client.connectToServer("127.0.0.1", server.serverPort());
+    expect(waitUntil([&client]() {
+               return client.connectionState() == RecorderConnectionState::Error;
+           }),
+           "a connection reset at once ends in an error");
+    expect(!reported_connected && !client.isConnected(),
+           "a connection reset at once is never reported as connected");
+}
+
 void testConnectionTimeoutDoesNotShortenCommandTimeout() {
     QTcpServer server;
     expect(server.listen(QHostAddress::LocalHost, 0),

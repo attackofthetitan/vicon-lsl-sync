@@ -1,4 +1,5 @@
 #include "CommandLine.h"
+#include "StreamOutlet.h"
 #include "ViconLSLBridge.h"
 
 #include <csignal>
@@ -14,6 +15,8 @@ void signalHandler(int) {
 }
 
 int main(int argc, char* argv[]) {
+    // Made first so it closes the last LSL streams after the bridge stops.
+    BackgroundOutletCloser outlet_closer;
     const auto parsed = vicon_lsl::parseCommandLine(argc, argv);
     const std::string program = argc > 0 ? argv[0] : "vicon-lsl-bridge";
     if (parsed.action == vicon_lsl::CommandLineAction::Help) {

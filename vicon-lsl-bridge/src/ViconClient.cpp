@@ -4,10 +4,12 @@
 
 #include <lsl_cpp.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -28,6 +30,10 @@ namespace {
 
 // Limit each connection check so a missing server does not hold up Stop for long.
 constexpr int kReachabilityTimeoutMs = 500;
+// Vicon first sends a new client the last frames it sent any client, which are
+// as old as the time since that client left, and then jumps to the current
+// frame. On a local network the burst arrives within a few milliseconds.
+constexpr auto kConnectBurstWait = std::chrono::milliseconds(200);
 
 #ifdef _WIN32
 using SocketHandle = SOCKET;
@@ -258,7 +264,7 @@ bool ViconClient::connect() {
     // The SDK defaults to one frame and discards older frames whenever the
     // bridge is briefly busy (for example, creating LSL outlets). Keep a bounded
     // FIFO and drain every frame; only the preview may coalesce updates.
-    client_.SetBufferSize(256);
+    client_.SetBufferSize(vicon_lsl::kViconClientBufferFrames);
     if (!checkSetupResult("SetStreamMode(ServerPush)",
                           client_.SetStreamMode(SDK::StreamMode::ServerPush),
                           client_) ||
@@ -267,9 +273,17 @@ bool ViconClient::connect() {
         return false;
     }
 
+    // Let the old frames arrive, then keep only the newest, so data from before
+    // this connection is never sent with a current time. The frame clock still
+    // catches a burst that arrives later than this.
+    std::this_thread::sleep_for(kConnectBurstWait);
+    client_.SetBufferSize(1);
+    client_.SetBufferSize(vicon_lsl::kViconClientBufferFrames);
+
     connected_ = true;
     frame_number_ = 0;
     frame_timestamp_ = 0.0;
+    frame_resync_seconds_ = 0.0;
     frame_rate_ = 0.0;
     frame_clock_.reset();
     std::cout << "Connected to " << server_address_ << std::endl;
@@ -288,6 +302,7 @@ void ViconClient::disconnect() {
         frame_timed_out_ = false;
         frame_number_ = 0;
         frame_timestamp_ = 0.0;
+        frame_resync_seconds_ = 0.0;
         frame_rate_ = 0.0;
         std::cout << "Disconnected" << std::endl;
     }
@@ -330,6 +345,7 @@ bool ViconClient::getFrame() {
         frame_rate_ = rate.FrameRateHz;
     }
     frame_timestamp_ = frame_clock_.timestamp(frame_number_, frame_rate_, acquisition_estimate);
+    frame_resync_seconds_ = frame_clock_.lastResyncSeconds();
     return true;
 }
 
@@ -343,6 +359,10 @@ unsigned int ViconClient::frameNumber() const {
 
 double ViconClient::frameTimestamp() const {
     return frame_timestamp_;
+}
+
+double ViconClient::frameTimestampResync() const {
+    return frame_resync_seconds_;
 }
 
 double ViconClient::frameRate() const {

@@ -41,6 +41,26 @@ in that queue, so `ViconFrameClock` does this:
   doesn't give old frames almost the same time.
 - Missing frame numbers stay gaps. No samples are made up.
 - A reconnect, a counter reset, or a rate change starts a new anchor.
+- The frame numbers are trusted only while they agree with the candidate:
+  - A frame can't be captured after it arrived. If the frame numbers put a frame
+    more than 50 ms after its candidate, they jumped ahead without that time
+    passing, so the clock starts again from the candidate.
+  - Draining the queue makes a frame arrive late by at most what the queue holds,
+    256 frames divided by the rate. Arriving more than 0.5 s later than that
+    means the frame numbers stopped keeping up, so the clock starts again from
+    the candidate too.
+  - Each restart is reported in the bridge status and log, at most once every
+    five seconds, with how far the frame numbers were off.
+
+Vicon sends both kinds of frame numbers. Measured on a Vicon server:
+
+- A new client first gets the last nine or so frames the server sent any
+  client, which are as old as the time since that client left, and then the
+  current frame. After 20 s without a client, the jump was 1,998 frames. So the
+  bridge waits 200 ms after connecting and then keeps only the newest frame the
+  SDK holds. The clock still catches a burst that arrives later.
+- Switching between reviewing a trial and Live jumped the frame number by up to
+  about 1,575 s at once, and a replay sends frames slower than its numbers say.
 
 It's still an estimate. It isn't an exact capture time.
 
@@ -52,9 +72,12 @@ It's still an estimate. It isn't an exact capture time.
    either, drop the frame.
 2. If there's no earlier time, accept it.
 3. If it's the same as or earlier than the last time, use the receipt time if
-   that's later, otherwise the smallest step after the last time,
-   `nextafter(previous, +infinity)`.
-4. Save the accepted time.
+   that's later. Otherwise, if it's no more than 1 s earlier, use the smallest
+   step after the last time, `nextafter(previous, +infinity)`.
+4. If it's more than 1 s earlier, the earlier times had run ahead of the clock.
+   Accept it as it is and report the step back. Holding every later frame just
+   after the last time would give minutes of data the same time.
+5. Save the accepted time.
 
 The record lives outside the reconnect loop and the source IDs don't change, so
 LabRecorder can join a reopened stream onto its earlier copy without time going

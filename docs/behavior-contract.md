@@ -65,8 +65,10 @@ Both streams carry these details, exactly:
 - `synchronization/offset_mean = 0`
 - `synchronization/can_drop_samples = true`
 
-Source IDs stay the same when streams reconnect or reopen. The bridge reopens
-both streams when the layout changes or the frame rate moves by more than 1%.
+Source IDs stay the same when streams reconnect or reopen. The computer's name
+in them is read once each time the bridge starts. The bridge reopens both
+streams when the layout changes or the frame rate moves by more than 1%. A Vicon
+reconnect that finds the same layout and rate keeps the open streams.
 
 ### `ViconMarkers`
 

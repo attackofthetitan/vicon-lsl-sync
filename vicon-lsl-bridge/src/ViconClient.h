@@ -19,6 +19,7 @@ public:
     bool frameTimedOut() const override;
     unsigned int frameNumber() const override;
     double frameTimestamp() const override;
+    double frameTimestampResync() const override;
     double frameRate() const override;
 
     vicon_lsl::CountRead readSubjectCount() const override;
@@ -45,6 +46,7 @@ private:
     bool frame_timed_out_ = false;
     unsigned int frame_number_ = 0;
     double frame_timestamp_ = 0.0;
+    double frame_resync_seconds_ = 0.0;
     double frame_rate_ = 0.0;
     vicon_lsl::ViconFrameClock frame_clock_;
 };

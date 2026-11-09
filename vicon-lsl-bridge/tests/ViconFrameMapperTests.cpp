@@ -195,6 +195,60 @@ TEST_CASE("Vicon frame clock reanchors on reconnect rate changes and counter res
     REQUIRE(std::abs(clock.timestamp(0, 100.0, 20.01) - 20.01) < 1e-12);
 }
 
+// Vicon's frame number jumps ahead without that time passing when it switches
+// from reviewing a trial to Live. Seen on hardware: about 773 s at once.
+TEST_CASE("Vicon frame clock resynchronizes when the frame number jumps ahead of time") {
+    vicon_lsl::ViconFrameClock clock;
+    clock.timestamp(1000, 100.0, 50.0);
+    REQUIRE(std::abs(clock.timestamp(1001, 100.0, 50.01) - 50.01) < 1e-9);
+    REQUIRE(clock.lastResyncSeconds() == 0.0);
+
+    const double after_jump = clock.timestamp(78300, 100.0, 50.02);
+    REQUIRE(std::abs(after_jump - 50.02) < 1e-9);
+    REQUIRE(std::abs(clock.lastResyncSeconds() - 772.98) < 1e-6);
+
+    // Normal frames after the jump follow the new anchor, not the old cadence.
+    REQUIRE(std::abs(clock.timestamp(78301, 100.0, 50.03) - 50.03) < 1e-9);
+    REQUIRE(clock.lastResyncSeconds() == 0.0);
+}
+
+// Seen on hardware: after 20 s with no client, a new client first gets nine
+// frames from when the last client left, then the current frame, all at once.
+TEST_CASE("Vicon frame clock does not carry a stale connect burst into later times") {
+    vicon_lsl::ViconFrameClock clock;
+    const double arrival = 300.0;
+    for (unsigned int frame = 50867; frame <= 50875; ++frame) {
+        const double timestamp = clock.timestamp(frame, 100.0, arrival);
+        REQUIRE(timestamp <= arrival + vicon_lsl::ViconFrameClock::kEarlyToleranceSeconds + 1e-9);
+    }
+    REQUIRE(std::abs(clock.timestamp(52873, 100.0, arrival) - arrival) < 1e-9);
+    REQUIRE(clock.lastResyncSeconds() > 19.0);
+    double timestamp = 0.0;
+    for (unsigned int frame = 52874; frame < 53874; ++frame) {
+        const double estimate = arrival + (frame - 52873) * 0.01;
+        timestamp = clock.timestamp(frame, 100.0, estimate);
+        REQUIRE(std::abs(timestamp - estimate) <= vicon_lsl::ViconFrameClock::kEarlyToleranceSeconds);
+    }
+    REQUIRE(std::abs(timestamp - (arrival + 10.0)) < 1e-6);
+}
+
+// A paused or slowed replay keeps sending frames whose numbers fall behind time.
+// A drained queue can only explain a lag as long as the queue.
+TEST_CASE("Vicon frame clock resynchronizes when frames fall behind more than the queue holds") {
+    vicon_lsl::ViconFrameClock clock;
+    clock.timestamp(1, 100.0, 10.0);
+    const double queue_seconds =
+        static_cast<double>(vicon_lsl::kViconClientBufferFrames) / 100.0;
+    // A full queue drained late is still trusted.
+    const double late = clock.timestamp(2, 100.0, 10.01 + queue_seconds);
+    REQUIRE(clock.lastResyncSeconds() == 0.0);
+    REQUIRE(late < 10.02);
+    // Frames that advance far less than time has passed are not.
+    const double stalled = clock.timestamp(3, 100.0, 10.02 + queue_seconds + 1.0);
+    REQUIRE(std::abs(stalled - (10.02 + queue_seconds + 1.0)) < 1e-9);
+    REQUIRE(clock.lastResyncSeconds() < -queue_seconds);
+}
+
 TEST_CASE("Vicon frame timestamp applies valid latency") {
     REQUIRE(std::abs(vicon_lsl::viconFrameTimestamp(100.0, 2.5, true) - 97.5) < 1e-12);
 }
@@ -227,6 +281,31 @@ TEST_CASE("Vicon timestamp policy clamps regressions without dropping frames") {
     REQUIRE(vicon_lsl::enforceViconTimestamp(5.0, 13.0, state, timestamp, &adjusted));
     REQUIRE(adjusted);
     REQUIRE(std::abs(timestamp - 13.0) < 1e-12);
+}
+
+// Holding every frame just after a time that ran ahead would stamp minutes of
+// data with one instant, as seen on hardware before the frame clock resynced.
+TEST_CASE("Vicon timestamp policy steps back instead of holding time for long") {
+    vicon_lsl::ViconTimestampState state;
+    double timestamp = 0.0;
+    bool adjusted = false;
+    bool stepped_back = false;
+    REQUIRE(vicon_lsl::enforceViconTimestamp(900.0, 100.0, state, timestamp, &adjusted, &stepped_back));
+    REQUIRE((!adjusted && !stepped_back));
+
+    // Within the hold limit the old rule applies.
+    REQUIRE(vicon_lsl::enforceViconTimestamp(899.5, 100.0, state, timestamp, &adjusted, &stepped_back));
+    REQUIRE((adjusted && !stepped_back));
+    REQUIRE(timestamp > 900.0);
+    REQUIRE(timestamp < 900.000001);
+
+    // Further behind, the time is accepted as it is.
+    REQUIRE(vicon_lsl::enforceViconTimestamp(100.0, 100.0, state, timestamp, &adjusted, &stepped_back));
+    REQUIRE((!adjusted && stepped_back));
+    REQUIRE(timestamp == 100.0);
+    REQUIRE(vicon_lsl::enforceViconTimestamp(100.01, 100.01, state, timestamp, &adjusted, &stepped_back));
+    REQUIRE((!adjusted && !stepped_back));
+    REQUIRE(timestamp == 100.01);
 }
 
 TEST_CASE("Vicon layout collection preserves discovered order") {

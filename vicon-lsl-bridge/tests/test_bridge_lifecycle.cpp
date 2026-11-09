@@ -2,6 +2,7 @@
 #include "ViconLSLBridgeInternal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -78,6 +79,12 @@ public:
 
     double frameTimestamp() const override {
         return 100.0 + static_cast<double>(get_frame_calls);
+    }
+
+    // Seconds the real client's frame clock moved the timestamp back to arrival time.
+    std::function<double(int)> resync_at;
+    double frameTimestampResync() const override {
+        return resync_at ? resync_at(get_frame_calls) : 0.0;
     }
 
     double frame_rate = 120.0;
@@ -692,6 +699,265 @@ void testStopDuringNonCancellableSdkDelayKeepsCallerResponsive() {
            "worker settles after the delayed SDK call without starting a new session");
 }
 
+// Vicon sends nothing while it is paused or between frames of a slow replay, so
+// the first frame gets the same run of one-second waits as streaming does.
+void testFirstFrameWaitsThroughTimeouts() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 10;
+    client->expose_marker = true;
+    client->frame_times_out = [](int call) { return call <= 3; };
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client, outletFactory(outlets), [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 6) bridge->stop();
+    };
+    std::vector<std::string> messages;
+    bridge->setStatusCallback([&messages](const BridgeStatus& status) {
+        messages.push_back(status.message);
+    });
+
+    bridge->run();
+
+    expect(client->connect_calls == 1 && client->disconnect_calls == 1,
+           "first-frame timeouts keep the connection instead of reconnecting");
+    expect(outlets->created == 1 && outlets->pushed == 2,
+           "streams open once the first frame arrives");
+    expect(std::find(messages.begin(), messages.end(), "Waiting for the first Vicon frame") !=
+               messages.end(),
+           "waiting for the first frame is reported");
+}
+
+void testTimestampResyncIsReportedOnce() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 20;
+    client->expose_marker = true;
+    client->resync_at = [](int call) {
+        if (call == 5) return 20.0;
+        if (call == 6) return 15.0;
+        return 0.0;
+    };
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client, outletFactory(outlets), [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 8) bridge->stop();
+    };
+    std::vector<std::string> resync_messages;
+    bridge->setStatusCallback([&resync_messages](const BridgeStatus& status) {
+        if (status.message.find("re-synchronized") != std::string::npos) {
+            resync_messages.push_back(status.message);
+        }
+    });
+
+    std::ostringstream log;
+    std::streambuf* previous_log = std::cerr.rdbuf(log.rdbuf());
+    bridge->run();
+    std::cerr.rdbuf(previous_log);
+
+    expect(resync_messages.size() == 1,
+           "back-to-back re-synchronizations report one status");
+    expect(!resync_messages.empty() &&
+               resync_messages.front().find("ran ahead of real time by 20.000 s") !=
+                   std::string::npos,
+           "the status says how far the frame numbers ran ahead");
+}
+
+// Closing a stream a recorder is reading makes liblsl send it one stale sample,
+// and a reopened stream takes the recorder seconds to find, so a reconnect that
+// finds the same layout and rate keeps the open streams.
+void testReconnectKeepsUnchangedStreams() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 3;
+    client->expose_marker = true;
+    auto events = std::make_shared<std::vector<std::string>>();
+    client->lifecycle_events = events;
+    auto outlets = std::make_shared<OutletState>();
+    outlets->lifecycle_events = events;
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client, outletFactory(outlets), [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 5) client->available_frames = 10;
+        if (call == 8) bridge->stop();
+    };
+
+    bridge->run();
+
+    expect(client->connect_calls == 2, "a lost connection reconnects");
+    expect(outlets->created == 1 && outlets->pushed == 5,
+           "the reconnect keeps sending on the stream it already had");
+    expect(*events == std::vector<std::string>({"client-disconnected",
+                                                 "markers-outlet-destroyed",
+                                                 "client-disconnected"}),
+           "the stream closes only when the bridge stops");
+}
+
+void testRateChangeAcrossReconnectReopensStreams() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 3;
+    client->expose_marker = true;
+    auto outlets = std::make_shared<OutletState>();
+    std::vector<double> rates;
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client,
+            [outlets, &rates](const lsl::stream_info& info) {
+                ++outlets->created;
+                rates.push_back(info.nominal_srate());
+                return std::make_unique<FakeOutlet>(outlets, info.name());
+            },
+            [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 4) client->frame_rate = 240.0;
+        if (call == 5) client->available_frames = 10;
+        if (call == 8) bridge->stop();
+    };
+    unsigned int layout_changes = 0;
+    bridge->setStatusCallback([&layout_changes](const BridgeStatus& status) {
+        layout_changes = status.layout_change_count;
+    });
+
+    bridge->run();
+
+    expect(rates == std::vector<double>({120.0, 240.0}),
+           "a rate that changed across a reconnect reopens the stream with the new rate");
+    expect(layout_changes == 0, "a rate change across a reconnect is not a layout change");
+}
+
+// The window treats a bridge silent for three seconds as stale, so status must
+// come at least every second even when 100 frames take longer than that.
+void testSlowFrameRateStillReportsStatus() {
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 40;
+    client->expose_marker = true;
+    client->frame_rate = 10.0;
+    auto outlets = std::make_shared<OutletState>();
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client, outletFactory(outlets),
+            [client] { return 200.0 + 0.1 * client->get_frame_calls; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        if (call == 32) bridge->stop();
+    };
+    int periodic = 0;
+    bridge->setStatusCallback([&periodic](const BridgeStatus& status) {
+        if (status.state == BridgeState::Streaming && status.message.empty()) ++periodic;
+    });
+
+    bridge->run();
+
+    expect(periodic >= 2 && periodic <= 4,
+           "about three seconds of 10 Hz frames report status about once a second");
+    expect(outlets->created == 1, "the periodic layout check keeps the unchanged stream");
+}
+
+// Stands in for an LSL outlet that takes a while to close, as liblsl sometimes
+// does for seconds while a recorder is reading it.
+class SlowClosingOutlet final : public StreamOutlet {
+public:
+    struct Record {
+        std::atomic<bool> closed{false};
+        std::thread::id closed_on;
+    };
+
+    SlowClosingOutlet(std::shared_ptr<Record> record, std::chrono::milliseconds delay)
+        : record_(std::move(record)), delay_(delay) {}
+
+    ~SlowClosingOutlet() override {
+        std::this_thread::sleep_for(delay_);
+        record_->closed_on = std::this_thread::get_id();
+        record_->closed = true;
+    }
+
+    void pushSample(const std::vector<double>&, double) override {}
+
+private:
+    std::shared_ptr<Record> record_;
+    std::chrono::milliseconds delay_;
+};
+
+void testRetiredOutletClosesInPlaceWithoutACloser() {
+    auto record = std::make_shared<SlowClosingOutlet::Record>();
+    retireStreamOutlet(std::make_unique<SlowClosingOutlet>(record, std::chrono::milliseconds(0)));
+    expect(record->closed && record->closed_on == std::this_thread::get_id(),
+           "without a background closer an outlet closes before retireStreamOutlet returns");
+}
+
+void testBackgroundCloserClosesOffTheCallingThread() {
+    auto record = std::make_shared<SlowClosingOutlet::Record>();
+    {
+        BackgroundOutletCloser closer;
+        const auto started = std::chrono::steady_clock::now();
+        retireStreamOutlet(
+            std::make_unique<SlowClosingOutlet>(record, std::chrono::milliseconds(300)));
+        expect(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(100),
+               "handing a slow outlet to the closer returns at once");
+        expect(!record->closed, "the slow outlet is still closing in the background");
+        expect(closer.waitUntilIdle(std::chrono::seconds(5)), "the background close finishes");
+        expect(record->closed && record->closed_on != std::this_thread::get_id(),
+               "the outlet closed on the closer's thread");
+    }
+
+    auto queued = std::make_shared<SlowClosingOutlet::Record>();
+    {
+        BackgroundOutletCloser closer;
+        retireStreamOutlet(
+            std::make_unique<SlowClosingOutlet>(queued, std::chrono::milliseconds(200)));
+    }
+    expect(queued->closed, "a closer finishes queued closes before it is destroyed");
+}
+
+// A replaced stream that takes 600 ms to close must not stop the bridge reading
+// Vicon, whose SDK queue holds only about a second of frames at 250 Hz.
+void testBridgeKeepsReadingWhileAReplacedStreamCloses() {
+    BackgroundOutletCloser closer;
+    auto client = std::make_shared<FakeViconClient>();
+    client->available_frames = 202;
+    client->expose_marker = true;
+    std::vector<std::chrono::steady_clock::time_point> reads;
+    auto bridge = std::make_unique<ViconLSLBridge>(
+        testConfig(),
+        vicon_lsl::bridge_internal::Dependencies{
+            client,
+            [](const lsl::stream_info&) -> std::unique_ptr<StreamOutlet> {
+                return std::make_unique<SlowClosingOutlet>(
+                    std::make_shared<SlowClosingOutlet::Record>(),
+                    std::chrono::milliseconds(600));
+            },
+            [] { return 200.0; },
+            [](std::chrono::milliseconds) {}});
+    client->on_get_frame = [&](int call) {
+        reads.push_back(std::chrono::steady_clock::now());
+        if (call == 101) client->expose_segment = true;
+        if (call == 150) bridge->stop();
+    };
+
+    const auto started = std::chrono::steady_clock::now();
+    bridge->run();
+    const auto run_time = std::chrono::steady_clock::now() - started;
+
+    std::chrono::steady_clock::duration longest{};
+    for (std::size_t i = 1; i < reads.size(); ++i) longest = (std::max)(longest, reads[i] - reads[i - 1]);
+    expect(longest < std::chrono::milliseconds(200),
+           "replacing the streams never holds up the next Vicon read");
+    expect(run_time < std::chrono::milliseconds(400),
+           "stop returns without waiting for the streams to close");
+    expect(closer.waitUntilIdle(std::chrono::seconds(10)), "the closed streams finish closing");
+}
+
 } // namespace
 
 int main() {
@@ -709,6 +975,14 @@ int main() {
     testOcclusionFlickerIsReportedLikeARepeat();
     testFailedLayoutCheckKeepsStreaming();
     testStopDuringNonCancellableSdkDelayKeepsCallerResponsive();
+    testFirstFrameWaitsThroughTimeouts();
+    testTimestampResyncIsReportedOnce();
+    testReconnectKeepsUnchangedStreams();
+    testRateChangeAcrossReconnectReopensStreams();
+    testSlowFrameRateStillReportsStatus();
+    testRetiredOutletClosesInPlaceWithoutACloser();
+    testBackgroundCloserClosesOffTheCallingThread();
+    testBridgeKeepsReadingWhileAReplacedStreamCloses();
     if (failures != 0) {
         std::cerr << failures << " test failure(s)" << std::endl;
         return 1;

@@ -1,5 +1,7 @@
 #include "detail/ViconOutlet.h"
 
+#include "ViconFrameClock.h"
+
 #include <cmath>
 #include <exception>
 #include <iomanip>
@@ -30,7 +32,8 @@ void appendTimingMetadata(lsl::stream_info& info, double stream_rate) {
     acquisition.append_child_value("clock_domain", "lsl_local_clock");
     acquisition.append_child_value(
         "timestamp_estimator", "frame_number_cadence_anchored_to_receipt_minus_pipeline_latency");
-    acquisition.append_child_value("client_buffer_frames", "256");
+    acquisition.append_child_value(
+        "client_buffer_frames", std::to_string(vicon_lsl::kViconClientBufferFrames).c_str());
     acquisition.append_child_value("clock_drift_slew_limit_ppm", "1000");
     acquisition.append_child_value("timestamp_fallback", "immediate_receipt_time");
     acquisition.append_child_value("latency_correction", "GetLatencyTotal_pipeline_estimate");
@@ -100,7 +103,9 @@ void ViconOutlet::initialize(const StreamSchema& schema,
 
 void ViconOutlet::destroy() {
     const bool was_initialized = outlet_ != nullptr || info_.has_value();
-    outlet_.reset();
+    // liblsl can take seconds to close a stream a recorder is reading, so let a
+    // BackgroundOutletCloser do it when the program has one.
+    retireStreamOutlet(std::move(outlet_));
     info_.reset();
     channel_count_ = 0;
     configured_ = false;

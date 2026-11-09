@@ -110,6 +110,11 @@ if(TARGET vicon-lsl-bridge-gui-components)
         TIMEOUT 60
         ENVIRONMENT_MODIFICATION "${VICON_LSL_QT_TEST_ENV};QT_SCALE_FACTOR=set:1.5"
     )
+    # Both GUI suites publish and look for LSL streams with the same names, so
+    # running them side by side with `ctest -j` makes each find the other's.
+    set_tests_properties(vicon-lsl-bridge-gui-test vicon-lsl-bridge-gui-scaled-test PROPERTIES
+        RESOURCE_LOCK lsl_stream_names
+    )
 endif()
 
 add_executable(vicon-lsl-bridge-lifecycle-tests tests/test_bridge_lifecycle.cpp)
