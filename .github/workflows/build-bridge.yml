@@ -53,7 +53,7 @@ jobs:
         run: python3 tools/generate_stream_contracts.py --check
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        uses: hendrikmuhs/ccache-action@e91f31892a1d1b8c44424b1a94c0b7f52d337168 # v1.2.26
         with:
           key: ubuntu-logic-ccache-${{ matrix.fetch_catch2 }}-${{ github.ref_name }}
           restore-keys: |
@@ -106,7 +106,7 @@ jobs:
           Add-MpPreference -ExclusionProcess "cl.exe", "ninja.exe", "cmake.exe", "ccache.exe", "git.exe", "boost_1_83_0-msvc-14.3-64.exe" -ErrorAction SilentlyContinue
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        uses: hendrikmuhs/ccache-action@e91f31892a1d1b8c44424b1a94c0b7f52d337168 # v1.2.26
         with:
           key: ${{ runner.os }}-ccache-${{ github.ref_name }}
           restore-keys: |
